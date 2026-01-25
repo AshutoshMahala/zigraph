@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(basic_example);
 
     const run_basic = b.addRunArtifact(basic_example);
-    const run_example_step = b.step("run-example", "Run the basic example");
+    const run_example_step = b.step("run-basic", "Run the basic example");
     run_example_step.dependOn(&run_basic.step);
 
     // Debug example
