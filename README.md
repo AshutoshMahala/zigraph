@@ -39,15 +39,10 @@
 
 ## Installation
 
-Add to your `build.zig.zon`:
+Run this command to add zigraph to your project:
 
-```zig
-.dependencies = .{
-    .zigraph = .{
-        .url = "https://github.com/AshutoshMahala/zigraph/archive/v0.1.0.tar.gz",
-        .hash = "...",
-    },
-},
+```bash
+zig fetch --save git+https://github.com/AshutoshMahala/zigraph
 ```
 
 Then in `build.zig`:
