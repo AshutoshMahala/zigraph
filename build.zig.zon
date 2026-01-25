@@ -1,0 +1,19 @@
+.{
+    .fingerprint = 0x35e8fc487bffb2f7,
+    .name = .zigraph,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.14.0",
+
+    .dependencies = .{
+        // Zero dependencies - that's the point!
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+        "LICENSE-MIT",
+        "LICENSE-APACHE",
+    },
+}

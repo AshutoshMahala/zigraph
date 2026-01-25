@@ -1,0 +1,28 @@
+# Zig build artifacts
+zig-cache/
+zig-out/
+.zig-cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Debug files
+*.log
+
+# Personal dev notes (not for release)
+.dev/
+
+# Auto-generated docs (WASM playground)
+docs/
+
+# Generated SVG files in root (keep assets/ copies)
+/*.svg
+!/assets/*.svg
