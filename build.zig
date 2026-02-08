@@ -102,6 +102,24 @@ pub fn build(b: *std.Build) void {
     const run_hero_step = b.step("run-hero", "Run the README hero example");
     run_hero_step.dependOn(&run_hero.step);
 
+    // Edge labels example
+    const labels_example = b.addExecutable(.{
+        .name = "edge_labels",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/edge_labels.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(labels_example);
+
+    const run_labels = b.addRunArtifact(labels_example);
+    const run_labels_step = b.step("run-labels", "Run the edge labels example");
+    run_labels_step.dependOn(&run_labels.step);
+
     // Stress test
     const stress_example = b.addExecutable(.{
         .name = "stress_test",

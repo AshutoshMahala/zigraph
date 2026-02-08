@@ -171,6 +171,48 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         }
     }
 
+    // Paint edge labels (between edges and nodes)
+    // Labels are rendered as "text" in quotes, centered on the edge.
+    // If a label would collide with existing characters, it's deferred to a legend.
+    var legend_edges: std.ArrayListUnmanaged(LegendEntry) = .{};
+    defer legend_edges.deinit(allocator);
+
+    for (layout_ir.getEdges()) |edge| {
+        if (edge.label) |label| {
+            const edge_color: u8 = if (config.edge_palette) |palette|
+                colors.getAnsi(palette, edge.edge_index)
+            else
+                0;
+
+            if (canPlaceLabel(&buffer, label, edge.label_x, edge.label_y)) {
+                paintLabel(&buffer, label, edge.label_x, edge.label_y, edge_color);
+            } else {
+                // Couldn't place — try sliding Y within the edge's vertical span
+                var placed = false;
+                const min_y = edge.from_y + 1;
+                const max_y = if (edge.to_y > 1) edge.to_y - 1 else edge.to_y;
+                var try_y = min_y;
+                while (try_y <= max_y) : (try_y += 1) {
+                    if (try_y == edge.label_y) continue; // Already tried
+                    if (canPlaceLabel(&buffer, label, edge.label_x, try_y)) {
+                        paintLabel(&buffer, label, edge.label_x, try_y, edge_color);
+                        placed = true;
+                        break;
+                    }
+                }
+                if (!placed) {
+                    // Fallback: add to legend
+                    try legend_edges.append(allocator, .{
+                        .from_id = edge.from_id,
+                        .to_id = edge.to_id,
+                        .label = label,
+                        .color = edge_color,
+                    });
+                }
+            }
+        }
+    }
+
     // Paint nodes (overwrite edges)
     for (layout_ir.getNodes()) |node| {
         paintNode(&buffer, &node, config.show_dummy_nodes);
@@ -223,6 +265,36 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         }
 
         try output.append(allocator, '\n');
+    }
+
+    // Append legend for labels that couldn't be placed inline
+    if (legend_edges.items.len > 0) {
+        try output.appendSlice(allocator, "\nEdge labels:\n");
+        for (legend_edges.items) |entry| {
+            try output.appendSlice(allocator, "  ");
+
+            // Look up source/target node labels for display
+            const from_label = if (layout_ir.nodeById(entry.from_id)) |n| n.label else "?";
+            const to_label = if (layout_ir.nodeById(entry.to_id)) |n| n.label else "?";
+
+            // Emit colored label if palette is active
+            if (config.edge_palette != null and entry.color != 0) {
+                const seq = colors.escape.fg256(entry.color);
+                try output.appendSlice(allocator, &seq);
+            }
+
+            try output.appendSlice(allocator, from_label);
+            try output.appendSlice(allocator, " → ");
+            try output.appendSlice(allocator, to_label);
+            try output.appendSlice(allocator, ": \"");
+            try output.appendSlice(allocator, entry.label);
+            try output.appendSlice(allocator, "\"");
+
+            if (config.edge_palette != null and entry.color != 0) {
+                try output.appendSlice(allocator, colors.escape.reset);
+            }
+            try output.append(allocator, '\n');
+        }
     }
 
     return output.toOwnedSlice(allocator);
@@ -357,7 +429,40 @@ fn mergeJunction(current: u21, from_above: bool, to_below: bool, to_right: bool,
     return current;
 }
 
-/// Paint an edge onto the buffer.
+/// Entry for the legend (labels that couldn't be placed inline).
+const LegendEntry = struct {
+    from_id: usize,
+    to_id: usize,
+    label: []const u8,
+    color: u8,
+};
+
+/// Check whether a label (rendered as `"text"`) can be placed at (x, y)
+/// without colliding with existing non-space, non-vertical-line characters.
+fn canPlaceLabel(buffer: *const Buffer2D, label: []const u8, x: usize, y: usize) bool {
+    if (y >= buffer.height) return false;
+    const label_width = label.len + 2; // +2 for surrounding quotes
+    if (x + label_width > buffer.width) return false;
+    for (0..label_width) |i| {
+        const c = buffer.get(x + i, y);
+        // Allow overwriting spaces and vertical lines (the edge's own stem)
+        if (c != ' ' and c != CP_V_LINE) return false;
+    }
+    return true;
+}
+
+/// Paint a label as `"text"` at the given position with optional ANSI color.
+fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: u8) void {
+    var px = x;
+    buffer.setWithColor(px, y, '"', color);
+    px += 1;
+    for (label) |ch| {
+        buffer.setWithColor(px, y, ch, color);
+        px += 1;
+    }
+    buffer.setWithColor(px, y, '"', color);
+}
+
 /// Paint an edge onto the buffer.
 fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
     switch (edge.path) {
@@ -369,7 +474,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (y == edge.to_y - 1) {
                     buffer.setWithColor(x, y, CP_ARROW_DOWN, color);
                 } else {
-                    buffer.setWithColor(x, y, CP_V_LINE, color);
+                    const current = buffer.get(x, y);
+                    buffer.setWithColor(x, y, mergeJunction(current, true, true, false, false), color);
                 }
             }
         },
@@ -383,25 +489,24 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from source to horizontal
             var y = edge.from_y;
             while (y < h_y) : (y += 1) {
-                buffer.setWithColor(x1, y, CP_V_LINE, color);
+                const current = buffer.get(x1, y);
+                buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
             }
 
-            // Horizontal segment (only fill spaces)
+            // Horizontal segment: merge with existing characters for proper crossings
             var x = min_x;
             while (x <= max_x) : (x += 1) {
                 if (x != x1 and x != x2) {
                     const current = buffer.get(x, h_y);
-                    if (current == ' ') {
-                        buffer.setWithColor(x, h_y, CP_H_LINE, color);
-                    }
+                    buffer.setWithColor(x, h_y, mergeJunction(current, false, false, true, true), color);
                 }
             }
 
-            // Junction at source x
+            // Junction at source x (vertical from above meets horizontal)
             const current1 = buffer.get(x1, h_y);
             buffer.setWithColor(x1, h_y, mergeJunction(current1, true, false, x1 < x2, x1 > x2), color);
 
-            // Corner at target x
+            // Corner at target x (horizontal meets vertical going down)
             const current2 = buffer.get(x2, h_y);
             buffer.setWithColor(x2, h_y, mergeJunction(current2, false, true, x1 > x2, x1 < x2), color);
 
@@ -411,7 +516,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else {
-                    buffer.setWithColor(x2, y, CP_V_LINE, color);
+                    const current = buffer.get(x2, y);
+                    buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
                 }
             }
         },
@@ -423,7 +529,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from source to start_y
             var y = edge.from_y + 1;
             while (y < sc.start_y) : (y += 1) {
-                buffer.setWithColor(x1, y, CP_V_LINE, color);
+                const current = buffer.get(x1, y);
+                buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
             }
 
             // Horizontal at start_y
@@ -431,15 +538,15 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const max_x1 = @max(x1, ch_x);
             var x = min_x1;
             while (x <= max_x1) : (x += 1) {
-                if (buffer.get(x, sc.start_y) == ' ') {
-                    buffer.setWithColor(x, sc.start_y, CP_H_LINE, color);
-                }
+                const current = buffer.get(x, sc.start_y);
+                buffer.setWithColor(x, sc.start_y, mergeJunction(current, false, false, true, true), color);
             }
 
             // Vertical in channel
             y = sc.start_y + 1;
             while (y < sc.end_y) : (y += 1) {
-                buffer.setWithColor(ch_x, y, CP_V_LINE, color);
+                const current = buffer.get(ch_x, y);
+                buffer.setWithColor(ch_x, y, mergeJunction(current, true, true, false, false), color);
             }
 
             // Horizontal at end_y
@@ -447,9 +554,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const max_x2 = @max(ch_x, x2);
             x = min_x2;
             while (x <= max_x2) : (x += 1) {
-                if (buffer.get(x, sc.end_y) == ' ') {
-                    buffer.setWithColor(x, sc.end_y, CP_H_LINE, color);
-                }
+                const current = buffer.get(x, sc.end_y);
+                buffer.setWithColor(x, sc.end_y, mergeJunction(current, false, false, true, true), color);
             }
 
             // Vertical from end_y to target
@@ -458,7 +564,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else {
-                    buffer.setWithColor(x2, y, CP_V_LINE, color);
+                    const current = buffer.get(x2, y);
+                    buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
                 }
             }
         },
@@ -475,7 +582,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from source to horizontal
             var y = edge.from_y;
             while (y < h_y) : (y += 1) {
-                buffer.setWithColor(x1, y, CP_V_LINE, color);
+                const current = buffer.get(x1, y);
+                buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
             }
 
             // Horizontal segment (only fill spaces)
@@ -503,7 +611,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else {
-                    buffer.setWithColor(x2, y, CP_V_LINE, color);
+                    const current = buffer.get(x2, y);
+                    buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
                 }
             }
         },
@@ -516,7 +625,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (y == edge.to_y - 1) {
                     buffer.setWithColor(x, y, CP_ARROW_DOWN, color);
                 } else {
-                    buffer.setWithColor(x, y, CP_V_LINE, color);
+                    const current = buffer.get(x, y);
+                    buffer.setWithColor(x, y, mergeJunction(current, true, true, false, false), color);
                 }
             }
             // Handle horizontal offset with corner if needed

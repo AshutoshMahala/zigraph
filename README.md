@@ -7,23 +7,29 @@
 <table>
 <tr>
 <td><strong>Terminal (Unicode)</strong></td>
-<td><strong>SVG (Direct)</strong></td>
+<td><strong>SVG (Debug)</strong></td>
 <td><strong>SVG (Splines)</strong></td>
+<td><strong>SVG (Labels on Path)</strong></td>
 </tr>
 <tr>
 <td>
 
-<img src="assets/readme_hero_tui_colored.png" width="280">
+<img src="assets/readme_hero_tui_colored.png" width="240">
 
 </td>
 <td>
 
-<img src="assets/hero_direct.svg" width="280">
+<img src="assets/hero_direct.svg" width="240">
 
 </td>
 <td>
 
-<img src="assets/hero_spline.svg" width="280">
+<img src="assets/hero_spline.svg" width="240">
+
+</td>
+<td>
+
+<img src="assets/hero_labels.svg" width="240">
 
 </td>
 </tr>
@@ -33,6 +39,7 @@
 
 - **Zero dependencies** — Pure Zig, no libc required
 - **Three renderers** — Unicode (terminal), SVG (with splines), JSON (for tooling)
+- **Edge labels** — Annotate edges with text, rendered in all output formats
 - **Pluggable algorithms** — Bring your own crossing reduction, positioning, routing
 - **Comptime graphs** — Build diagrams at compile time, embed as string literals
 - **Embedded-first** — Explicit allocators, ~40KB WASM target
@@ -109,7 +116,7 @@ pub fn main() !void {
     try graph.addNode(2, "Compile");
     try graph.addNode(3, "Link");
     try graph.addEdge(1, 2);
-    try graph.addEdge(2, 3);
+    try graph.addEdgeLabeled(2, 3, "link");  // labeled edge
 
     // Layout and render
     const output = try zigraph.render(&graph, allocator, .{});
@@ -130,6 +137,35 @@ Output:
  [Link]
 ```
 
+## Edge Labels
+
+Annotate edges with descriptive text:
+
+```zig
+try graph.addEdgeLabeled(1, 2, "requires");
+try graph.addEdgeLabeled(2, 3, "queries");
+try graph.addEdge(1, 3);  // unlabeled edge
+```
+
+Labels appear in all renderers — terminal, SVG, and JSON.
+
+### SVG Label Modes
+
+```zig
+// Default: labels centered at edge midpoint
+const svg = try zigraph.svg.render(&ir, allocator, .{
+    .color_edges = true,
+});
+
+// Text-on-path: labels follow the edge curve
+const svg_path = try zigraph.svg.render(&ir, allocator, .{
+    .color_edges = true,
+    .labels_on_path = true,  // uses SVG <textPath>
+});
+```
+
+SVG labels are automatically oriented left-to-right (never upside-down) and centered on the geometric midpoint of each edge.
+
 ## Renderers
 
 ### Unicode (Terminal)
@@ -146,6 +182,8 @@ defer ir.deinit();
 
 const svg = try zigraph.svg.render(&ir, allocator, .{
     .edge_palette = &zigraph.colors.radix,  // Colored edges
+    .stitch_splines = true,                  // Smooth curves (default)
+    .labels_on_path = true,                  // Labels follow edge curves
     .show_control_points = true,             // Debug splines
 });
 ```
@@ -311,6 +349,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design decisions.
 zig build run-example      # Basic usage
 zig build run-hero         # README hero diagram
 zig build run-svg          # SVG with splines
+zig build run-labels       # Edge labels demo (exports SVG)
 zig build run-json         # JSON export
 zig build run-comptime     # Comptime graphs
 zig build run-stress       # Stress test suite

@@ -27,7 +27,7 @@ pub fn main() !void {
     try dag.addNode(8, "Output");
 
     // Level 1 connections (Root fans out) - order matters for layout
-    try dag.addEdge(1, 6);  // Root -> Task E (leftmost due to skip-level)
+    try dag.addEdgeLabeled(1, 6, "spawn");  // Root -> Task E (leftmost due to skip-level)
     try dag.addEdge(1, 2);
     try dag.addEdge(1, 3);
     try dag.addEdge(1, 4);
@@ -40,8 +40,8 @@ pub fn main() !void {
     try dag.addEdge(5, 7);
 
     // Final Output
-    try dag.addEdge(6, 8);  // E -> Output (skip-level edge, now on left)
-    try dag.addEdge(7, 8);  // F -> Output
+    try dag.addEdgeLabeled(6, 8, "skip");  // E -> Output (skip-level edge, now on left)
+    try dag.addEdgeLabeled(7, 8, "merge");  // F -> Output
 
     // Layout with quality settings to minimize edge crossings
     var ir = try zigraph.layout(&dag, allocator, .{
@@ -67,4 +67,43 @@ pub fn main() !void {
         \\{s}
         \\
     , .{output});
+
+    // Export SVG assets for README
+    // Direct mode: no colors, show dummy nodes for debugging showcase
+    const svg_direct = try zigraph.svg.render(&ir, allocator, .{
+        .color_edges = false,
+        .stitch_splines = false,
+        .show_dummy_nodes = true,
+    });
+    defer allocator.free(svg_direct);
+    {
+        const f = try std.fs.cwd().createFile("assets/hero_direct.svg", .{});
+        defer f.close();
+        try f.writeAll(svg_direct);
+    }
+
+    const svg_spline = try zigraph.svg.render(&ir, allocator, .{
+        .color_edges = true,
+        .stitch_splines = true,
+    });
+    defer allocator.free(svg_spline);
+    {
+        const f = try std.fs.cwd().createFile("assets/hero_spline.svg", .{});
+        defer f.close();
+        try f.writeAll(svg_spline);
+    }
+
+    const svg_labels = try zigraph.svg.render(&ir, allocator, .{
+        .color_edges = true,
+        .stitch_splines = true,
+        .labels_on_path = true,
+    });
+    defer allocator.free(svg_labels);
+    {
+        const f = try std.fs.cwd().createFile("assets/hero_labels.svg", .{});
+        defer f.close();
+        try f.writeAll(svg_labels);
+    }
+
+    std.debug.print(">>> SVG assets exported to assets/\n", .{});
 }

@@ -112,6 +112,12 @@ pub const LayoutEdge = struct {
     path: EdgePath,
     /// Edge index (for consistent coloring)
     edge_index: usize,
+    /// Optional edge label text (e.g., "depends on")
+    label: ?[]const u8 = null,
+    /// Computed label X position (set during layout)
+    label_x: usize = 0,
+    /// Computed label Y position (set during layout)
+    label_y: usize = 0,
 };
 
 /// Intermediate representation of a laid-out graph.

@@ -66,6 +66,8 @@ pub const Edge = struct {
     from: usize,
     /// Target node ID
     to: usize,
+    /// Optional label (e.g., "depends on")
+    label: ?[]const u8 = null,
 };
 
 /// A Directed Acyclic Graph with layout capabilities.
@@ -200,6 +202,24 @@ pub const Graph = struct {
         try self.edges.append(self.allocator, .{ .from = from, .to = to });
 
         // Update adjacency lists
+        try self.children.items[from_idx].append(self.allocator, to_idx);
+        try self.parents.items[to_idx].append(self.allocator, from_idx);
+    }
+
+    /// Add a labeled edge between two nodes.
+    ///
+    /// The label is displayed along the edge in rendered output (e.g., `"depends on"`).
+    /// Both nodes must already exist.
+    pub fn addEdgeLabeled(self: *Self, from: usize, to: usize, label: []const u8) !void {
+        const from_idx = self.id_to_index.get(from) orelse return error.NodeNotFound;
+        const to_idx = self.id_to_index.get(to) orelse return error.NodeNotFound;
+
+        if (self.max_edges > 0 and self.edges.items.len >= self.max_edges) {
+            return error.OutOfMemory;
+        }
+
+        try self.edges.append(self.allocator, .{ .from = from, .to = to, .label = label });
+
         try self.children.items[from_idx].append(self.allocator, to_idx);
         try self.parents.items[to_idx].append(self.allocator, from_idx);
     }

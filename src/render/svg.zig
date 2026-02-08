@@ -66,6 +66,10 @@ pub const SvgConfig = struct {
     show_control_points: bool = false,
     /// Control point color (when show_control_points is true)
     control_point_color: []const u8 = "#ff0000",
+    /// Render edge labels along the path using SVG <textPath>
+    /// When false (default), labels are placed at fixed positions near the edge.
+    /// When true, labels follow the edge curve using SVG text-on-a-path.
+    labels_on_path: bool = false,
 
     /// Get the color for a specific edge index
     pub fn getEdgeColor(self: SvgConfig, edge_index: usize) []const u8 {
@@ -397,6 +401,38 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
             }
         },
     }
+
+    // Edge label (if present)
+    if (edge.label) |label| {
+        const stroke_color = if (config.color_edges) config.getEdgeColor(edge.edge_index) else config.edge_stroke;
+        if (config.labels_on_path) {
+            // Emit a hidden path for text (always left-to-right for readable text)
+            const ltr = from_x <= to_x;
+            const text_x1 = if (ltr) from_x else to_x;
+            const text_y1 = if (ltr) from_y else to_y;
+            const text_x2 = if (ltr) to_x else from_x;
+            const text_y2 = if (ltr) to_y else from_y;
+            try writer.print(
+                \\    <path id="edgepath{d}" d="M {d} {d} L {d} {d}" fill="none" stroke="none"/>
+                \\
+            , .{ edge.edge_index, text_x1, text_y1, text_x2, text_y2 });
+            try writer.print(
+                \\    <text font-family="monospace" font-size="12" fill="{s}" dy="-4">
+                \\      <textPath href="#edgepath{d}" startOffset="50%"
+                \\              text-anchor="middle" dominant-baseline="auto">"{s}"</textPath></text>
+                \\
+            , .{ stroke_color, edge.edge_index, label });
+        } else {
+            // Center label at the edge midpoint (not terminal layout position)
+            const mid_x = (from_x + to_x) / 2;
+            const mid_y = (from_y + to_y) / 2;
+            try writer.print(
+                \\    <text x="{d}" y="{d}" font-family="monospace" font-size="12"
+                \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto">"{s}"</text>
+                \\
+            , .{ mid_x, mid_y, stroke_color, label });
+        }
+    }
 }
 
 /// Render a cubic bezier curve (for spline routing)
@@ -523,19 +559,89 @@ fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allo
         const last_seg = segments.items[segments.items.len - 1];
         try points.append(allocator, .{ .x = last_seg.to_x, .y = last_seg.to_y });
 
+        // Check if any segment carries a label
+        var edge_label: ?[]const u8 = null;
+        for (segments.items) |seg| {
+            if (seg.label) |l| {
+                edge_label = l;
+                break;
+            }
+        }
+        const has_label = edge_label != null;
+
         // Render based on number of points
         if (points.items.len == 2) {
             // Simple direct edge
-            try renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config);
+            try renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, has_label);
         } else {
             // Multi-point: render as smooth spline
-            try renderSplinePath(writer, points.items, edge_idx, config);
+            try renderSplinePath(writer, points.items, edge_idx, config, has_label);
+        }
+
+        // Render edge label (if any segment carries one)
+        if (edge_label) |label| {
+            const stroke_color = if (config.color_edges) config.getEdgeColor(edge_idx) else config.edge_stroke;
+            if (config.labels_on_path) {
+                // Text follows the edge path curve (hidden path is always L→R)
+                try writer.print(
+                    \\    <text font-family="monospace" font-size="12" fill="{s}" dy="-4">
+                    \\      <textPath href="#edgepath{d}" startOffset="50%"
+                    \\              text-anchor="middle" dominant-baseline="auto">"{s}"</textPath></text>
+                    \\
+                , .{ stroke_color, edge_idx, label });
+            } else {
+                // Center label at the midpoint along the actual edge path
+                const np = points.items.len;
+                const cw_f: f64 = @floatFromInt(config.char_width);
+                const lh_f: f64 = @floatFromInt(config.line_height);
+                const pad_f: f64 = @floatFromInt(config.padding);
+
+                var ppx: [128]f64 = undefined;
+                var ppy: [128]f64 = undefined;
+                const pn = @min(np, 128);
+                for (points.items[0..pn], 0..) |p, idx| {
+                    ppx[idx] = @as(f64, @floatFromInt(p.x)) * cw_f + pad_f;
+                    ppy[idx] = @as(f64, @floatFromInt(p.y)) * lh_f + pad_f;
+                }
+
+                // Compute total polyline length
+                var total_len: f64 = 0;
+                for (1..pn) |idx| {
+                    const ddx = ppx[idx] - ppx[idx - 1];
+                    const ddy = ppy[idx] - ppy[idx - 1];
+                    total_len += @sqrt(ddx * ddx + ddy * ddy);
+                }
+
+                // Walk to midpoint
+                const half_len = total_len / 2.0;
+                var accum: f64 = 0;
+                var mx: f64 = ppx[0];
+                var my: f64 = ppy[0];
+                for (0..(pn - 1)) |idx| {
+                    const ddx = ppx[idx + 1] - ppx[idx];
+                    const ddy = ppy[idx + 1] - ppy[idx];
+                    const slen = @sqrt(ddx * ddx + ddy * ddy);
+                    if (accum + slen >= half_len and slen > 0) {
+                        const t = (half_len - accum) / slen;
+                        mx = ppx[idx] + t * ddx;
+                        my = ppy[idx] + t * ddy;
+                        break;
+                    }
+                    accum += slen;
+                }
+
+                try writer.print(
+                    \\    <text x="{d:.0}" y="{d:.0}" font-family="monospace" font-size="12"
+                    \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto">"{s}"</text>
+                    \\
+                , .{ mx, my, stroke_color, label });
+            }
         }
     }
 }
 
 /// Render a simple two-point edge
-fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig) !void {
+fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig, has_label: bool) !void {
     const from_x = from.x * config.char_width + config.padding;
     const from_y = from.y * config.line_height + config.padding;
     const to_x = to.x * config.char_width + config.padding;
@@ -544,17 +650,31 @@ fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, co
     const color = config.getEdgeColor(edge_idx);
     const arrow_id = if (config.color_edges) edge_idx % config.edge_palette.len else 0;
 
+    // Always emit visible edge as <line>
     try writer.print(
         \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
         \\          stroke="{s}" stroke-width="{d}" 
         \\          marker-end="url(#arrow{d})"/>
         \\
     , .{ from_x, from_y, to_x, to_y, color, config.edge_width, arrow_id });
+
+    // Emit hidden text path (always left-to-right for readable text)
+    if (config.labels_on_path and has_label) {
+        const ltr = from_x <= to_x;
+        const tx1 = if (ltr) from_x else to_x;
+        const ty1 = if (ltr) from_y else to_y;
+        const tx2 = if (ltr) to_x else from_x;
+        const ty2 = if (ltr) to_y else from_y;
+        try writer.print(
+            \\    <path id="edgepath{d}" d="M {d} {d} L {d} {d}" fill="none" stroke="none"/>
+            \\
+        , .{ edge_idx, tx1, ty1, tx2, ty2 });
+    }
 }
 
 /// Render a multi-point path as a smooth cubic bezier spline.
 /// Uses Catmull-Rom to Bezier conversion for smooth curves through all points.
-fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig) !void {
+fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, has_label: bool) !void {
     if (points.len < 2) return;
 
     const color = config.getEdgeColor(edge_idx);
@@ -575,7 +695,7 @@ fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, con
     var control_points: [256]struct { x: f64, y: f64, from_x: f64, from_y: f64 } = undefined;
     var cp_count: usize = 0;
 
-    // Start the path
+    // Start the visible path (text path is separate for correct L→R orientation)
     try writer.print("    <path d=\"M {d:.0} {d:.0}", .{ px_points[0].x, px_points[0].y });
 
     // For 2 points, just draw a line
@@ -646,6 +766,44 @@ fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, con
                 config.control_point_color,
             });
         }
+    }
+
+    // Emit hidden text path for labels_on_path (always left-to-right for readable text)
+    if (config.labels_on_path and has_label) {
+        // Determine if path needs reversing (text should always read left-to-right)
+        const needs_reverse = px_points[0].x > px_points[n - 1].x;
+        var text_pts: @TypeOf(px_points) = undefined;
+        if (needs_reverse) {
+            for (0..n) |i| {
+                text_pts[i] = px_points[n - 1 - i];
+            }
+        } else {
+            for (0..n) |i| {
+                text_pts[i] = px_points[i];
+            }
+        }
+
+        try writer.print("    <path id=\"edgepath{d}\" d=\"M {d:.0} {d:.0}", .{ edge_idx, text_pts[0].x, text_pts[0].y });
+        if (n == 2) {
+            try writer.print(" L {d:.0} {d:.0}\"", .{ text_pts[1].x, text_pts[1].y });
+        } else {
+            for (0..(n - 1)) |i| {
+                const tp0 = if (i == 0) text_pts[0] else text_pts[i - 1];
+                const tp1 = text_pts[i];
+                const tp2 = text_pts[i + 1];
+                const tp3 = if (i + 2 >= n) text_pts[n - 1] else text_pts[i + 2];
+                const t: f64 = 6.0;
+                const c1x = tp1.x + (tp2.x - tp0.x) / t;
+                const c1y = tp1.y + (tp2.y - tp0.y) / t;
+                const c2x = tp2.x - (tp3.x - tp1.x) / t;
+                const c2y = tp2.y - (tp3.y - tp1.y) / t;
+                try writer.print(" C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}", .{
+                    c1x, c1y, c2x, c2y, tp2.x, tp2.y,
+                });
+            }
+            try writer.writeAll("\"");
+        }
+        try writer.writeAll(" fill=\"none\" stroke=\"none\"/>\n");
     }
 }
 

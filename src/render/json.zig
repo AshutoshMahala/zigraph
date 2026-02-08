@@ -90,6 +90,14 @@ pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {
             },
             .spline => |sp| try writer.print("{{\"type\": \"spline\", \"cp1_x\": {d}, \"cp1_y\": {d}, \"cp2_x\": {d}, \"cp2_y\": {d}}}", .{ sp.cp1_x, sp.cp1_y, sp.cp2_x, sp.cp2_y }),
         }
+
+        // Label (optional)
+        if (edge.label) |label| {
+            try writer.writeAll(", \"label\": \"");
+            try writer.writeAll(label);
+            try writer.print("\", \"label_x\": {d}, \"label_y\": {d}", .{ edge.label_x, edge.label_y });
+        }
+
         try writer.writeAll("}");
         if (i < layout_ir.edges.items.len - 1) try writer.writeAll(",");
         try writer.writeAll("\n");

@@ -225,12 +225,38 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
     // Step 3: Crossing reduction pipeline on virtual levels (includes dummies)
     try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
 
+    // Step 3b: Compute adaptive level spacing
+    // Need enough vertical rows between levels to stagger outgoing edges.
+    // Also add extra rows when edge labels are present (dedicated label row).
+    const has_edge_labels = blk: {
+        for (g.edges.items) |edge| {
+            if (edge.label != null) break :blk true;
+        }
+        break :blk false;
+    };
+    const label_extra: usize = if (has_edge_labels) 2 else 0;
+
+    const effective_level_spacing = blk: {
+        var max_fan: usize = 0;
+        for (0..g.nodeCount()) |node_idx| {
+            const children = g.getChildren(node_idx);
+            if (children.len > max_fan) max_fan = children.len;
+            const parents = g.getParents(node_idx);
+            if (parents.len > max_fan) max_fan = parents.len;
+        }
+        // Need enough rows to stagger all edges in the busiest level gap.
+        // Cap at 20 to avoid absurd vertical gaps for extreme fan-out/in;
+        // the router's slot modulo wraps gracefully when rows < edges.
+        const needed = if (max_fan > 1) @min(max_fan + 1, 20) else 2;
+        break :blk @max(config.level_spacing, needed) + label_extra;
+    };
+
     // Step 4: Position all nodes (real + dummy) respecting crossing-reduced order
     var virtual_positions = try layering.virtual.computeVirtualPositions(
         g,
         &virtual_levels,
         config.node_spacing,
-        config.level_spacing,
+        effective_level_spacing,
         allocator,
     );
     defer virtual_positions.deinit();
@@ -240,7 +266,7 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
         g,
         &virtual_levels,
         &virtual_positions,
-        config.level_spacing,
+        effective_level_spacing,
         allocator,
     );
     defer real_positions.deinit();
@@ -250,7 +276,7 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
         &virtual_levels,
         &virtual_positions,
         g.edges.items.len,
-        config.level_spacing,
+        effective_level_spacing,
         allocator,
     );
     defer dummy_positions.deinit();
@@ -288,7 +314,7 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
             if (vnode.dummyEdge()) |edge_idx| {
                 // Get position from virtual positions
                 const x = virtual_positions.x.items[level_idx].items[pos_in_level];
-                const y = level_idx * (1 + config.level_spacing);
+                const y = level_idx * (1 + effective_level_spacing);
 
                 // Create a synthetic ID for this dummy
                 const dummy_id = 0x80000000 + edge_idx * 1000 + level_idx;
@@ -413,8 +439,119 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
         }
     }
 
-    // Set dimensions
-    result.setDimensions(real_positions.total_width, real_positions.total_height);
+    // Step 7: Stagger horizontal_y for all corner edges.
+    // After splitting, edges from both the router and the splitter coexist in
+    // result.edges.  Group them by from_y (same source-level band) and assign
+    // sequential slots so no two horizontal segments share the same row.
+    for (result.edges.items, 0..) |*edge, i| {
+        if (edge.path != .corner) continue;
+        // Count how many earlier corner edges share this from_y
+        var slot: usize = 0;
+        for (result.edges.items[0..i]) |prev| {
+            if (prev.path == .corner and prev.from_y == edge.from_y) {
+                slot += 1;
+            }
+        }
+        const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
+        edge.path.corner.horizontal_y = edge.from_y + 1 + (slot % available);
+    }
+
+    // Step 8: Propagate edge labels and compute label positions.
+    // Labels come from the original Graph.Edge; we look them up via edge_index.
+    // For split edges (through dummies), only the first segment gets the label.
+    // Label is placed on a dedicated row below the horizontal routing area.
+    {
+        // Track which original edges have already had their label assigned
+        // (so split edges don't duplicate the label on every segment).
+        var label_assigned = try allocator.alloc(bool, g.edges.items.len);
+        defer allocator.free(label_assigned);
+        @memset(label_assigned, false);
+
+        for (result.edges.items) |*edge| {
+            const orig_idx = edge.edge_index;
+            if (orig_idx >= g.edges.items.len) continue;
+
+            const orig_label = g.edges.items[orig_idx].label orelse continue;
+            if (label_assigned[orig_idx]) continue;
+            label_assigned[orig_idx] = true;
+
+            edge.label = orig_label;
+
+            // Compute label position based on path type.
+            // For corner edges, place on the post-corner vertical (at to_x)
+            // where the edge has diverged from the shared source column.
+            // For other paths, place near the source.
+            var label_y: usize = undefined;
+            var edge_x_at_label: usize = undefined;
+
+            switch (edge.path) {
+                .direct => {
+                    label_y = if (edge.to_y > edge.from_y + 2)
+                        edge.from_y + 2
+                    else
+                        edge.from_y + 1;
+                    edge_x_at_label = edge.from_x;
+                },
+                .corner => |c| {
+                    // Place on the post-corner vertical at to_x.
+                    // Y just below the horizontal turn, with room before destination.
+                    if (c.horizontal_y + 1 < edge.to_y) {
+                        label_y = c.horizontal_y + 1;
+                    } else if (c.horizontal_y > edge.from_y + 1) {
+                        label_y = c.horizontal_y - 1;
+                    } else {
+                        label_y = edge.from_y + 1;
+                    }
+                    edge_x_at_label = edge.to_x;
+                },
+                .side_channel => |sc| {
+                    label_y = if (sc.start_y + 1 < sc.end_y)
+                        sc.start_y + 1
+                    else if (edge.to_y > edge.from_y + 2)
+                        edge.from_y + 2
+                    else
+                        edge.from_y + 1;
+                    edge_x_at_label = sc.channel_x;
+                },
+                .multi_segment => {
+                    label_y = if (edge.to_y > edge.from_y + 2)
+                        edge.from_y + 2
+                    else
+                        edge.from_y + 1;
+                    edge_x_at_label = edge.from_x;
+                },
+                .spline => {
+                    label_y = if (edge.to_y > edge.from_y + 2)
+                        edge.from_y + 2
+                    else
+                        edge.from_y + 1;
+                    edge_x_at_label = edge.from_x;
+                },
+            }
+
+            // Center the label text (rendered as "text", so width = len + 2 for quotes)
+            const label_width = orig_label.len + 2;
+            const label_x = if (edge_x_at_label >= label_width / 2)
+                edge_x_at_label - label_width / 2
+            else
+                0;
+
+            edge.label_x = label_x;
+            edge.label_y = label_y;
+        }
+    }
+
+    // Step 9: Widen layout if labels extend beyond current width.
+    {
+        var needed_width = real_positions.total_width;
+        for (result.edges.items) |edge| {
+            if (edge.label) |lbl| {
+                const right = edge.label_x + lbl.len + 2; // +2 for quotes
+                if (right > needed_width) needed_width = right;
+            }
+        }
+        result.setDimensions(needed_width, real_positions.total_height);
+    }
 
     return result;
 }

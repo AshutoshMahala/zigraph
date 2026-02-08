@@ -21,6 +21,7 @@ const DummyPositions = virtual_mod.DummyPositions;
 /// Route all edges using direct (straight-line) routing.
 ///
 /// Returns a list of LayoutEdge with path information.
+/// Edges from the same source are staggered to different horizontal rows.
 pub fn route(
     g: *const Graph,
     nodes: []const LayoutNode,
@@ -29,6 +30,16 @@ pub fn route(
 ) !std.ArrayListUnmanaged(LayoutEdge) {
     var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
 
+    // Per-level slot counter: all edges originating from the same level share
+    // a counter so they get unique horizontal rows (handles both fan-out and fan-in).
+    var max_level: usize = 0;
+    for (nodes) |n| {
+        if (n.level > max_level) max_level = n.level;
+    }
+    var level_slot_counts = try allocator.alloc(usize, max_level + 1);
+    defer allocator.free(level_slot_counts);
+    @memset(level_slot_counts, 0);
+
     for (g.edges.items, 0..) |edge, edge_index| {
         // Look up node positions from IR
         const from_ir_idx = node_id_to_ir_index.get(edge.from) orelse continue;
@@ -36,6 +47,9 @@ pub fn route(
 
         const from_node = &nodes[from_ir_idx];
         const to_node = &nodes[to_ir_idx];
+
+        const slot = level_slot_counts[from_node.level];
+        level_slot_counts[from_node.level] += 1;
 
         // Determine path type
         const level_diff = if (to_node.level > from_node.level)
@@ -47,17 +61,16 @@ pub fn route(
         const to_y_edge = to_node.y; // Row of target
 
         const path: EdgePath = if (from_node.center_x == to_node.center_x) blk: {
-            // Vertically aligned: direct connection
             break :blk .{ .direct = {} };
         } else if (level_diff <= 1) blk: {
-            // Adjacent levels with horizontal offset: corner routing
-            // Put horizontal line in the middle between source and target
-            const h_y = from_y_edge + (to_y_edge - from_y_edge) / 2;
+            const available = if (to_y_edge > from_y_edge + 1) to_y_edge - from_y_edge - 1 else 1;
+            const base_h_y = from_y_edge + 1;
+            const h_y = base_h_y + (slot % available);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         } else blk: {
-            // Skip-level with horizontal offset: corner routing
-            // Use the row just above the target to avoid crossing intermediate nodes
-            const h_y = if (to_y_edge > 0) to_y_edge - 1 else to_y_edge;
+            const available = if (to_y_edge > from_y_edge + 1) to_y_edge - from_y_edge - 1 else 1;
+            const base_h_y = from_y_edge + 1;
+            const h_y = base_h_y + (slot % available);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         };
 
@@ -80,6 +93,9 @@ pub fn route(
 ///
 /// For skip-level edges, routes through the dummy node positions computed
 /// during virtual level layout. This produces proper orthogonal routing.
+///
+/// Edges that share a source or target are staggered onto different horizontal
+/// rows so they don't overlap visually.
 pub fn routeWithDummies(
     g: *const Graph,
     nodes: []const LayoutNode,
@@ -93,6 +109,16 @@ pub fn routeWithDummies(
         edges.deinit(allocator);
     }
 
+    // Per-level slot counter: all edges originating from the same level share
+    // a counter so they get unique horizontal rows (handles both fan-out and fan-in).
+    var max_level: usize = 0;
+    for (nodes) |n| {
+        if (n.level > max_level) max_level = n.level;
+    }
+    var level_slot_counts = try allocator.alloc(usize, max_level + 1);
+    defer allocator.free(level_slot_counts);
+    @memset(level_slot_counts, 0);
+
     for (g.edges.items, 0..) |edge, edge_index| {
         // Look up node positions from IR
         const from_ir_idx = node_id_to_ir_index.get(edge.from) orelse continue;
@@ -104,12 +130,15 @@ pub fn routeWithDummies(
         const from_y_edge = from_node.y + 1;
         const to_y_edge = to_node.y;
 
+        // Slot for this edge: nth edge from this level
+        const slot = level_slot_counts[from_node.level];
+        level_slot_counts[from_node.level] += 1;
+
         // Check for dummy waypoints
         const waypoints = dummy_positions.getWaypoints(edge_index);
 
         const path: EdgePath = if (waypoints.len > 0) blk: {
             // Multi-segment path through dummy nodes
-            // Build orthogonal path: vertical down, horizontal to dummy, vertical, etc.
             var ms_waypoints: std.ArrayListUnmanaged(EdgePath.Waypoint) = .{};
             errdefer ms_waypoints.deinit(allocator);
 
@@ -123,13 +152,11 @@ pub fn routeWithDummies(
                 const target_x = wp.x;
                 const target_y = wp.level;
 
-                // Go vertical to the waypoint's y first
                 if (curr_y != target_y) {
                     try ms_waypoints.append(allocator, .{ .x = curr_x, .y = target_y });
                     curr_y = target_y;
                 }
 
-                // Then horizontal to the waypoint's x
                 if (curr_x != target_x) {
                     try ms_waypoints.append(allocator, .{ .x = target_x, .y = curr_y });
                     curr_x = target_x;
@@ -140,13 +167,11 @@ pub fn routeWithDummies(
             const end_x = to_node.center_x;
             const end_y = to_y_edge;
 
-            // Vertical to target row (just above target)
             if (curr_y != end_y) {
                 try ms_waypoints.append(allocator, .{ .x = curr_x, .y = end_y });
                 curr_y = end_y;
             }
 
-            // Final horizontal if needed
             if (curr_x != end_x) {
                 try ms_waypoints.append(allocator, .{ .x = end_x, .y = curr_y });
             }
@@ -160,7 +185,11 @@ pub fn routeWithDummies(
         } else if (from_node.center_x == to_node.center_x) blk: {
             break :blk .{ .direct = {} };
         } else blk: {
-            const h_y = from_y_edge + (to_y_edge - from_y_edge) / 2;
+            // Stagger horizontal_y by slot so edges from the same source
+            // don't all land on the same row
+            const available = if (to_y_edge > from_y_edge + 1) to_y_edge - from_y_edge - 1 else 1;
+            const base_h_y = from_y_edge + 1;
+            const h_y = base_h_y + (slot % available);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         };
 

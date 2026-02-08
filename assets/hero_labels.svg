@@ -79,8 +79,10 @@
     <line x1="300" y1="40" x2="60" y2="200" 
           stroke="#3e63dd" stroke-width="2" 
           marker-end="url(#arrow0)"/>
-    <text x="180" y="120" font-family="monospace" font-size="12"
-          fill="#3e63dd" text-anchor="middle" dy="-6" dominant-baseline="auto">"spawn"</text>
+    <path id="edgepath0" d="M 60 200 L 300 40" fill="none" stroke="none"/>
+    <text font-family="monospace" font-size="12" fill="#3e63dd" dy="-4">
+      <textPath href="#edgepath0" startOffset="50%"
+              text-anchor="middle" dominant-baseline="auto">"spawn"</textPath></text>
     <line x1="300" y1="40" x2="180" y2="200" 
           stroke="#e54d2e" stroke-width="2" 
           marker-end="url(#arrow1)"/>
@@ -107,13 +109,17 @@
           marker-end="url(#arrow8)"/>
     <path d="M 60 220 C 88 247, 190 323, 230 380 C 270 437, 288 530, 300 560" fill="none" stroke="#f5d90a" stroke-width="2" 
           marker-end="url(#arrow9)"/>
-    <text x="215" y="366" font-family="monospace" font-size="12"
-          fill="#f5d90a" text-anchor="middle" dy="-6" dominant-baseline="auto">"skip"</text>
+    <path id="edgepath9" d="M 60 220 C 88 247, 190 323, 230 380 C 270 437, 288 530, 300 560" fill="none" stroke="none"/>
+    <text font-family="monospace" font-size="12" fill="#f5d90a" dy="-4">
+      <textPath href="#edgepath9" startOffset="50%"
+              text-anchor="middle" dominant-baseline="auto">"skip"</textPath></text>
     <line x1="320" y1="400" x2="300" y2="560" 
           stroke="#89ddff" stroke-width="2" 
           marker-end="url(#arrow10)"/>
-    <text x="310" y="480" font-family="monospace" font-size="12"
-          fill="#89ddff" text-anchor="middle" dy="-6" dominant-baseline="auto">"merge"</text>
+    <path id="edgepath10" d="M 300 560 L 320 400" fill="none" stroke="none"/>
+    <text font-family="monospace" font-size="12" fill="#89ddff" dy="-4">
+      <textPath href="#edgepath10" startOffset="50%"
+              text-anchor="middle" dominant-baseline="auto">"merge"</textPath></text>
   </g>
 
   <!-- Nodes -->
