@@ -15,10 +15,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ir_mod = @import("../core/ir.zig");
-const LayoutIR = ir_mod.LayoutIR;
-const LayoutNode = ir_mod.LayoutNode;
-const LayoutEdge = ir_mod.LayoutEdge;
-const EdgePath = ir_mod.EdgePath;
+const LayoutIR = ir_mod.LayoutIR(usize);
+const LayoutNode = ir_mod.LayoutNode(usize);
+const LayoutEdge = ir_mod.LayoutEdge(usize);
+const EdgePath = ir_mod.EdgePath(usize);
 const colors = @import("colors.zig");
 
 // Box drawing characters as u21 codepoints (comptime decoded)
@@ -110,6 +110,22 @@ pub const Config = struct {
     /// Use colors.ansi, colors.ansi_dark, or colors.ansi_light
     edge_palette: ?[]const u8 = null,
 };
+
+/// Render any GenericLayoutIR to a Unicode string.
+/// Converts coordinates to usize if needed, then renders.
+pub fn renderGeneric(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator) ![]u8 {
+    return renderGenericWithConfig(Coord, layout_ir, allocator, .{});
+}
+
+/// Render any GenericLayoutIR to a Unicode string with configuration.
+pub fn renderGenericWithConfig(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator, config: Config) ![]u8 {
+    if (Coord == usize) {
+        return renderWithConfig(layout_ir, allocator, config);
+    }
+    var converted = try layout_ir.convertCoord(usize, allocator);
+    defer converted.deinit();
+    return renderWithConfig(&converted, allocator, config);
+}
 
 /// Render a LayoutIR to a Unicode string.
 pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {

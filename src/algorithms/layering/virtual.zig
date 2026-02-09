@@ -397,7 +397,7 @@ pub fn extractRealNodePositions(
 pub fn extractDummyPositionsFromEdges(
     g: *const Graph,
     virtual_levels: *const VirtualLevels,
-    real_positions: *const @import("../positioning/common.zig").PositionAssignment,
+    real_positions: *const @import("../positioning/common.zig").PositionAssignment(usize),
     level_spacing: usize,
     allocator: Allocator,
 ) !DummyPositions {

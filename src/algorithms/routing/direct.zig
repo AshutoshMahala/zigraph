@@ -12,9 +12,9 @@ const Allocator = std.mem.Allocator;
 const graph_mod = @import("../../core/graph.zig");
 const Graph = graph_mod.Graph;
 const ir_mod = @import("../../core/ir.zig");
-const LayoutEdge = ir_mod.LayoutEdge;
-const EdgePath = ir_mod.EdgePath;
-const LayoutNode = ir_mod.LayoutNode;
+const LayoutEdge = ir_mod.LayoutEdge(usize);
+const EdgePath = ir_mod.EdgePath(usize);
+const LayoutNode = ir_mod.LayoutNode(usize);
 const virtual_mod = @import("../layering/virtual.zig");
 const DummyPositions = virtual_mod.DummyPositions;
 

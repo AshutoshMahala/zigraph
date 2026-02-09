@@ -108,7 +108,7 @@ const CountingAllocator = struct {
 };
 
 /// Compute total edge span from the LayoutIR (sum of level differences).
-fn totalEdgeSpan(ir: *const zigraph.LayoutIR) usize {
+fn totalEdgeSpan(ir: *const zigraph.LayoutIR(usize)) usize {
     var total: usize = 0;
     for (ir.edges.items) |edge| {
         var from_level: usize = 0;
@@ -125,7 +125,7 @@ fn totalEdgeSpan(ir: *const zigraph.LayoutIR) usize {
 }
 
 /// Count dummy nodes in the LayoutIR.
-fn dummyNodeCount(ir: *const zigraph.LayoutIR) usize {
+fn dummyNodeCount(ir: *const zigraph.LayoutIR(usize)) usize {
     var count: usize = 0;
     for (ir.nodes.items) |node| {
         if (node.kind == .dummy) count += 1;

@@ -23,10 +23,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ir_mod = @import("../core/ir.zig");
-const LayoutIR = ir_mod.LayoutIR;
-const LayoutNode = ir_mod.LayoutNode;
-const LayoutEdge = ir_mod.LayoutEdge;
-const EdgePath = ir_mod.EdgePath;
+const LayoutIR = ir_mod.LayoutIR(usize);
+const LayoutNode = ir_mod.LayoutNode(usize);
+const LayoutEdge = ir_mod.LayoutEdge(usize);
+const EdgePath = ir_mod.EdgePath(usize);
 const colors = @import("colors.zig");
 
 /// SVG rendering configuration
@@ -77,6 +77,17 @@ pub const SvgConfig = struct {
         return colors.get(self.edge_palette, edge_index);
     }
 };
+
+/// Render any GenericLayoutIR to SVG string.
+/// Converts coordinates to usize if needed, then renders.
+pub fn renderGeneric(comptime Coord: type, layout: *const ir_mod.LayoutIR(Coord), allocator: Allocator, config: SvgConfig) ![]u8 {
+    if (Coord == usize) {
+        return render(layout, allocator, config);
+    }
+    var converted = try layout.convertCoord(usize, allocator);
+    defer converted.deinit();
+    return render(&converted, allocator, config);
+}
 
 /// Render LayoutIR to SVG string
 pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) ![]u8 {

@@ -23,16 +23,27 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ir_mod = @import("../core/ir.zig");
-const LayoutIR = ir_mod.LayoutIR;
-const EdgePath = ir_mod.EdgePath;
+const LayoutIR = ir_mod.LayoutIR(usize);
+const EdgePath = ir_mod.EdgePath(usize);
 
 /// Current JSON schema version
 pub const VERSION = "1.0";
 
-/// Render LayoutIR as JSON string.
+/// Render any GenericLayoutIR as JSON string.
+/// Works with any coordinate type (usize, u16, f32, etc.).
+/// Returns a heap-allocated JSON string. Caller owns the memory.
+pub fn renderGeneric(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator) ![]u8 {
+    return renderImpl(Coord, layout_ir, allocator);
+}
+
+/// Render LayoutIR (usize coordinates) as JSON string.
 ///
 /// Returns a heap-allocated JSON string. Caller owns the memory.
 pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {
+    return renderImpl(usize, layout_ir, allocator);
+}
+
+fn renderImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator) ![]u8 {
     var buffer: std.ArrayListUnmanaged(u8) = .{};
     errdefer buffer.deinit(allocator);
 

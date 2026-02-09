@@ -18,7 +18,7 @@ const Graph = graph_mod.Graph;
 // Use shared types
 const common = @import("common.zig");
 pub const Config = common.Config;
-pub const PositionAssignment = common.PositionAssignment;
+pub const PositionAssignment = common.PositionAssignment(usize);
 
 /// Compute node positions using simple left-to-right packing.
 pub fn compute(

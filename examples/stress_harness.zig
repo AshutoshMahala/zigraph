@@ -9,7 +9,7 @@ const std = @import("std");
 const zigraph = @import("zigraph");
 
 const Graph = zigraph.Graph;
-const LayoutIR = zigraph.LayoutIR;
+const LayoutIR = zigraph.LayoutIR(usize);
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

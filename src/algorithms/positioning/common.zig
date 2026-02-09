@@ -13,27 +13,29 @@ pub const Config = struct {
     level_spacing: usize = 2,
 };
 
-/// Result of positioning computation
+/// Result of positioning computation, parameterized by coordinate type.
 ///
 /// Contains computed x/y coordinates for each node in the graph.
 /// Indexed by node index (not node ID).
-pub const PositionAssignment = struct {
-    /// X coordinate for each node (indexed by node index)
-    x: []usize,
-    /// Y coordinate for each node (indexed by node index)
-    y: []usize,
-    /// Center X for each node (indexed by node index)
-    center_x: []usize,
-    /// Total width of the layout
-    total_width: usize,
-    /// Total height of the layout
-    total_height: usize,
-    /// Allocator used
-    allocator: Allocator,
+pub fn PositionAssignment(comptime Coord: type) type {
+    return struct {
+        /// X coordinate for each node (indexed by node index)
+        x: []Coord,
+        /// Y coordinate for each node (indexed by node index)
+        y: []Coord,
+        /// Center X for each node (indexed by node index)
+        center_x: []Coord,
+        /// Total width of the layout
+        total_width: Coord,
+        /// Total height of the layout
+        total_height: Coord,
+        /// Allocator used
+        allocator: Allocator,
 
-    pub fn deinit(self: *PositionAssignment) void {
-        if (self.x.len > 0) self.allocator.free(self.x);
-        if (self.y.len > 0) self.allocator.free(self.y);
-        if (self.center_x.len > 0) self.allocator.free(self.center_x);
-    }
-};
+        pub fn deinit(self: *@This()) void {
+            if (self.x.len > 0) self.allocator.free(self.x);
+            if (self.y.len > 0) self.allocator.free(self.y);
+            if (self.center_x.len > 0) self.allocator.free(self.center_x);
+        }
+    };
+}

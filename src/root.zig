@@ -40,12 +40,16 @@ pub const Code = errors.Code;
 pub const ErrorDetail = errors.ErrorDetail;
 pub const ZigraphError = errors.ZigraphError;
 
-/// Intermediate Representation for layout
+/// Intermediate Representation for layout.
+/// All IR types are parameterized by coordinate type:
+///   const MyIR = ir.LayoutIR(f32);
+///   const DefaultIR = ir.LayoutIR(usize);
 pub const ir = @import("core/ir.zig");
 pub const LayoutIR = ir.LayoutIR;
 pub const LayoutNode = ir.LayoutNode;
 pub const LayoutEdge = ir.LayoutEdge;
 pub const EdgePath = ir.EdgePath;
+pub const coordCast = ir.coordCast;
 
 // ============================================================================
 // Algorithms
@@ -83,6 +87,7 @@ pub const crossing = struct {
 
 /// Node positioning algorithms - assign x-coordinates
 pub const positioning = struct {
+    pub const common = @import("algorithms/positioning/common.zig");
     pub const simple = @import("algorithms/positioning/simple.zig");
     pub const brandes_kopf = @import("algorithms/positioning/brandes_kopf.zig");
 };
@@ -198,7 +203,7 @@ pub const LayoutError = error{
 /// Returns error.CycleDetected if the graph contains a cycle.
 /// Custom crossing reducers may return additional errors.
 /// Use `graph.validate()` before calling for detailed cycle info.
-pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR {
+pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
     // Step 0: Validate graph (unless skipped)
     if (!config.skip_validation) {
         var validation = try g.validate(allocator);
@@ -288,7 +293,7 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
     defer dummy_positions.deinit();
 
     // Step 5: Build LayoutIR
-    var result = LayoutIR.init(allocator);
+    var result = LayoutIR(usize).init(allocator);
     errdefer result.deinit();
 
     // Add real nodes
@@ -393,7 +398,7 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
                         const dummy_node = result.nodes.items[result.id_to_index.get(dummy_id).?];
 
                         // Determine path type based on x alignment
-                        const edge_path: ir.EdgePath = if (prev_x == dummy_node.center_x)
+                        const edge_path: ir.EdgePath(usize) = if (prev_x == dummy_node.center_x)
                             .direct
                         else
                             .{ .corner = .{ .horizontal_y = prev_y + 1 } };
@@ -417,7 +422,7 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
                 }
 
                 // Final segment from last dummy to target
-                const final_path: ir.EdgePath = if (prev_x == edge.to_x)
+                const final_path: ir.EdgePath(usize) = if (prev_x == edge.to_x)
                     .direct
                 else
                     .{ .corner = .{ .horizontal_y = prev_y + 1 } };
@@ -562,6 +567,37 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
     return result;
 }
 
+/// Compute layout with a user-chosen coordinate type.
+///
+/// The internal Sugiyama pipeline runs with native integer arithmetic.
+/// The result is converted to the specified `Coord` type at the boundary
+/// using `coordCast`.
+///
+/// When `Coord` is `usize`, this is equivalent to `layout()` — no conversion,
+/// no extra allocation.
+///
+/// ```zig
+/// // Get layout in f32 coordinates (for GPU / web rendering)
+/// var ir_f32 = try zigraph.layoutTyped(f32, &graph, allocator, .{});
+/// defer ir_f32.deinit();
+///
+/// // Get layout in u16 coordinates (for embedded / low-memory)
+/// var ir_u16 = try zigraph.layoutTyped(u16, &graph, allocator, .{});
+/// defer ir_u16.deinit();
+/// ```
+pub fn layoutTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(Coord) {
+    var usize_result = try layout(g, allocator, config);
+
+    // Fast path: no conversion needed when Coord is already usize
+    if (Coord == usize) {
+        return usize_result;
+    }
+
+    // Convert to target coordinate type
+    defer usize_result.deinit();
+    return try usize_result.convertCoord(Coord, allocator);
+}
+
 /// Convenience function: layout and render in one step.
 ///
 /// Returns the Unicode string representation of the graph.
@@ -593,6 +629,42 @@ pub fn exportJson(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     return try json.render(&layout_ir, allocator);
 }
 
+/// Layout and render with a custom coordinate type.
+///
+/// Internally computes the layout (usize), converts to Coord, then renders
+/// via the renderer's generic path. Useful when you want the rendered output
+/// to reflect a non-usize coordinate space (e.g., JSON with float coords).
+///
+/// For Unicode and SVG, the renderers convert back to usize internally,
+/// so prefer `render()` for those formats unless you need the typed IR
+/// for other purposes.
+pub fn renderTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+    var layout_ir = try layoutTyped(Coord, g, allocator, config);
+    defer layout_ir.deinit();
+
+    return try unicode.renderGenericWithConfig(Coord, &layout_ir, allocator, .{
+        .show_dummy_nodes = config.include_dummy_nodes,
+        .edge_palette = config.edge_palette,
+    });
+}
+
+/// Export graph layout as JSON with a custom coordinate type.
+///
+/// This is where typed coordinates shine — the JSON output will contain
+/// float values (`"x": 3.5`) or narrow integers (`"x": 42`) matching
+/// your chosen Coord type exactly.
+///
+/// ```zig
+/// const json_f32 = try zigraph.exportJsonTyped(f32, &graph, allocator, .{});
+/// // Output: {"nodes":[{"x":3.0,"y":0.0,...}], ...}
+/// ```
+pub fn exportJsonTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+    var layout_ir = try layoutTyped(Coord, g, allocator, config);
+    defer layout_ir.deinit();
+
+    return try json.renderGeneric(Coord, &layout_ir, allocator);
+}
+
 // ============================================================================
 // Version info
 // ============================================================================
@@ -620,7 +692,7 @@ test "core modules are accessible" {
     try std.testing.expectEqual(@as(usize, 1), g.nodeCount());
 
     // Test LayoutIR
-    var layout_ir = LayoutIR.init(allocator);
+    var layout_ir = LayoutIR(usize).init(allocator);
     defer layout_ir.deinit();
     try std.testing.expectEqual(@as(usize, 0), layout_ir.getNodes().len);
 }
@@ -749,6 +821,83 @@ test "layout: can skip validation for performance" {
     defer result.deinit();
 
     try std.testing.expectEqual(@as(usize, 2), result.getNodes().len);
+}
+
+test "layoutTyped: usize is identical to layout" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addEdge(1, 2);
+
+    var result = try layoutTyped(usize, &g, allocator, .{});
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), result.getNodes().len);
+    try std.testing.expect(result.getEdges().len >= 1);
+}
+
+test "layoutTyped: f32 produces float coordinates" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "Start");
+    try g.addNode(2, "End");
+    try g.addEdge(1, 2);
+
+    var result = try layoutTyped(f32, &g, allocator, .{});
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), result.getNodes().len);
+
+    // Coordinates should be valid floats
+    const nodes = result.getNodes();
+    try std.testing.expect(nodes[0].y < nodes[1].y);
+    try std.testing.expect(nodes[0].width > 0.0);
+}
+
+test "layoutTyped: u16 produces narrow coordinates" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addEdge(1, 2);
+    try g.addEdge(1, 3);
+
+    var result = try layoutTyped(u16, &g, allocator, .{});
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 3), result.getNodes().len);
+    try std.testing.expectEqual(@as(usize, 2), result.getLevelCount());
+}
+
+test "exportJsonTyped: f32 JSON output" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addEdge(1, 2);
+
+    const output = try exportJsonTyped(f32, &g, allocator, .{});
+    defer allocator.free(output);
+
+    // f32 JSON should contain float notation (e.g., "e+00" or ".")
+    try std.testing.expect(output.len > 0);
+    // Should contain node labels
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"A\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"B\"") != null);
 }
 
 // Run tests from submodules
