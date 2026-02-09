@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Network simplex layering** — Optimal layer assignment algorithm (Gansner et al. 1993) that minimizes total edge span, producing more compact layouts than longest-path for complex graphs
+  - `.network_simplex` — Full simplex pivoting until optimal
+  - `.network_simplex_fast` — Bounded iterations (`V × √E`) for predictable performance on large graphs
 - **Edge labels** — `graph.addEdgeLabeled(from, to, "label")` to attach labels to edges
 - **Edge labels in Unicode renderer** — Labels rendered inline alongside edges in terminal output
 - **Edge labels in SVG renderer** — Two rendering modes:
@@ -16,7 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Smart text orientation** — Text paths are always left-to-right so labels are never rendered upside-down, even on edges that flow right-to-left
 - **SVG edge label centering** — Labels are positioned at the true geometric midpoint of the rendered edge path (polyline walk), not the terminal grid position
 - `run-labels` build step — `zig build run-labels` to run the edge labels demo
+- `run-ns-compare` build step — `zig build run-ns-compare` to compare layering algorithms
 - `edge_labels.zig` example — Demonstrates labeled edges with dependency, state machine, and mixed-label graphs
+- `ns_compare.zig` example — Side-by-side comparison of longest-path vs network simplex layering
 
 ### Changed
 

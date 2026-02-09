@@ -18,7 +18,7 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 │                         LAYOUT CONFIG                                   │
 │                                                                         │
 │   LayoutConfig {                                                        │
-│       .layering = .longest_path,                                        │
+│       .layering = .longest_path,  // or .network_simplex / .network_simplex_fast                                        │
 │       .crossing_reducers = &crossing.balanced,  // preset or custom     │
 │       .positioning = .brandes_kopf,                                     │
 │       .routing = .direct,                                               │
@@ -32,8 +32,8 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 │  │  Layering   │  │  Crossing   │  │ Positioning │  │   Routing   │     │
 │  │             │  │  Reduction  │  │             │  │             │     │
 │  │ longest_path│  │ median      │  │ simple      │  │ direct      │     │
-│  │ virtual     │  │ adj_exchange│  │ brandes_kopf│  │ spline      │     │
-│  │ (dummies)   │  │ reducers    │  │             │  │             │     │
+│  │ net_simplex │  │ adj_exchange│  │ brandes_kopf│  │ spline      │     │
+│  │ virtual     │  │ reducers    │  │             │  │             │     │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘     │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -74,8 +74,9 @@ zigraph/
 │   │
 │   ├── algorithms/
 │   │   ├── layering/
-│   │   │   ├── longest_path.zig   # O(V+E) layer assignment
-│   │   │   └── virtual.zig        # Dummy node insertion for long edges
+│   │   │   ├── longest_path.zig      # O(V+E) layer assignment
+│   │   │   ├── network_simplex.zig   # Optimal layering (Gansner et al. 1993)
+│   │   │   └── virtual.zig           # Dummy node insertion for long edges
 │   │   │
 │   │   ├── crossing/
 │   │   │   ├── median.zig         # Median heuristic crossing reduction
@@ -250,7 +251,9 @@ The library implements the Sugiyama layered graph layout:
 - Cycles are rejected (DAGs only)
 
 ### Phase 2: Layer Assignment
-- **Longest Path**: O(V+E), assigns each node to deepest possible layer
+- **Longest Path** (`.longest_path`): O(V+E), assigns each node to deepest possible layer
+- **Network Simplex** (`.network_simplex`): Optimal layering via simplex pivoting (Gansner et al. 1993). Minimizes total edge span → fewer dummy nodes → more compact layouts. Typical O(V·E), worst case O(V²·E)
+- **Network Simplex Fast** (`.network_simplex_fast`): Same algorithm with bounded iterations (V×√E). Trades optimality for predictable O(V+E + iters·E) runtime on large graphs
 - Virtual nodes inserted for edges spanning multiple layers
 
 ### Phase 3: Crossing Reduction
@@ -332,6 +335,8 @@ All limits return `error.OutOfMemory` when exceeded.
 | Operation | Complexity | Notes |
 |-----------|------------|-------|
 | Longest path layering | O(V + E) | Single DFS pass |
+| Network simplex layering | O(V · E) typical | Simplex pivoting until optimal |
+| Network simplex fast | O(V + E + iters·E) | Bounded V×√E iterations |
 | Median crossing | O(passes * (V + E)) | Default 4 passes, optimized with position maps |
 | Adjacent exchange | O(L * N^2 * passes) | L=layers, N=nodes/layer |
 | Simple positioning | O(V) | Linear scan |

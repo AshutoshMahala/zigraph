@@ -54,6 +54,7 @@ pub const EdgePath = ir.EdgePath;
 /// Layering algorithms - assign nodes to horizontal levels
 pub const layering = struct {
     pub const longest_path = @import("algorithms/layering/longest_path.zig");
+    pub const network_simplex = @import("algorithms/layering/network_simplex.zig");
     pub const virtual = @import("algorithms/layering/virtual.zig");
 };
 
@@ -124,7 +125,10 @@ pub const ComptimeGraph = comptime_graph.ComptimeGraph;
 pub const Layering = enum {
     /// Longest path layering - simple, fast, may produce more layers
     longest_path,
-    // Future: coffman_graham, network_simplex
+    /// Network simplex - optimal minimum edge span (slower)
+    network_simplex,
+    /// Network simplex fast - bounded iterations, near-optimal (good default)
+    network_simplex_fast,
 };
 
 /// Available positioning algorithms
@@ -210,6 +214,8 @@ pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
     // Step 1: Layer assignment
     var layer_assignment = switch (config.layering) {
         .longest_path => try layering.longest_path.compute(g, allocator),
+        .network_simplex => try layering.network_simplex.compute(g, allocator),
+        .network_simplex_fast => try layering.network_simplex.computeFast(g, allocator),
     };
     defer layer_assignment.deinit();
 

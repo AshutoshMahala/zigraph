@@ -120,6 +120,24 @@ pub fn build(b: *std.Build) void {
     const run_labels_step = b.step("run-labels", "Run the edge labels example");
     run_labels_step.dependOn(&run_labels.step);
 
+    // Network simplex comparison
+    const ns_compare = b.addExecutable(.{
+        .name = "ns_compare",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/ns_compare.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(ns_compare);
+
+    const run_ns = b.addRunArtifact(ns_compare);
+    const run_ns_step = b.step("run-ns-compare", "Compare layering algorithms");
+    run_ns_step.dependOn(&run_ns.step);
+
     // Stress test
     const stress_example = b.addExecutable(.{
         .name = "stress_test",

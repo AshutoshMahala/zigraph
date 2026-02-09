@@ -200,6 +200,11 @@ See [JSON_SCHEMA.md](JSON_SCHEMA.md) for the output format, or view [assets/hero
 
 ```zig
 const output = try zigraph.render(&graph, allocator, .{
+    // Layering
+    .layering = .longest_path,        // default: simple, fast
+    // .layering = .network_simplex,   // optimal: minimizes total edge span
+    // .layering = .network_simplex_fast, // bounded iterations, good for large graphs
+
     // Positioning
     .positioning = .brandes_kopf,  // or .simple
 
@@ -300,7 +305,7 @@ Benchmarks on Apple M2 (zig build run-benchmark):
 
 zigraph implements the **Sugiyama algorithm** (hierarchical layout):
 
-1. **Layering** — Assign nodes to horizontal layers (longest-path)
+1. **Layering** — Assign nodes to horizontal layers (longest-path, network simplex)
 2. **Crossing reduction** — Reorder nodes to minimize edge crossings (median + adjacent exchange)
 3. **Positioning** — Assign x-coordinates (Brandes-Köpf or simple)
 4. **Routing** — Route edges between nodes (direct or spline)
@@ -318,8 +323,8 @@ zigraph implements the **Sugiyama algorithm** (hierarchical layout):
 │  │  Layering   │ Crossing         │  Positioning   │ Routing │  │
 │  │             │                  │                │         │  │
 │  │ longest_path│ median           │ brandes_kopf   │ direct  │  │
-│  │             │ adjacent_exchange│ simple         │ spline  │  │
-│  │             │ (pluggable)      │                │         │  │
+│  │ net_simplex │ adjacent_exchange│ simple         │ spline  │  │
+│  │ ns_fast     │ (pluggable)      │                │         │  │
 │  └─────────────┴──────────────────┴────────────────┴─────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                        Layout IR                                │
@@ -350,6 +355,7 @@ zig build run-example      # Basic usage
 zig build run-hero         # README hero diagram
 zig build run-svg          # SVG with splines
 zig build run-labels       # Edge labels demo (exports SVG)
+zig build run-ns-compare   # Compare layering algorithms
 zig build run-json         # JSON export
 zig build run-comptime     # Comptime graphs
 zig build run-stress       # Stress test suite
