@@ -1,6 +1,6 @@
 # JSON IR Schema
 
-Version: **1.0**
+Version: **1.1**
 
 The JSON IR (Intermediate Representation) is zigraph's output format for external tool integration. Use it to build SVG renderers, web visualizations, React/Vue components, or any custom output.
 
@@ -8,18 +8,18 @@ The JSON IR (Intermediate Representation) is zigraph's output format for externa
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "width": 25,
   "height": 10,
   "level_count": 3,
   "nodes": [
-    {"id": 1, "label": "Start", "x": 5, "y": 0, "width": 7, "center_x": 8, "level": 0, "level_position": 0},
-    {"id": 2, "label": "Process", "x": 3, "y": 3, "width": 9, "center_x": 7, "level": 1, "level_position": 0},
-    {"id": 3, "label": "End", "x": 7, "y": 6, "width": 5, "center_x": 9, "level": 2, "level_position": 0}
+    {"id": 1, "label": "Start", "x": 5, "y": 0, "width": 7, "center_x": 8, "level": 0, "level_position": 0, "kind": "explicit", "edge_index": null},
+    {"id": 2, "label": "Process", "x": 3, "y": 3, "width": 9, "center_x": 7, "level": 1, "level_position": 0, "kind": "explicit", "edge_index": null},
+    {"id": 3, "label": "End", "x": 7, "y": 6, "width": 5, "center_x": 9, "level": 2, "level_position": 0, "kind": "explicit", "edge_index": null}
   ],
   "edges": [
-    {"from": 1, "to": 2, "from_x": 8, "from_y": 1, "to_x": 7, "to_y": 3, "path": {"type": "direct"}},
-    {"from": 2, "to": 3, "from_x": 7, "from_y": 4, "to_x": 9, "to_y": 6, "path": {"type": "direct"}}
+    {"from": 1, "to": 2, "from_x": 8, "from_y": 1, "to_x": 7, "to_y": 3, "path": {"type": "direct"}, "edge_index": 0, "directed": true},
+    {"from": 2, "to": 3, "from_x": 7, "from_y": 4, "to_x": 9, "to_y": 6, "path": {"type": "direct"}, "edge_index": 1, "directed": true}
   ]
 }
 ```
@@ -30,7 +30,7 @@ The JSON IR (Intermediate Representation) is zigraph's output format for externa
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `version` | string | Schema version (currently `"1.0"`) |
+| `version` | string | Schema version (currently `"1.1"`) |
 | `width` | integer | Total width of layout in character cells |
 | `height` | integer | Total height of layout in character cells |
 | `level_count` | integer | Number of horizontal levels (layers) |
@@ -53,6 +53,8 @@ Each node represents a positioned vertex in the layout.
 | `center_x` | integer | Center x-coordinate (for edge connections) |
 | `level` | integer | Hierarchical level (0 = top) |
 | `level_position` | integer | Position within level (0 = leftmost) |
+| `kind` | string | `explicit`, `implicit`, or `dummy` |
+| `edge_index` | integer&#124;null | For dummy nodes: which edge they belong to |
 
 ### Coordinate System
 
@@ -105,6 +107,11 @@ Each edge represents a connection between two nodes.
 | `to_x` | integer | End x-coordinate (target node center) |
 | `to_y` | integer | End y-coordinate (row of target) |
 | `path` | object | Path routing information |
+| `edge_index` | integer | Edge index for consistent coloring |
+| `directed` | boolean | Whether an arrow is drawn at the target |
+| `label` | string (optional) | Edge label text |
+| `label_x` | integer (optional) | Label x-position (grid coords) |
+| `label_y` | integer (optional) | Label y-position (grid coords) |
 
 ### Edge Direction
 
@@ -244,6 +251,8 @@ interface ZigraphNode {
   center_x: number;
   level: number;
   level_position: number;
+  kind: "explicit" | "implicit" | "dummy";
+  edge_index: number | null;
 }
 
 interface ZigraphEdge {
@@ -254,6 +263,11 @@ interface ZigraphEdge {
   to_x: number;
   to_y: number;
   path: PathDirect | PathCorner | PathSideChannel | PathMultiSegment | PathSpline;
+  edge_index: number;
+  directed: boolean;
+  label?: string;
+  label_x?: number;
+  label_y?: number;
 }
 
 type PathDirect = { type: "direct" };
@@ -303,7 +317,7 @@ import json
 
 def load_layout(json_str: str) -> dict:
     layout = json.loads(json_str)
-    assert layout["version"] == "1.0"
+    assert layout["version"] in ("1.0", "1.1")
     return layout
 
 def node_bounds(node: dict) -> tuple:
@@ -323,6 +337,7 @@ def node_bounds(node: dict) -> tuple:
 | Version | Changes |
 |---------|---------|
 | 1.0 | Initial schema |
+| 1.1 | Added `directed`, `edge_index`, `label`, `label_x`, `label_y` on edges; `kind` and `edge_index` on nodes; added deserialization support |
 
 ---
 

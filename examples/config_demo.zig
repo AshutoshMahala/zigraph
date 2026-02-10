@@ -85,9 +85,16 @@ pub fn main() !void {
     // Show available options
     // =========================================================================
     std.debug.print("\n=== Available Options ===\n\n", .{});
-    std.debug.print("Layering:    .longest_path (default)\n", .{});
+    std.debug.print("PRESETS (recommended):\n", .{});
+    std.debug.print("  zigraph.presets.sugiyama.standard()  - balanced quality/speed\n", .{});
+    std.debug.print("  zigraph.presets.sugiyama.fast()      - fastest, acceptable quality\n", .{});
+    std.debug.print("  zigraph.presets.sugiyama.quality()   - best quality, slower\n", .{});
+    std.debug.print("  zigraph.presets.fdg_presets.standard()  - force-directed O(N²)\n", .{});
+    std.debug.print("  zigraph.presets.fdg_presets.fast()      - Barnes-Hut O(N log N)\n", .{});
+    std.debug.print("\nMANUAL CONFIG:\n", .{});
+    std.debug.print("Layering:    .longest_path (default), .network_simplex, .network_simplex_fast\n", .{});
     std.debug.print("Crossing:    crossing.balanced (default), crossing.fast, crossing.quality, crossing.none\n", .{});
-    std.debug.print("Positioning: .brandes_kopf (default), .simple\n", .{});
+    std.debug.print("Positioning: .none (default), .simple, .brandes_kopf\n", .{});
     std.debug.print("Routing:     .direct (default), .spline\n", .{});
     std.debug.print("\nTuning:\n", .{});
     std.debug.print("  .node_spacing   = 3 (default)\n", .{});

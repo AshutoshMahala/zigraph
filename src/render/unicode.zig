@@ -25,6 +25,9 @@ const colors = @import("colors.zig");
 const CP_V_LINE: u21 = '│';
 const CP_H_LINE: u21 = '─';
 const CP_ARROW_DOWN: u21 = '↓';
+const CP_ARROW_UP: u21 = '↑';
+const CP_ARROW_RIGHT: u21 = '→';
+const CP_ARROW_LEFT: u21 = '←';
 const CP_CORNER_DR: u21 = '└'; // down-right (from above, going right)
 const CP_CORNER_DL: u21 = '┘'; // down-left (from above, going left)
 const CP_CORNER_UR: u21 = '┌'; // from above-right, going down
@@ -365,6 +368,132 @@ fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: bool)
     buffer.set(x, y, close_bracket);
 }
 
+/// Draw a pure-vertical direct edge between y_from and y_to at column x.
+/// Draws in the range [min(y_from,y_to) .. max(y_from,y_to)), with an
+/// arrow one step before the target (only when directed).
+fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, directed: bool) void {
+    if (y_from == y_to) return;
+    const lo = @min(y_from, y_to);
+    const hi = @max(y_from, y_to);
+    const going_down = y_to > y_from;
+    const arrow_y = if (going_down) hi - 1 else lo;
+    const arrow_char: u21 = if (going_down) CP_ARROW_DOWN else CP_ARROW_UP;
+
+    var y = lo;
+    while (y < hi) : (y += 1) {
+        if (directed and y == arrow_y) {
+            buffer.setWithColor(x, y, arrow_char, color);
+        } else {
+            const cur = buffer.get(x, y);
+            buffer.setWithColor(x, y, mergeJunction(cur, true, true, false, false), color);
+        }
+    }
+}
+
+/// Draw a pure-horizontal direct edge between x_from and x_to at row y.
+fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, directed: bool) void {
+    if (x_from == x_to) return;
+    const lo = @min(x_from, x_to);
+    const hi = @max(x_from, x_to);
+    const going_right = x_to > x_from;
+    const arrow_x = if (going_right) hi - 1 else lo;
+    const arrow_char: u21 = if (going_right) CP_ARROW_RIGHT else CP_ARROW_LEFT;
+
+    var x = lo;
+    while (x < hi) : (x += 1) {
+        if (directed and x == arrow_x) {
+            buffer.setWithColor(x, y, arrow_char, color);
+        } else {
+            const cur = buffer.get(x, y);
+            buffer.setWithColor(x, y, mergeJunction(cur, false, false, true, true), color);
+        }
+    }
+}
+
+/// Draw a Manhattan Z-shaped route between (x0,y0) and (x1,y1).
+/// Route: (x0,y0) → (x0,mid_y) → (x1,mid_y) → (x1,y1)
+/// Uses box-drawing corners at the two bends for clean visual connections.
+fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, directed: bool) void {
+    const lo_y = @min(y0, y1);
+    const hi_y = @max(y0, y1);
+    const mid_y = lo_y + (hi_y - lo_y) / 2;
+
+    // --- Segment 1: vertical at x0 between y0 and mid_y (exclusive of both) ---
+    {
+        const seg_lo = @min(y0, mid_y);
+        const seg_hi = @max(y0, mid_y);
+        if (seg_hi > seg_lo + 1) {
+            var y = seg_lo + 1;
+            while (y < seg_hi) : (y += 1) {
+                const cur = buffer.get(x0, y);
+                buffer.setWithColor(x0, y, mergeJunction(cur, true, true, false, false), color);
+            }
+        }
+    }
+
+    // --- Corner 1 at (x0, mid_y) ---
+    {
+        const cur = buffer.get(x0, mid_y);
+        buffer.setWithColor(x0, mid_y, mergeJunction(cur, y0 < mid_y, // from_above
+            y0 > mid_y, // to_below
+            x1 > x0, // to_right
+            x1 < x0), color); // to_left
+    }
+
+    // --- Segment 2: horizontal at mid_y (exclusive of x0 and x1) ---
+    {
+        const lo_x = @min(x0, x1);
+        const hi_x = @max(x0, x1);
+        if (hi_x > lo_x + 1) {
+            var x = lo_x + 1;
+            while (x < hi_x) : (x += 1) {
+                const cur = buffer.get(x, mid_y);
+                buffer.setWithColor(x, mid_y, mergeJunction(cur, false, false, true, true), color);
+            }
+        }
+    }
+
+    // --- Corner 2 at (x1, mid_y) ---
+    {
+        const cur = buffer.get(x1, mid_y);
+        buffer.setWithColor(x1, mid_y, mergeJunction(cur, y1 < mid_y, // from_above
+            y1 > mid_y, // to_below
+            x0 > x1, // to_right (horizontal from x0 which is right of x1)
+            x0 < x1), color); // to_left
+    }
+
+    // --- Segment 3: vertical at x1 between mid_y and y1 (exclusive of both) ---
+    {
+        const seg_lo = @min(mid_y, y1);
+        const seg_hi = @max(mid_y, y1);
+        if (seg_hi > seg_lo + 1) {
+            var y = seg_lo + 1;
+            while (y < seg_hi) : (y += 1) {
+                const cur = buffer.get(x1, y);
+                buffer.setWithColor(x1, y, mergeJunction(cur, true, true, false, false), color);
+            }
+        }
+    }
+
+    // --- Arrow: one cell before target along the last segment (directed only) ---
+    if (directed) {
+        if (y1 != mid_y) {
+            const going_down_s3 = y1 > mid_y;
+            const arrow_y = if (going_down_s3) y1 - 1 else y1 + 1;
+            const arrow_char: u21 = if (going_down_s3) CP_ARROW_DOWN else CP_ARROW_UP;
+            buffer.setWithColor(x1, arrow_y, arrow_char, color);
+        } else {
+            // mid_y == y1: edge approaches horizontally — arrow on horizontal approach
+            const going_right = x1 > x0;
+            const arrow_x = if (going_right) x1 - 1 else x1 + 1;
+            const arrow_char: u21 = if (going_right) CP_ARROW_RIGHT else CP_ARROW_LEFT;
+            if (arrow_x < buffer.width) {
+                buffer.setWithColor(arrow_x, y1, arrow_char, color);
+            }
+        }
+    }
+}
+
 /// Merge a junction character based on which directions are connected.
 /// Returns the appropriate box-drawing character for the intersection.
 fn mergeJunction(current: u21, from_above: bool, to_below: bool, to_right: bool, to_left: bool) u21 {
@@ -483,16 +612,23 @@ fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: u
 fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
     switch (edge.path) {
         .direct => {
-            // Vertical line from from_y to to_y-1 at from_x
-            const x = edge.from_x;
-            var y = edge.from_y;
-            while (y < edge.to_y) : (y += 1) {
-                if (y == edge.to_y - 1) {
-                    buffer.setWithColor(x, y, CP_ARROW_DOWN, color);
-                } else {
-                    const current = buffer.get(x, y);
-                    buffer.setWithColor(x, y, mergeJunction(current, true, true, false, false), color);
-                }
+            // Orthogonal (Manhattan) routing from (from_x, from_y) to (to_x, to_y).
+            // For axis-aligned edges: pure vertical │ or horizontal ─.
+            // For other edges: Z-shaped route through a midpoint using
+            // box-drawing corners (└┐┌┘) that always connect cleanly.
+            const x0 = edge.from_x;
+            const y0 = edge.from_y;
+            const x1 = edge.to_x;
+            const y1 = edge.to_y;
+
+            if (x0 == x1 and y0 == y1) return; // degenerate
+
+            if (x0 == x1) {
+                drawDirectVertical(buffer, x0, y0, y1, color, edge.directed);
+            } else if (y0 == y1) {
+                drawDirectHorizontal(buffer, y0, x0, x1, color, edge.directed);
+            } else {
+                drawDirectManhattan(buffer, x0, y0, x1, y1, color, edge.directed);
             }
         },
         .corner => |corner| {
@@ -529,7 +665,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from horizontal to target
             y = h_y + 1;
             while (y < edge.to_y) : (y += 1) {
-                if (y == edge.to_y - 1) {
+                if (edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else {
                     const current = buffer.get(x2, y);
@@ -577,7 +713,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from end_y to target
             y = sc.end_y + 1;
             while (y < edge.to_y) : (y += 1) {
-                if (y == edge.to_y - 1) {
+                if (edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else {
                     const current = buffer.get(x2, y);
@@ -624,7 +760,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from horizontal to target
             y = h_y + 1;
             while (y < edge.to_y) : (y += 1) {
-                if (y == edge.to_y - 1) {
+                if (edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else {
                     const current = buffer.get(x2, y);
@@ -638,7 +774,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const x = edge.from_x;
             var y = edge.from_y;
             while (y < edge.to_y) : (y += 1) {
-                if (y == edge.to_y - 1) {
+                if (edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x, y, CP_ARROW_DOWN, color);
                 } else {
                     const current = buffer.get(x, y);

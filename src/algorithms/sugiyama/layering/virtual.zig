@@ -19,7 +19,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const graph_mod = @import("../../core/graph.zig");
+const graph_mod = @import("../../../core/graph.zig");
 const Graph = graph_mod.Graph;
 
 /// A virtual node - either a real node or a dummy for edge routing.
@@ -241,11 +241,34 @@ pub fn extractDummyPositions(
 /// Compute positions for virtual levels (both real and dummy nodes).
 ///
 /// Uses a simple left-to-right placement with centering.
+/// This is a convenience wrapper that calls computeVirtualPositionsWithHints with no hints.
 pub fn computeVirtualPositions(
     g: *const Graph,
     virtual_levels: *const VirtualLevels,
     node_spacing: usize,
     level_spacing: usize,
+    allocator: Allocator,
+) !VirtualPositions {
+    return computeVirtualPositionsWithHints(g, virtual_levels, node_spacing, level_spacing, null, allocator);
+}
+
+/// Compute positions for virtual levels with optional x-coordinate hints from a positioning algorithm.
+///
+/// When `real_node_x_hints` is provided (indexed by node_idx), real nodes use those x-coordinates
+/// and dummy nodes interpolate between adjacent real nodes on the edge path.
+/// When null, uses simple left-to-right placement with centering (backward compatible).
+///
+/// This enables integration with brandes_kopf.compute() or simple.compute():
+/// 1. Extract real-node levels via extractRealNodeLevels()
+/// 2. Run positioning algorithm to get x-coordinates for real nodes
+/// 3. Pass those x-coordinates here as hints
+/// 4. Dummy nodes are automatically interpolated
+pub fn computeVirtualPositionsWithHints(
+    g: *const Graph,
+    virtual_levels: *const VirtualLevels,
+    node_spacing: usize,
+    level_spacing: usize,
+    real_node_x_hints: ?[]const usize,
     allocator: Allocator,
 ) !VirtualPositions {
     var x_positions: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) = .{};
@@ -256,35 +279,112 @@ pub fn computeVirtualPositions(
 
     try x_positions.ensureTotalCapacity(allocator, virtual_levels.levels.items.len);
 
-    // First pass: compute x positions and level widths
-    var level_widths = try allocator.alloc(usize, virtual_levels.levels.items.len);
-    defer allocator.free(level_widths);
-
     var max_width: usize = 0;
 
-    for (virtual_levels.levels.items, 0..) |level, level_idx| {
-        var level_x: std.ArrayListUnmanaged(usize) = .{};
-        try level_x.ensureTotalCapacity(allocator, level.items.len);
+    if (real_node_x_hints) |hints| {
+        // =====================================================================
+        // Hinted mode: use provided x-coordinates for real nodes
+        // =====================================================================
 
-        var x: usize = 0;
-        for (level.items) |vnode| {
-            try level_x.append(allocator, x);
-            const w = vnode.width(g);
-            x += w + node_spacing;
+        // First pass: place real nodes from hints, collect dummy node info
+        for (virtual_levels.levels.items) |level| {
+            var level_x: std.ArrayListUnmanaged(usize) = .{};
+            try level_x.ensureTotalCapacity(allocator, level.items.len);
+
+            for (level.items) |vnode| {
+                const x: usize = switch (vnode) {
+                    .real => |node_idx| if (node_idx < hints.len) hints[node_idx] else 0,
+                    .dummy => 0, // Placeholder, will be computed below
+                };
+                try level_x.append(allocator, x);
+            }
+            try x_positions.append(allocator, level_x);
         }
 
-        level_widths[level_idx] = if (x > node_spacing) x - node_spacing else 0;
-        max_width = @max(max_width, level_widths[level_idx]);
-        try x_positions.append(allocator, level_x);
-    }
+        // Second pass: interpolate dummy positions for each edge
+        // For skip-level edges, dummy nodes form a path between source and target.
+        // We linearly interpolate x-coordinates between adjacent real nodes.
+        for (g.edges.items, 0..) |edge, edge_idx| {
+            const from_idx = g.nodeIndex(edge.from) orelse continue;
+            const to_idx = g.nodeIndex(edge.to) orelse continue;
 
-    // Second pass: center each level
-    for (x_positions.items, 0..) |*level_x, level_idx| {
-        const level_width = level_widths[level_idx];
-        if (level_width < max_width) {
-            const offset = (max_width - level_width) / 2;
-            for (level_x.items) |*x| {
-                x.* += offset;
+            const from_x: i64 = @intCast(if (from_idx < hints.len) hints[from_idx] else 0);
+            const to_x: i64 = @intCast(if (to_idx < hints.len) hints[to_idx] else 0);
+
+            // Find source and target levels
+            var from_level: ?usize = null;
+            var to_level: ?usize = null;
+
+            for (virtual_levels.levels.items, 0..) |level, level_idx| {
+                for (level.items) |vnode| {
+                    if (vnode.realIndex()) |idx| {
+                        if (idx == from_idx) from_level = level_idx;
+                        if (idx == to_idx) to_level = level_idx;
+                    }
+                }
+            }
+
+            const src_level = from_level orelse continue;
+            const dst_level = to_level orelse continue;
+            if (dst_level <= src_level + 1) continue; // Not a skip-level edge
+
+            // Interpolate x for dummy nodes at intermediate levels
+            const total_span: i64 = @intCast(dst_level - src_level);
+            for (virtual_levels.levels.items, 0..) |level, level_idx| {
+                if (level_idx <= src_level or level_idx >= dst_level) continue;
+
+                for (level.items, 0..) |vnode, pos| {
+                    if (vnode.dummyEdge()) |eidx| {
+                        if (eidx == edge_idx) {
+                            // Linear interpolation
+                            const t: i64 = @intCast(level_idx - src_level);
+                            const interp_x = from_x + @divTrunc((to_x - from_x) * t, total_span);
+                            x_positions.items[level_idx].items[pos] = @intCast(@max(0, interp_x));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Compute max width from all positions
+        for (virtual_levels.levels.items, 0..) |level, level_idx| {
+            for (level.items, 0..) |vnode, pos| {
+                const x = x_positions.items[level_idx].items[pos];
+                const w = vnode.width(g);
+                max_width = @max(max_width, x + w);
+            }
+        }
+    } else {
+        // =====================================================================
+        // Default mode: simple left-to-right placement with centering
+        // =====================================================================
+        var level_widths = try allocator.alloc(usize, virtual_levels.levels.items.len);
+        defer allocator.free(level_widths);
+
+        for (virtual_levels.levels.items, 0..) |level, level_idx| {
+            var level_x: std.ArrayListUnmanaged(usize) = .{};
+            try level_x.ensureTotalCapacity(allocator, level.items.len);
+
+            var x: usize = 0;
+            for (level.items) |vnode| {
+                try level_x.append(allocator, x);
+                const w = vnode.width(g);
+                x += w + node_spacing;
+            }
+
+            level_widths[level_idx] = if (x > node_spacing) x - node_spacing else 0;
+            max_width = @max(max_width, level_widths[level_idx]);
+            try x_positions.append(allocator, level_x);
+        }
+
+        // Second pass: center each level
+        for (x_positions.items, 0..) |*level_x, level_idx| {
+            const level_width = level_widths[level_idx];
+            if (level_width < max_width) {
+                const offset = (max_width - level_width) / 2;
+                for (level_x.items) |*x| {
+                    x.* += offset;
+                }
             }
         }
     }

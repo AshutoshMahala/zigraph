@@ -38,6 +38,8 @@
 ## Features
 
 - **Zero dependencies** — Pure Zig, no libc required
+- **Two layout engines** — Sugiyama (hierarchical DAGs) and Fruchterman-Reingold (force-directed)
+- **Directed & undirected edges** — `addDiEdge` / `addUnDiEdge` with per-edge arrow control
 - **Three renderers** — Unicode (terminal), SVG (with splines), JSON (for tooling)
 - **Edge labels** — Annotate edges with text, rendered in all output formats
 - **Pluggable algorithms** — Bring your own crossing reduction, positioning, routing
@@ -115,11 +117,12 @@ pub fn main() !void {
     try graph.addNode(1, "Parse");
     try graph.addNode(2, "Compile");
     try graph.addNode(3, "Link");
-    try graph.addEdge(1, 2);
-    try graph.addEdgeLabeled(2, 3, "link");  // labeled edge
+    try graph.addDiEdge(1, 2);                     // directed edge (arrow)
+    try graph.addDiEdgeLabeled(2, 3, "link");       // directed + labeled
+    // try graph.addUnDiEdge(1, 3);                 // undirected (no arrow)
 
-    // Layout and render
-    const output = try zigraph.render(&graph, allocator, .{});
+    // Layout using a preset (recommended)
+    const output = try zigraph.render(&graph, allocator, zigraph.presets.sugiyama.standard());
     defer allocator.free(output);
     
     std.debug.print("{s}\n", .{output});
@@ -142,12 +145,78 @@ Output:
 Annotate edges with descriptive text:
 
 ```zig
-try graph.addEdgeLabeled(1, 2, "requires");
-try graph.addEdgeLabeled(2, 3, "queries");
-try graph.addEdge(1, 3);  // unlabeled edge
+try graph.addDiEdgeLabeled(1, 2, "requires");
+try graph.addDiEdgeLabeled(2, 3, "queries");
+try graph.addDiEdge(1, 3);  // unlabeled edge
 ```
 
 Labels appear in all renderers — terminal, SVG, and JSON.
+
+## Directed & Undirected Edges
+
+zigraph supports directed, undirected, and mixed graphs:
+
+```zig
+try graph.addDiEdge(1, 2);           // directed: renders with arrow (→)
+try graph.addUnDiEdge(2, 3);         // undirected: renders without arrow (—)
+try graph.addDiEdgeLabeled(1, 3, "dep");    // directed + labeled
+try graph.addUnDiEdgeLabeled(3, 4, "link"); // undirected + labeled
+
+// Legacy aliases still work:
+try graph.addEdge(1, 2);             // same as addDiEdge
+try graph.addEdgeLabeled(1, 2, "x"); // same as addDiEdgeLabeled
+```
+
+## Presets (Recommended)
+
+Presets provide curated configurations for common use cases:
+
+```zig
+const zigraph = @import("zigraph");
+
+// Sugiyama (hierarchical DAG layout)
+const ir = try zigraph.layout(&graph, allocator, zigraph.presets.sugiyama.standard());
+const ir_fast = try zigraph.layout(&graph, allocator, zigraph.presets.sugiyama.fast());
+const ir_quality = try zigraph.layout(&graph, allocator, zigraph.presets.sugiyama.quality());
+
+// Force-directed (any graph type)
+const ir_fdg = try zigraph.layout(&graph, allocator, zigraph.presets.fdg_presets.standard());
+const ir_fdg_fast = try zigraph.layout(&graph, allocator, zigraph.presets.fdg_presets.fast());
+```
+
+| Preset | Use Case | Speed |
+|--------|----------|-------|
+| `sugiyama.standard()` | DAGs, balanced quality/speed | ★★★ |
+| `sugiyama.fast()` | Large DAGs, speed priority | ★★★★ |
+| `sugiyama.quality()` | Small DAGs, best visuals | ★★ |
+| `fdg_presets.standard()` | General graphs < 500 nodes | ★★★ |
+| `fdg_presets.fast()` | Large graphs 500-10000 nodes | ★★★★ |
+
+## Force-Directed Layout (FDG)
+
+For non-hierarchical or general graphs, use the Fruchterman-Reingold algorithm:
+
+```zig
+const zigraph = @import("zigraph");
+
+// Use preset (recommended)
+var ir = try zigraph.layout(&graph, allocator, zigraph.presets.fdg_presets.standard());
+var ir_fast = try zigraph.layout(&graph, allocator, zigraph.presets.fdg_presets.fast());
+
+// Or manual config for fine control
+var ir_custom = try zigraph.layout(&graph, allocator, .{
+    .algorithm = .{ .fruchterman_reingold = .{} },
+});
+defer ir_custom.deinit();
+```
+
+### FDG Perf (Apple M2)
+
+| Nodes | FR Standard | FR-Fast (Barnes-Hut) | Speedup |
+|-------|-------------|----------------------|---------|
+| 500   | 11 ms       | 5 ms                 | 2.2×    |
+| 1000  | 42 ms       | 11 ms                | 3.8×    |
+| 5000  | 1040 ms     | 28 ms                | 37.6×   |
 
 ### SVG Label Modes
 
@@ -198,6 +267,8 @@ See [JSON_SCHEMA.md](JSON_SCHEMA.md) for the output format, or view [assets/hero
 
 ## Configuration
 
+For fine-grained control, configure manually (or start with a preset and override):
+
 ```zig
 const output = try zigraph.render(&graph, allocator, .{
     // Layering
@@ -206,7 +277,9 @@ const output = try zigraph.render(&graph, allocator, .{
     // .layering = .network_simplex_fast, // bounded iterations, good for large graphs
 
     // Positioning
-    .positioning = .brandes_kopf,  // or .simple
+    .positioning = .none,  // default: left-to-right packing (no collisions)
+    // .positioning = .simple,        // level centering (has collision issues)
+    // .positioning = .brandes_kopf,  // parent/child centering (has collision issues)
 
     // Crossing reduction
     .crossing_reducers = &zigraph.crossing.balanced,  // default
@@ -303,32 +376,32 @@ Benchmarks on Apple M2 (zig build run-benchmark):
 
 ## Architecture
 
-zigraph implements the **Sugiyama algorithm** (hierarchical layout):
+zigraph implements two layout engines:
 
-1. **Layering** — Assign nodes to horizontal layers (longest-path, network simplex)
-2. **Crossing reduction** — Reorder nodes to minimize edge crossings (median + adjacent exchange)
-3. **Positioning** — Assign x-coordinates (Brandes-Köpf or simple)
-4. **Routing** — Route edges between nodes (direct or spline)
+1. **Sugiyama** (hierarchical layout for DAGs):
+   Layering → Crossing reduction → Positioning → Routing
+
+2. **Fruchterman-Reingold** (force-directed for general graphs):
+   FR Standard (O(V²)) or FR-Fast with Barnes-Hut quadtree (O(V log V))
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                          User API                               │
 │  zigraph.render() / zigraph.layout() / zigraph.exportJson()     │
 ├─────────────────────────────────────────────────────────────────┤
-│                        LayoutConfig                             │
-│  positioning, crossing_reducers, routing, spacing               │
-├─────────────────────────────────────────────────────────────────┤
-│                        Algorithms                               │
-│  ┌─────────────┬──────────────────┬────────────────┬─────────┐  │
-│  │  Layering   │ Crossing         │  Positioning   │ Routing │  │
-│  │             │                  │                │         │  │
-│  │ longest_path│ median           │ brandes_kopf   │ direct  │  │
-│  │ net_simplex │ adjacent_exchange│ simple         │ spline  │  │
-│  │ ns_fast     │ (pluggable)      │                │         │  │
-│  └─────────────┴──────────────────┴────────────────┴─────────┘  │
+│  ┌──────────────────────────┐  ┌─────────────────────────────┐  │
+│  │       Sugiyama           │  │   Force-Directed (FDG)      │  │
+│  │ ┌─────────┬──────────┐   │  │                             │  │
+│  │ │Layering │ Crossing │   │  │ FR Standard (O(V²))         │  │
+│  │ │ lp / ns │ med / ae │   │  │ FR-Fast (Barnes-Hut O(VlogV)│  │
+│  │ ├─────────┼──────────┤   │  │ Q16.16 fixed-point          │  │
+│  │ │Position │ Routing  │   │  │ Deterministic               │  │
+│  │ │ bk / s  │ dir / sp │   │  │                             │  │
+│  │ └─────────┴──────────┘   │  └─────────────────────────────┘  │
+│  └──────────────────────────┘                                   │
 ├─────────────────────────────────────────────────────────────────┤
 │                        Layout IR                                │
-│  Intermediate representation with positions and paths           │
+│  LayoutIR(usize) { nodes, edges, width, height }                │
 ├─────────────────────────────────────────────────────────────────┤
 │                        Renderers                                │
 │  ┌──────────────┬──────────────────┬─────────────────────────┐  │
@@ -353,13 +426,17 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design decisions.
 ```bash
 zig build run-example      # Basic usage
 zig build run-hero         # README hero diagram
+zig build run-presets      # Presets demo (all presets side-by-side)
+zig build run-config       # Configuration options demo
 zig build run-svg          # SVG with splines
 zig build run-labels       # Edge labels demo (exports SVG)
 zig build run-ns-compare   # Compare layering algorithms
 zig build run-json         # JSON export
 zig build run-comptime     # Comptime graphs
+zig build run-fdg          # Force-directed layout (terminal + SVG)
+zig build run-fdg-bench    # FDG performance benchmarks
 zig build run-stress       # Stress test suite
-zig build run-benchmark    # Performance benchmarks
+zig build run-benchmark    # Sugiyama benchmarks
 ```
 
 ## License

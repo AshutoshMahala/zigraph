@@ -95,28 +95,28 @@
     <line x1="300" y1="40" x2="540" y2="200" 
           stroke="#8e4ec6" stroke-width="2" 
           marker-end="url(#arrow4)"/>
-    <line x1="180" y1="220" x2="320" y2="380" 
+    <line x1="180" y1="220" x2="300" y2="380" 
           stroke="#12a594" stroke-width="2" 
           marker-end="url(#arrow5)"/>
-    <line x1="300" y1="220" x2="320" y2="380" 
+    <line x1="300" y1="220" x2="300" y2="380" 
           stroke="#e93d82" stroke-width="2" 
           marker-end="url(#arrow6)"/>
-    <line x1="420" y1="220" x2="320" y2="380" 
+    <line x1="420" y1="220" x2="300" y2="380" 
           stroke="#ffe629" stroke-width="2" 
           marker-end="url(#arrow7)"/>
-    <line x1="540" y1="220" x2="320" y2="380" 
+    <line x1="540" y1="220" x2="300" y2="380" 
           stroke="#7ce2fe" stroke-width="2" 
           marker-end="url(#arrow8)"/>
-    <path d="M 60 220 C 88 247, 190 323, 230 380 C 270 437, 288 530, 300 560" fill="none" stroke="#f5d90a" stroke-width="2" 
+    <path d="M 60 220 C 73 247, 100 323, 140 380 C 180 437, 273 530, 300 560" fill="none" stroke="#f5d90a" stroke-width="2" 
           marker-end="url(#arrow9)"/>
-    <path id="edgepath9" d="M 60 220 C 88 247, 190 323, 230 380 C 270 437, 288 530, 300 560" fill="none" stroke="none"/>
+    <path id="edgepath9" d="M 60 220 C 73 247, 100 323, 140 380 C 180 437, 273 530, 300 560" fill="none" stroke="none"/>
     <text font-family="monospace" font-size="12" fill="#f5d90a" dy="-4">
       <textPath href="#edgepath9" startOffset="50%"
               text-anchor="middle" dominant-baseline="auto">"skip"</textPath></text>
-    <line x1="320" y1="400" x2="300" y2="560" 
+    <line x1="300" y1="400" x2="300" y2="560" 
           stroke="#89ddff" stroke-width="2" 
           marker-end="url(#arrow10)"/>
-    <path id="edgepath10" d="M 300 560 L 320 400" fill="none" stroke="none"/>
+    <path id="edgepath10" d="M 300 400 L 300 560" fill="none" stroke="none"/>
     <text font-family="monospace" font-size="12" fill="#89ddff" dy="-4">
       <textPath href="#edgepath10" startOffset="50%"
               text-anchor="middle" dominant-baseline="auto">"merge"</textPath></text>
@@ -160,10 +160,10 @@
     <text x="540" y="214" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task D</text>
-    <rect x="280" y="380" width="80" height="20" 
+    <rect x="260" y="380" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="320" y="394" 
+    <text x="300" y="394" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task F</text>
     <rect x="260" y="560" width="80" height="20" 

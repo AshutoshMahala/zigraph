@@ -272,13 +272,17 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
     const to_x = edge.to_x * config.char_width + config.padding;
     const to_y = edge.to_y * config.line_height + config.padding;
 
+    const marker: []const u8 = if (edge.directed)
+        " marker-end=\"url(#arrowhead)\""
+    else
+        "";
+
     switch (edge.path) {
         .direct => {
-            // Simple straight line with arrow
+            // Simple straight line with optional arrow
             try writer.print(
                 \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-                \\          stroke="{s}" stroke-width="{d}" 
-                \\          marker-end="url(#arrowhead)"/>
+                \\          stroke="{s}" stroke-width="{d}"{s}/>
                 \\
             , .{
                 from_x,
@@ -287,6 +291,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                marker,
             });
         },
         .corner => |c| {
@@ -294,8 +299,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
             const corner_y = c.horizontal_y * config.line_height + config.padding;
             try writer.print(
                 \\    <path d="M {d} {d} L {d} {d} L {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}" 
-                \\          marker-end="url(#arrowhead)"/>
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
                 \\
             , .{
                 from_x,
@@ -306,6 +310,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                marker,
             });
         },
         .side_channel => |sc| {
@@ -315,8 +320,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
             const end_y = sc.end_y * config.line_height + config.padding;
             try writer.print(
                 \\    <path d="M {d} {d} L {d} {d} L {d} {d} L {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}" 
-                \\          marker-end="url(#arrowhead)"/>
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
                 \\
             , .{
                 from_x,
@@ -329,6 +333,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                marker,
             });
         },
         .multi_segment => |ms| {
@@ -341,12 +346,12 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
             }
             try writer.print(" L {d} {d}\"", .{ to_x, to_y });
             try writer.print(
-                \\ fill="none" stroke="{s}" stroke-width="{d}" 
-                \\          marker-end="url(#arrowhead)"/>
+                \\ fill="none" stroke="{s}" stroke-width="{d}"{s}/>
                 \\
             , .{
                 config.edge_stroke,
                 config.edge_width,
+                marker,
             });
         },
         .spline => |sp| {
@@ -358,8 +363,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
 
             try writer.print(
                 \\    <path d="M {d} {d} C {d} {d}, {d} {d}, {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}" 
-                \\          marker-end="url(#arrowhead)"/>
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
                 \\
             , .{
                 from_x,
@@ -372,6 +376,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                marker,
             });
 
             // Show control points if debugging
@@ -459,12 +464,16 @@ pub fn renderBezierEdge(
     to_x: usize,
     to_y: usize,
     config: SvgConfig,
+    directed: bool,
 ) !void {
+    const marker: []const u8 = if (directed)
+        " marker-end=\"url(#arrowhead)\""
+    else
+        "";
     // Cubic bezier curve: C p1x,p1y p2x,p2y x,y
     try writer.print(
         \\    <path d="M {d} {d} C {d} {d}, {d} {d}, {d} {d}" 
-        \\          fill="none" stroke="{s}" stroke-width="{d}" 
-        \\          marker-end="url(#arrowhead)"/>
+        \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
         \\
     , .{
         from_x,
@@ -477,6 +486,7 @@ pub fn renderBezierEdge(
         to_y,
         config.edge_stroke,
         config.edge_width,
+        marker,
     });
 
     // Show control points for debugging
@@ -580,13 +590,18 @@ fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allo
         }
         const has_label = edge_label != null;
 
+        // The last segment determines whether the edge carries an arrowhead.
+        // For single-segment edges the flag comes from the edge itself;
+        // for multi-segment (split through dummies) it comes from the final segment.
+        const is_directed = last_seg.directed;
+
         // Render based on number of points
         if (points.items.len == 2) {
             // Simple direct edge
-            try renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, has_label);
+            try renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, has_label, is_directed);
         } else {
             // Multi-point: render as smooth spline
-            try renderSplinePath(writer, points.items, edge_idx, config, has_label);
+            try renderSplinePath(writer, points.items, edge_idx, config, has_label, is_directed);
         }
 
         // Render edge label (if any segment carries one)
@@ -652,7 +667,7 @@ fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allo
 }
 
 /// Render a simple two-point edge
-fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig, has_label: bool) !void {
+fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig, has_label: bool, directed: bool) !void {
     const from_x = from.x * config.char_width + config.padding;
     const from_y = from.y * config.line_height + config.padding;
     const to_x = to.x * config.char_width + config.padding;
@@ -661,13 +676,21 @@ fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, co
     const color = config.getEdgeColor(edge_idx);
     const arrow_id = if (config.color_edges) edge_idx % config.edge_palette.len else 0;
 
-    // Always emit visible edge as <line>
-    try writer.print(
-        \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-        \\          stroke="{s}" stroke-width="{d}" 
-        \\          marker-end="url(#arrow{d})"/>
-        \\
-    , .{ from_x, from_y, to_x, to_y, color, config.edge_width, arrow_id });
+    // Emit visible edge as <line>, with optional arrow marker
+    if (directed) {
+        try writer.print(
+            \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+            \\          stroke="{s}" stroke-width="{d}" 
+            \\          marker-end="url(#arrow{d})"/>
+            \\
+        , .{ from_x, from_y, to_x, to_y, color, config.edge_width, arrow_id });
+    } else {
+        try writer.print(
+            \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+            \\          stroke="{s}" stroke-width="{d}"/>
+            \\
+        , .{ from_x, from_y, to_x, to_y, color, config.edge_width });
+    }
 
     // Emit hidden text path (always left-to-right for readable text)
     if (config.labels_on_path and has_label) {
@@ -685,7 +708,7 @@ fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, co
 
 /// Render a multi-point path as a smooth cubic bezier spline.
 /// Uses Catmull-Rom to Bezier conversion for smooth curves through all points.
-fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, has_label: bool) !void {
+fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, has_label: bool, directed: bool) !void {
     if (points.len < 2) return;
 
     const color = config.getEdgeColor(edge_idx);
@@ -751,11 +774,18 @@ fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, con
         try writer.writeAll("\"");
     }
 
-    try writer.print(
-        \\ fill="none" stroke="{s}" stroke-width="{d}" 
-        \\          marker-end="url(#arrow{d})"/>
-        \\
-    , .{ color, config.edge_width, arrow_id });
+    if (directed) {
+        try writer.print(
+            \\ fill="none" stroke="{s}" stroke-width="{d}" 
+            \\          marker-end="url(#arrow{d})"/>
+            \\
+        , .{ color, config.edge_width, arrow_id });
+    } else {
+        try writer.print(
+            \\ fill="none" stroke="{s}" stroke-width="{d}"/>
+            \\
+        , .{ color, config.edge_width });
+    }
 
     // Render control points if debugging
     if (config.show_control_points and cp_count > 0) {

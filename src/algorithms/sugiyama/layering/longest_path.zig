@@ -14,7 +14,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const graph_mod = @import("../../core/graph.zig");
+const graph_mod = @import("../../../core/graph.zig");
 const Graph = graph_mod.Graph;
 
 /// Result of layering computation

@@ -31,6 +31,9 @@ const Allocator = std.mem.Allocator;
 const errors = @import("errors.zig");
 pub const ValidationResult = errors.ValidationResult;
 pub const CycleInfo = errors.CycleInfo;
+pub const ValidationFailures = errors.ValidationFailures;
+pub const Requirements = errors.Requirements;
+pub const GraphProperties = errors.GraphProperties;
 
 /// Validate a graph represented by adjacency lists.
 ///
@@ -226,6 +229,120 @@ pub fn hasCycle(
     return false;
 }
 
+/// Count connected components using union-find.
+/// Treats graph as undirected for connectivity check.
+pub fn countComponents(
+    node_count: usize,
+    children: []const std.ArrayListUnmanaged(usize),
+    parents: []const std.ArrayListUnmanaged(usize),
+    allocator: Allocator,
+) !usize {
+    if (node_count == 0) return 0;
+    if (node_count == 1) return 1;
+
+    // Union-Find with path compression
+    var parent_arr = try allocator.alloc(usize, node_count);
+    defer allocator.free(parent_arr);
+
+    // Initialize each node as its own parent
+    for (0..node_count) |i| {
+        parent_arr[i] = i;
+    }
+
+    // Find with path compression
+    const find = struct {
+        fn f(x: usize, parent: []usize) usize {
+            if (parent[x] != x) {
+                parent[x] = f(parent[x], parent);
+            }
+            return parent[x];
+        }
+    }.f;
+
+    // Union edges (treat as undirected)
+    for (0..node_count) |i| {
+        for (children[i].items) |j| {
+            const root_i = find(i, parent_arr);
+            const root_j = find(j, parent_arr);
+            if (root_i != root_j) {
+                parent_arr[root_i] = root_j;
+            }
+        }
+        for (parents[i].items) |j| {
+            const root_i = find(i, parent_arr);
+            const root_j = find(j, parent_arr);
+            if (root_i != root_j) {
+                parent_arr[root_i] = root_j;
+            }
+        }
+    }
+
+    // Count unique roots
+    var component_count: usize = 0;
+    for (0..node_count) |i| {
+        if (find(i, parent_arr) == i) {
+            component_count += 1;
+        }
+    }
+
+    return component_count;
+}
+
+/// Compute all graph properties at once for validation.
+///
+/// This gathers: node count, edge counts (directed/undirected), cycle detection,
+/// and component count into a single struct that can be checked against Requirements.
+///
+/// Parameters:
+/// - `node_count`: Number of nodes in the graph
+/// - `children`: For each node, the indices of its children (directed edges: this -> child)
+/// - `parents`: For each node, the indices of its parents (directed edges: parent -> this)
+/// - `is_directed`: For each edge in children lists, whether it's directed or undirected
+/// - `allocator`: For temporary allocations
+///
+/// The `is_directed` parameter should be indexed in a way that matches the edge order.
+/// If null, all edges are assumed to be directed.
+pub fn computeProperties(
+    node_count: usize,
+    children: []const std.ArrayListUnmanaged(usize),
+    parents: []const std.ArrayListUnmanaged(usize),
+    allocator: Allocator,
+) !GraphProperties {
+    // Count edges (each directed edge appears in children once)
+    var directed_count: usize = 0;
+    for (children) |child_list| {
+        directed_count += child_list.items.len;
+    }
+
+    // Check for cycles
+    const has_cycle = try hasCycle(node_count, children, allocator);
+
+    // Count components
+    const components = try countComponents(node_count, children, parents, allocator);
+
+    return GraphProperties{
+        .node_count = node_count,
+        .directed_edge_count = directed_count,
+        .undirected_edge_count = 0, // TODO: Support mixed graphs when edge metadata is available
+        .has_cycle = has_cycle,
+        .component_count = components,
+    };
+}
+
+/// Check graph against requirements and return all failures.
+///
+/// Convenience function that computes properties and checks requirements in one call.
+pub fn checkRequirements(
+    node_count: usize,
+    children: []const std.ArrayListUnmanaged(usize),
+    parents: []const std.ArrayListUnmanaged(usize),
+    requirements: Requirements,
+    allocator: Allocator,
+) !ValidationFailures {
+    const props = try computeProperties(node_count, children, parents, allocator);
+    return props.checkRequirements(requirements);
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -356,4 +473,151 @@ test "hasCycle: quick check" {
     defer child1.deinit(allocator);
 
     try std.testing.expect(try hasCycle(2, &children_cycle, allocator));
+}
+
+test "countComponents: empty graph" {
+    const allocator = std.testing.allocator;
+    const empty: []const std.ArrayListUnmanaged(usize) = &.{};
+    const count = try countComponents(0, empty, empty, allocator);
+    try std.testing.expectEqual(@as(usize, 0), count);
+}
+
+test "countComponents: single node" {
+    const allocator = std.testing.allocator;
+    const children = [_]std.ArrayListUnmanaged(usize){.{}};
+    const parents = [_]std.ArrayListUnmanaged(usize){.{}};
+    const count = try countComponents(1, &children, &parents, allocator);
+    try std.testing.expectEqual(@as(usize, 1), count);
+}
+
+test "countComponents: connected chain" {
+    const allocator = std.testing.allocator;
+
+    // A -> B -> C (all connected)
+    var child0: std.ArrayListUnmanaged(usize) = .{};
+    defer child0.deinit(allocator);
+    try child0.append(allocator, 1);
+
+    var child1: std.ArrayListUnmanaged(usize) = .{};
+    defer child1.deinit(allocator);
+    try child1.append(allocator, 2);
+
+    const child2: std.ArrayListUnmanaged(usize) = .{};
+
+    const parent0: std.ArrayListUnmanaged(usize) = .{};
+    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    defer parent1.deinit(allocator);
+    try parent1.append(allocator, 0);
+
+    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    defer parent2.deinit(allocator);
+    try parent2.append(allocator, 1);
+
+    const children = [_]std.ArrayListUnmanaged(usize){ child0, child1, child2 };
+    const parents_arr = [_]std.ArrayListUnmanaged(usize){ parent0, parent1, parent2 };
+
+    const count = try countComponents(3, &children, &parents_arr, allocator);
+    try std.testing.expectEqual(@as(usize, 1), count);
+}
+
+test "countComponents: disconnected" {
+    const allocator = std.testing.allocator;
+
+    // A -> B, C (isolated) - two components
+    var child0: std.ArrayListUnmanaged(usize) = .{};
+    defer child0.deinit(allocator);
+    try child0.append(allocator, 1);
+
+    const child1: std.ArrayListUnmanaged(usize) = .{};
+    const child2: std.ArrayListUnmanaged(usize) = .{};
+
+    const parent0: std.ArrayListUnmanaged(usize) = .{};
+    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    defer parent1.deinit(allocator);
+    try parent1.append(allocator, 0);
+
+    const parent2: std.ArrayListUnmanaged(usize) = .{};
+
+    const children = [_]std.ArrayListUnmanaged(usize){ child0, child1, child2 };
+    const parents_arr = [_]std.ArrayListUnmanaged(usize){ parent0, parent1, parent2 };
+
+    const count = try countComponents(3, &children, &parents_arr, allocator);
+    try std.testing.expectEqual(@as(usize, 2), count);
+}
+
+test "computeProperties: basic dag" {
+    const allocator = std.testing.allocator;
+
+    // A -> B -> C
+    var child0: std.ArrayListUnmanaged(usize) = .{};
+    defer child0.deinit(allocator);
+    try child0.append(allocator, 1);
+
+    var child1: std.ArrayListUnmanaged(usize) = .{};
+    defer child1.deinit(allocator);
+    try child1.append(allocator, 2);
+
+    const child2: std.ArrayListUnmanaged(usize) = .{};
+
+    const parent0: std.ArrayListUnmanaged(usize) = .{};
+    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    defer parent1.deinit(allocator);
+    try parent1.append(allocator, 0);
+
+    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    defer parent2.deinit(allocator);
+    try parent2.append(allocator, 1);
+
+    const children = [_]std.ArrayListUnmanaged(usize){ child0, child1, child2 };
+    const parents_arr = [_]std.ArrayListUnmanaged(usize){ parent0, parent1, parent2 };
+
+    const props = try computeProperties(3, &children, &parents_arr, allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), props.node_count);
+    try std.testing.expectEqual(@as(usize, 2), props.directed_edge_count);
+    try std.testing.expectEqual(@as(usize, 0), props.undirected_edge_count);
+    try std.testing.expect(!props.has_cycle);
+    try std.testing.expectEqual(@as(usize, 1), props.component_count);
+    try std.testing.expect(props.isAllDirected());
+    try std.testing.expect(props.isConnected());
+}
+
+test "checkRequirements: sugiyama validation" {
+    const allocator = std.testing.allocator;
+
+    // Valid DAG: A -> B -> C
+    var child0: std.ArrayListUnmanaged(usize) = .{};
+    defer child0.deinit(allocator);
+    try child0.append(allocator, 1);
+
+    var child1: std.ArrayListUnmanaged(usize) = .{};
+    defer child1.deinit(allocator);
+    try child1.append(allocator, 2);
+
+    const child2: std.ArrayListUnmanaged(usize) = .{};
+
+    const parent0: std.ArrayListUnmanaged(usize) = .{};
+    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    defer parent1.deinit(allocator);
+    try parent1.append(allocator, 0);
+
+    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    defer parent2.deinit(allocator);
+    try parent2.append(allocator, 1);
+
+    const children = [_]std.ArrayListUnmanaged(usize){ child0, child1, child2 };
+    const parents_arr = [_]std.ArrayListUnmanaged(usize){ parent0, parent1, parent2 };
+
+    const failures = try checkRequirements(3, &children, &parents_arr, Requirements.sugiyama, allocator);
+    try std.testing.expect(failures.isOk());
+}
+
+test "checkRequirements: empty graph fails sugiyama" {
+    const allocator = std.testing.allocator;
+    const empty: []const std.ArrayListUnmanaged(usize) = &.{};
+
+    const failures = try checkRequirements(0, empty, empty, Requirements.sugiyama, allocator);
+    try std.testing.expect(!failures.isOk());
+    try std.testing.expect(failures.empty);
+    try std.testing.expectEqual(@as(u8, 1), failures.count());
 }

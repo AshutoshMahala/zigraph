@@ -66,14 +66,17 @@ pub const Edge = struct {
     from: usize,
     /// Target node ID
     to: usize,
+    /// Whether this edge is directed (from → to) or undirected (from — to)
+    directed: bool = true,
     /// Optional label (e.g., "depends on")
     label: ?[]const u8 = null,
 };
 
-/// A Directed Acyclic Graph with layout capabilities.
+/// A graph with layout capabilities.
 ///
-/// The graph stores nodes and edges, maintaining adjacency lists
-/// for efficient traversal during layout computation.
+/// Supports directed, undirected, and mixed edges. The graph stores
+/// nodes and edges, maintaining adjacency lists for efficient traversal
+/// during layout computation.
 pub const Graph = struct {
     /// Default maximum number of nodes (security limit to prevent DoS)
     pub const default_max_nodes: usize = 100_000;
@@ -186,45 +189,49 @@ pub const Graph = struct {
         try self.parents.append(self.allocator, .{});
     }
 
-    /// Add an edge between two nodes.
+    // ── Directed edge helpers ────────────────────────────────────────
+
+    /// Add a directed edge from → to.
     ///
     /// Both nodes must already exist. Returns error if either node is missing.
     /// Returns error.OutOfMemory if max_edges limit would be exceeded.
-    pub fn addEdge(self: *Self, from: usize, to: usize) !void {
-        const from_idx = self.id_to_index.get(from) orelse return error.NodeNotFound;
-        const to_idx = self.id_to_index.get(to) orelse return error.NodeNotFound;
-
-        // Security: enforce max edge limit to prevent DoS (0 = unlimited)
-        if (self.max_edges > 0 and self.edges.items.len >= self.max_edges) {
-            return error.OutOfMemory;
-        }
-
-        try self.edges.append(self.allocator, .{ .from = from, .to = to });
-
-        // Update adjacency lists
-        try self.children.items[from_idx].append(self.allocator, to_idx);
-        try self.parents.items[to_idx].append(self.allocator, from_idx);
+    pub fn addDiEdge(self: *Self, from: usize, to: usize) !void {
+        try self.addEdgeInternal(from, to, true, null);
     }
 
-    /// Add a labeled edge between two nodes.
+    /// Add a directed edge with a label.
+    pub fn addDiEdgeLabeled(self: *Self, from: usize, to: usize, label: []const u8) !void {
+        try self.addEdgeInternal(from, to, true, label);
+    }
+
+    // ── Undirected edge helpers ────────────────────────────────────
+
+    /// Add an undirected edge between a and b.
     ///
-    /// The label is displayed along the edge in rendered output (e.g., `"depends on"`).
+    /// Internally stores a single edge record with `directed = false`.
     /// Both nodes must already exist.
-    pub fn addEdgeLabeled(self: *Self, from: usize, to: usize, label: []const u8) !void {
-        const from_idx = self.id_to_index.get(from) orelse return error.NodeNotFound;
-        const to_idx = self.id_to_index.get(to) orelse return error.NodeNotFound;
-
-        if (self.max_edges > 0 and self.edges.items.len >= self.max_edges) {
-            return error.OutOfMemory;
-        }
-
-        try self.edges.append(self.allocator, .{ .from = from, .to = to, .label = label });
-
-        try self.children.items[from_idx].append(self.allocator, to_idx);
-        try self.parents.items[to_idx].append(self.allocator, from_idx);
+    pub fn addUnDiEdge(self: *Self, a: usize, b: usize) !void {
+        try self.addEdgeInternal(a, b, false, null);
     }
 
-    /// Add an edge, auto-creating missing nodes with default labels.
+    /// Add an undirected edge with a label.
+    pub fn addUnDiEdgeLabeled(self: *Self, a: usize, b: usize, label: []const u8) !void {
+        try self.addEdgeInternal(a, b, false, label);
+    }
+
+    // ── Backward-compatible aliases ────────────────────────────────
+
+    /// Add a directed edge (alias for `addDiEdge`).
+    pub fn addEdge(self: *Self, from: usize, to: usize) !void {
+        try self.addDiEdge(from, to);
+    }
+
+    /// Add a directed labeled edge (alias for `addDiEdgeLabeled`).
+    pub fn addEdgeLabeled(self: *Self, from: usize, to: usize, label: []const u8) !void {
+        try self.addDiEdgeLabeled(from, to, label);
+    }
+
+    /// Add a directed edge, auto-creating missing nodes with default labels.
     ///
     /// Nodes are created with their ID as the label (e.g., node 42 → label "42").
     /// The label is heap-allocated and freed when the graph is deinitialized.
@@ -242,7 +249,37 @@ pub const Graph = struct {
             try self.addNodeOwned(to, label);
         }
 
-        try self.addEdge(from, to);
+        try self.addDiEdge(from, to);
+    }
+
+    // ── Core edge insertion ────────────────────────────────────────
+
+    /// Internal: single code-path for all edge additions.
+    fn addEdgeInternal(
+        self: *Self,
+        from: usize,
+        to: usize,
+        directed: bool,
+        label: ?[]const u8,
+    ) !void {
+        const from_idx = self.id_to_index.get(from) orelse return error.NodeNotFound;
+        const to_idx = self.id_to_index.get(to) orelse return error.NodeNotFound;
+
+        // Security: enforce max edge limit to prevent DoS (0 = unlimited)
+        if (self.max_edges > 0 and self.edges.items.len >= self.max_edges) {
+            return error.OutOfMemory;
+        }
+
+        try self.edges.append(self.allocator, .{
+            .from = from,
+            .to = to,
+            .directed = directed,
+            .label = label,
+        });
+
+        // Update adjacency lists
+        try self.children.items[from_idx].append(self.allocator, to_idx);
+        try self.parents.items[to_idx].append(self.allocator, from_idx);
     }
 
     /// Allocate a label string for an ID (e.g., 42 → "42")

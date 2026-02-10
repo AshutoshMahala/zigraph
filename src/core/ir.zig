@@ -156,6 +156,8 @@ pub fn LayoutEdge(comptime Coord: type) type {
         path: EdgePath(Coord),
         /// Edge index (for consistent coloring)
         edge_index: usize,
+        /// Whether this edge is directed (arrow) or undirected (no arrow)
+        directed: bool = true,
         /// Optional edge label text (e.g., "depends on")
         label: ?[]const u8 = null,
         /// Computed label X position (set during layout)
@@ -381,6 +383,7 @@ pub fn LayoutIR(comptime Coord: type) type {
                     .to_y = coordCast(Target, Coord, edge.to_y),
                     .path = converted_path,
                     .edge_index = edge.edge_index,
+                    .directed = edge.directed,
                     .label = edge.label,
                     .label_x = coordCast(Target, Coord, edge.label_x),
                     .label_y = coordCast(Target, Coord, edge.label_y),

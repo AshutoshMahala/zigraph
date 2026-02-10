@@ -9,9 +9,9 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const graph_mod = @import("../../core/graph.zig");
+const graph_mod = @import("../../../core/graph.zig");
 const Graph = graph_mod.Graph;
-const ir_mod = @import("../../core/ir.zig");
+const ir_mod = @import("../../../core/ir.zig");
 const LayoutEdge = ir_mod.LayoutEdge(usize);
 const EdgePath = ir_mod.EdgePath(usize);
 const LayoutNode = ir_mod.LayoutNode(usize);
@@ -83,6 +83,7 @@ pub fn route(
             .to_y = to_node.y, // Top of target node
             .path = path,
             .edge_index = edge_index,
+            .directed = edge.directed,
         });
     }
 
@@ -202,6 +203,7 @@ pub fn routeWithDummies(
             .to_y = to_y_edge,
             .path = path,
             .edge_index = edge_index,
+            .directed = edge.directed,
         });
     }
 

@@ -17,46 +17,34 @@
   <!-- Edges (rendered first, under nodes) -->
   <g id="edges">
     <path d="M 300 40 L 300 60 L 60 200" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
     <text x="180" y="120" font-family="monospace" font-size="12"
           fill="#666666" text-anchor="middle" dy="-6" dominant-baseline="auto">"spawn"</text>
     <path d="M 300 40 L 300 80 L 180 200" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
     <line x1="300" y1="40" x2="300" y2="200" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
+          stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
     <path d="M 300 40 L 300 100 L 420 200" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
     <path d="M 300 40 L 300 120 L 540 200" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <path d="M 180 220 L 180 240 L 320 380" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <path d="M 300 220 L 300 260 L 320 380" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <path d="M 420 220 L 420 280 L 320 380" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <path d="M 540 220 L 540 300 L 320 380" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <path d="M 60 220 L 60 320 L 230 380" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <text x="145" y="300" font-family="monospace" font-size="12"
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <path d="M 180 220 L 180 240 L 300 380" 
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line x1="300" y1="220" x2="300" y2="380" 
+          stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <path d="M 420 220 L 420 260 L 300 380" 
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <path d="M 540 220 L 540 280 L 300 380" 
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <path d="M 60 220 L 60 300 L 140 380" 
+          fill="none" stroke="#666666" stroke-width="2"/>
+    <text x="100" y="300" font-family="monospace" font-size="12"
           fill="#666666" text-anchor="middle" dy="-6" dominant-baseline="auto">"skip"</text>
-    <path d="M 230 400 L 230 420 L 300 560" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <path d="M 320 400 L 320 440 L 300 560" 
-          fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrowhead)"/>
-    <text x="310" y="480" font-family="monospace" font-size="12"
+    <path d="M 140 400 L 140 420 L 300 560" 
+          fill="none" stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line x1="300" y1="400" x2="300" y2="560" 
+          stroke="#666666" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <text x="300" y="480" font-family="monospace" font-size="12"
           fill="#666666" text-anchor="middle" dy="-6" dominant-baseline="auto">"merge"</text>
   </g>
 
@@ -98,10 +86,10 @@
     <text x="540" y="214" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task D</text>
-    <rect x="280" y="380" width="80" height="20" 
+    <rect x="260" y="380" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="320" y="394" 
+    <text x="300" y="394" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task F</text>
     <rect x="260" y="560" width="80" height="20" 
@@ -110,7 +98,7 @@
     <text x="300" y="574" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Output</text>
-    <circle cx="235" cy="390" r="4" 
+    <circle cx="145" cy="390" r="4" 
             fill="#ff6600" stroke="#cc4400" stroke-width="1"/>
   </g>
 

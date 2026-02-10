@@ -15,29 +15,28 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         LAYOUT CONFIG                                   │
+│                       ALGORITHM DISPATCH                                │
 │                                                                         │
-│   LayoutConfig {                                                        │
-│       .layering = .longest_path,  // or .network_simplex / .network_simplex_fast                                        │
-│       .crossing_reducers = &crossing.balanced,  // preset or custom     │
-│       .positioning = .brandes_kopf,                                     │
-│       .routing = .direct,                                               │
+│   Algorithm = union(enum) {                                             │
+│       sugiyama,                    // DAG hierarchical layout           │
+│       fruchterman_reingold,        // Force-directed O(V²)              │
+│       fruchterman_reingold_fast,   // Barnes-Hut O(V log V)             │
 │   }                                                                     │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         ALGORITHM LAYER                                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │  Layering   │  │  Crossing   │  │ Positioning │  │   Routing   │     │
-│  │             │  │  Reduction  │  │             │  │             │     │
-│  │ longest_path│  │ median      │  │ simple      │  │ direct      │     │
-│  │ net_simplex │  │ adj_exchange│  │ brandes_kopf│  │ spline      │     │
-│  │ virtual     │  │ reducers    │  │             │  │             │     │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘     │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
+                        ┌───────────┴───────────┐
+                        ▼                       ▼
+┌──────────────────────────────────┐ ┌────────────────────────────────────┐
+│      SUGIYAMA PIPELINE           │ │     FORCE-DIRECTED (FDG)           │
+│  ┌──────────┐  ┌──────────────┐  │ │                                    │
+│  │ Layering │  │  Crossing    │  │ │  Q16.16 fixed-point arithmetic     │
+│  │  lp / ns │  │  med / ae    │  │ │  Quadtree (Barnes-Hut θ=0.8)       │
+│  ├──────────┤  ├──────────────┤  │ │  Fruchterman-Reingold simulation   │
+│  │Positioning│ │  Routing     │  │ │  300 iterations → grid coords      │
+│  │  bk / s  │  │ direct / sp  │  │ │                                    │
+│  └──────────┘  └──────────────┘  │ └────────────────────────────────────┘
+└──────────────────────────────────┘
+                        ┌───────────┴───────────┐
+                        ▼                       ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    ★ INTERMEDIATE REPRESENTATION ★                      │
 │                                                                         │
@@ -45,6 +44,7 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 │                                                                         │
 │   This is the STABLE CONTRACT between layout and rendering.             │
 │   Supports both real and dummy nodes for multi-level edge routing.      │
+│   Edges carry a `directed` flag for per-edge arrow control.             │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -52,7 +52,7 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 │                          RENDER LAYER                                   │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
 │  │   Unicode   │  │     SVG     │  │    JSON     │  │   Colors    │     │
-│  │ (terminal)  │  │  (vector)   │  │   (IR)      │  │ (palettes)  │     │
+│  │ (terminal)  │  │  (vector)   │  │ (IR ⇄ JSON) │  │ (palettes)  │     │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -63,42 +63,60 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 zigraph/
 ├── src/
 │   ├── root.zig              # Library entry point, re-exports, layout()
+│   ├── presets.zig           # Curated layout configurations (sugiyama.*, fdg.*)
 │   ├── comptime_graph.zig    # ComptimeGraph for zero-runtime-cost diagrams
 │   ├── fuzz_tests.zig        # Property-based and security tests
 │   │
 │   ├── core/
 │   │   ├── graph.zig         # Graph, Node, Edge, Options (with resource limits)
 │   │   ├── ir.zig            # LayoutIR, LayoutNode, LayoutEdge, EdgePath
-│   │   ├── validation.zig    # Cycle detection, graph validation
-│   │   └── errors.zig        # WDP Level 0 error codes
+│   │   ├── validation.zig    # Cycle detection, graph validation, Requirements
+│   │   └── errors.zig        # WDP Level 0 error codes, ValidationFailures
 │   │
 │   ├── algorithms/
-│   │   ├── layering/
-│   │   │   ├── longest_path.zig      # O(V+E) layer assignment
-│   │   │   ├── network_simplex.zig   # Optimal layering (Gansner et al. 1993)
-│   │   │   └── virtual.zig           # Dummy node insertion for long edges
+│   │   ├── interface.zig              # LayoutAlgorithm contract for BYOA
 │   │   │
-│   │   ├── crossing/
-│   │   │   ├── median.zig         # Median heuristic crossing reduction
-│   │   │   ├── adjacent_exchange.zig  # Local optimization refinement
-│   │   │   └── reducers.zig       # Preset pipelines (fast, balanced, quality)
+│   │   ├── sugiyama/                  # Hierarchical DAG layout
+│   │   │   ├── layering/
+│   │   │   │   ├── longest_path.zig      # O(V+E) layer assignment
+│   │   │   │   ├── network_simplex.zig   # Optimal layering (Gansner et al. 1993)
+│   │   │   │   └── virtual.zig           # Dummy node insertion for long edges
+│   │   │   │
+│   │   │   ├── crossing/
+│   │   │   │   ├── median.zig         # Median heuristic crossing reduction
+│   │   │   │   ├── adjacent_exchange.zig  # Local optimization refinement
+│   │   │   │   └── reducers.zig       # Preset pipelines (fast, balanced, quality)
+│   │   │   │
+│   │   │   ├── positioning/
+│   │   │   │   ├── simple.zig         # Left-to-right packing
+│   │   │   │   ├── brandes_kopf.zig   # Centered parent/child alignment
+│   │   │   │   └── common.zig         # Shared positioning utilities
+│   │   │   │
+│   │   │   └── routing/
+│   │   │       ├── direct.zig         # Manhattan routing (straight + corners)
+│   │   │       └── spline.zig         # Catmull-Rom spline generation
 │   │   │
-│   │   ├── positioning/
-│   │   │   ├── simple.zig         # Left-to-right packing
-│   │   │   ├── brandes_kopf.zig   # Centered parent/child alignment
-│   │   │   └── common.zig         # Shared positioning utilities
+│   │   ├── shared/                    # Reusable components for all algorithms
+│   │   │   ├── fixed_point.zig        # Q16.16 fixed-point arithmetic
+│   │   │   ├── quadtree.zig           # Barnes-Hut spatial acceleration
+│   │   │   ├── common.zig             # PositionResult, Convergence, Initializer
+│   │   │   └── forces/                # Composable force primitives
+│   │   │       ├── mod.zig            # Force re-exports
+│   │   │       ├── repulsion.zig      # Coulomb-like: k²/d
+│   │   │       ├── attraction.zig     # Spring-like: d/k
+│   │   │       └── gravity.zig        # Center pull (for FA2)
 │   │   │
-│   │   └── routing/
-│   │       ├── direct.zig         # Manhattan routing (straight + corners)
-│   │       └── spline.zig         # Catmull-Rom spline generation
+│   │   └── fruchterman_reingold/      # FR force-directed layout
+│   │       └── mod.zig                # Standard O(N²) + Fast O(N log N)
 │   │
 │   └── render/
 │       ├── unicode.zig        # Terminal output with box drawing
 │       ├── svg.zig            # SVG vector output with spline support
-│       ├── json.zig           # JSON IR export (for external tools)
+│       ├── json.zig           # JSON IR export/import (for external tools)
 │       └── colors.zig         # Color palettes (Radix, vibrant, etc.)
 │
 ├── examples/                  # Usage examples
+├── docs/                      # Design documents and roadmaps
 ├── build.zig                  # Zig build configuration
 ├── build.zig.zon              # Package manifest
 ├── README.md
@@ -197,6 +215,7 @@ pub const LayoutEdge = struct {
     to_y: usize,
     path: EdgePath,
     edge_index: usize,                    // For consistent coloring
+    directed: bool = true,                // Arrow at target (false = undirected)
 };
 
 pub const LayoutIR = struct {
@@ -239,11 +258,59 @@ const ir = try zigraph.layout(&graph, allocator, .{
 - `quality`: 8 median + 4 adjacent exchange + 2 polish passes (best results)
 - `none`: No reduction (for debugging)
 
+### 6. Layout Presets
+
+Curated configurations for common use cases:
+
+```zig
+// Use a preset (recommended)
+const ir = try zigraph.layout(&graph, allocator, zigraph.presets.sugiyama.standard());
+
+// Presets include validation requirements
+const preset = zigraph.presets.sugiyama.preset(.quality);
+// preset.requirements = { .non_empty = true, .acyclic = true, .all_directed = true }
+```
+
+| Preset | Layering | Crossing | Positioning | Routing | Requirements |
+|--------|----------|----------|-------------|---------|---------------|
+| `sugiyama.standard()` | longest_path | balanced | none | direct | non_empty, acyclic, all_directed |
+| `sugiyama.fast()` | longest_path | fast | none | direct | non_empty, acyclic, all_directed |
+| `sugiyama.quality()` | network_simplex_fast | quality | none | spline | non_empty, acyclic, all_directed |
+| `fdg_presets.standard()` | — | — | — | direct | non_empty |
+| `fdg_presets.fast()` | — | — | — | direct | non_empty |
+
+### 7. Validation System
+
+Bitset-based validation for reporting multiple failures:
+
+```zig
+// ValidationFailures is a packed struct(u8)
+const failures = try zigraph.validation.checkRequirements(
+    graph.nodeCount(), 
+    graph.children, 
+    graph.parents, 
+    zigraph.Requirements.sugiyama, 
+    allocator
+);
+
+if (!failures.isOk()) {
+    // Check individual failures
+    if (failures.empty) { /* graph has no nodes */ }
+    if (failures.has_cycle) { /* graph contains cycles */ }
+    if (failures.has_undirected_edges) { /* graph has undirected edges */ }
+    
+    // Get all WDP error codes
+    var codes_buf: [5][]const u8 = undefined;
+    const codes = failures.codes(&codes_buf);
+    // codes = ["E.Graph.Node.001", "E.Graph.Dag.003", ...]
+}
+```
+
 ---
 
 ## Sugiyama Algorithm Implementation
 
-The library implements the Sugiyama layered graph layout:
+The library implements the Sugiyama layered graph layout for DAGs:
 
 ### Phase 1: Cycle Detection
 - DFS-based cycle detection in `validation.zig`
@@ -268,6 +335,32 @@ The library implements the Sugiyama layered graph layout:
 ### Phase 5: Edge Routing
 - **Direct**: Manhattan routing with corner detection
 - **Spline**: Catmull-Rom/Bezier curves through waypoints
+
+---
+
+## Fruchterman-Reingold (Force-Directed) Implementation
+
+For general (non-DAG) graphs, zigraph provides the Fruchterman-Reingold
+force-directed layout algorithm:
+
+### Arithmetic
+- All computation uses **Q16.16 fixed-point** (`i32`) for bit-exact determinism
+  across platforms.  See `src/algorithms/shared/fixed_point.zig`.
+
+### FR Standard (`fruchterman_reingold`)
+- O(V²) per iteration — computes all-pairs repulsion
+- Good for graphs up to ~500 nodes
+
+### FR-Fast (`fruchterman_reingold_fast`)
+- Uses a **Barnes-Hut quadtree** (θ = 0.8) for O(V log V) repulsion
+- Scales to 5000+ nodes with 37× speedup over standard at that size
+- See `src/algorithms/shared/quadtree.zig`
+
+### Integration
+- Selected via `Algorithm.fruchterman_reingold` / `.fruchterman_reingold_fast`
+  in `LayoutConfig`
+- FDG positions are scaled to integer grid coordinates and routed through
+  the same `LayoutIR` / renderer pipeline as Sugiyama
 
 ---
 
@@ -326,7 +419,7 @@ All limits return `error.OutOfMemory` when exceeded.
 - **Property-based tests**: Layout invariants verified in `fuzz_tests.zig`
 - **Cycle detection tests**: Edge cases including disjoint components
 - **Security tests**: Resource limit verification
-- **88 tests total** as of v0.1.0
+- **168 tests total** as of v0.2.0 (presets, validation, FDG, directed/undirected)
 
 ---
 
@@ -341,6 +434,8 @@ All limits return `error.OutOfMemory` when exceeded.
 | Adjacent exchange | O(L * N^2 * passes) | L=layers, N=nodes/layer |
 | Simple positioning | O(V) | Linear scan |
 | Brandes-Kopf | O(V + E) | Two passes |
+| FR Standard | O(V² · iters) | 300 iterations default |
+| FR-Fast (Barnes-Hut) | O(V log V · iters) | θ=0.8, 300 iterations |
 | Unicode render | O(W * H) | Grid-based |
 | SVG render | O(V + E) | Path generation |
 
@@ -348,18 +443,38 @@ All limits return `error.OutOfMemory` when exceeded.
 
 ## Error Codes (WDP Level 0)
 
-zigraph uses Waddling Diagnostic Protocol compliant error codes:
+zigraph uses Waddling Diagnostic Protocol compliant error codes.
+Codes are composed at comptime from semantic building blocks:
+
+```zig
+// Building blocks
+const E = "E";           // Severity: Error
+const Graph = "Graph";   // Component
+const Node = "Node";     // Primary
+const MISSING = "001";   // Sequence (WDP Part 6)
+
+// Composed at comptime
+pub const EMPTY_GRAPH = code(E, Graph, Node, MISSING); // → "E.Graph.Node.001"
+```
+
+### Error Code Reference
 
 | Code | Meaning |
-|------|---------|
+|------|---------||
 | E.Graph.Node.001 | Empty graph (MISSING) |
 | E.Graph.Node.021 | Node not found (NOT_FOUND) |
+| E.Graph.Edge.002 | Graph has undirected/directed edges (MISMATCH) |
 | E.Graph.Edge.003 | Self-loop invalid (INVALID) |
 | E.Graph.Edge.007 | Duplicate edge (DUPLICATE) |
 | E.Graph.Dag.003 | Cycle detected (INVALID) |
+| E.Graph.Component.003 | Graph disconnected (INVALID) |
 | E.Layout.Algo.003 | Layout failed (INVALID) |
 | E.Layout.Algo.026 | Out of memory (EXHAUSTED) |
 | E.Layout.Reducer.001 | Reducer lost node (MISSING) |
 | E.Layout.Reducer.002 | Reducer node count mismatch (MISMATCH) |
 | E.Layout.Reducer.003 | Reducer corrupted levels (INVALID) |
 | E.Layout.Reducer.007 | Reducer duplicate node (DUPLICATE) |
+| E.Json.*.001 | JSON field missing (MISSING) |
+| E.Json.*.002 | JSON field type mismatch (MISMATCH) |
+| E.Json.*.003 | JSON field invalid (INVALID) |
+| E.Json.*.009 | JSON version unsupported (UNSUPPORTED) |

@@ -21,11 +21,11 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const ir_mod = @import("../../core/ir.zig");
+const ir_mod = @import("../../../core/ir.zig");
 const LayoutEdge = ir_mod.LayoutEdge(usize);
 const EdgePath = ir_mod.EdgePath(usize);
 const LayoutNode = ir_mod.LayoutNode(usize);
-const graph_mod = @import("../../core/graph.zig");
+const graph_mod = @import("../../../core/graph.zig");
 const Graph = graph_mod.Graph;
 const virtual_mod = @import("../layering/virtual.zig");
 const DummyPositions = virtual_mod.DummyPositions;
@@ -100,6 +100,7 @@ pub fn route(
                 },
             },
             .edge_index = edge_idx,
+            .directed = edge.directed,
         });
     }
 
@@ -161,6 +162,7 @@ pub fn routeWithDummies(
                     },
                 },
                 .edge_index = edge_idx,
+                .directed = edge.directed,
             });
         } else {
             // No dummies - standard spline
@@ -194,6 +196,7 @@ pub fn routeWithDummies(
                     },
                 },
                 .edge_index = edge_idx,
+                .directed = edge.directed,
             });
         }
     }

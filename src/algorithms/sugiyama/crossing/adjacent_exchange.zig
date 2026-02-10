@@ -8,7 +8,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const graph_mod = @import("../../core/graph.zig");
+const graph_mod = @import("../../../core/graph.zig");
 const Graph = graph_mod.Graph;
 const virtual_mod = @import("../layering/virtual.zig");
 const VirtualLevels = virtual_mod.VirtualLevels;

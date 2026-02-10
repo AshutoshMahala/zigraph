@@ -32,7 +32,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const graph_mod = @import("../../core/graph.zig");
+const graph_mod = @import("../../../core/graph.zig");
 const Graph = graph_mod.Graph;
 const longest_path = @import("longest_path.zig");
 pub const LayerAssignment = longest_path.LayerAssignment;

@@ -228,6 +228,24 @@ pub fn build(b: *std.Build) void {
     const run_config_step = b.step("run-config", "Run the config demo example");
     run_config_step.dependOn(&run_config.step);
 
+    // Presets demo example
+    const presets_example = b.addExecutable(.{
+        .name = "presets_demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/presets_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(presets_example);
+
+    const run_presets = b.addRunArtifact(presets_example);
+    const run_presets_step = b.step("run-presets", "Run the presets demo example");
+    run_presets_step.dependOn(&run_presets.step);
+
     // JSON export example
     const json_example = b.addExecutable(.{
         .name = "json_export",
@@ -359,4 +377,42 @@ pub fn build(b: *std.Build) void {
     const run_generate_assets = b.addRunArtifact(generate_assets_exe);
     const run_generate_assets_step = b.step("generate-assets", "Generate README hero assets (assets/)");
     run_generate_assets_step.dependOn(&run_generate_assets.step);
+
+    // Force-directed graph layout example
+    const fdg_example = b.addModule("fdg_example", .{
+        .root_source_file = b.path("examples/fdg_basic.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const fdg_exe = b.addExecutable(.{
+        .name = "fdg_basic",
+        .root_module = fdg_example,
+    });
+    b.installArtifact(fdg_exe);
+
+    const run_fdg = b.addRunArtifact(fdg_exe);
+    const run_fdg_step = b.step("run-fdg", "Run force-directed graph layout example");
+    run_fdg_step.dependOn(&run_fdg.step);
+
+    // FDG benchmark
+    const fdg_bench_example = b.addModule("fdg_bench_example", .{
+        .root_source_file = b.path("examples/fdg_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const fdg_bench_exe = b.addExecutable(.{
+        .name = "fdg_benchmark",
+        .root_module = fdg_bench_example,
+    });
+    b.installArtifact(fdg_bench_exe);
+
+    const run_fdg_bench = b.addRunArtifact(fdg_bench_exe);
+    const run_fdg_bench_step = b.step("run-fdg-bench", "Run FDG performance benchmarks");
+    run_fdg_bench_step.dependOn(&run_fdg_bench.step);
 }
