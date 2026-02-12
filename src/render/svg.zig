@@ -174,6 +174,11 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     } else {
         // Render each edge segment individually
         for (layout.edges.items) |edge| {
+            // Self-loops: render a loop arc
+            if (edge.reversed and edge.from_id == edge.to_id) {
+                try renderSelfLoop(writer, &edge, edge.edge_index, config, layout.nodes.items);
+                continue;
+            }
             try renderEdge(writer, edge, config);
         }
     }
@@ -267,22 +272,39 @@ fn renderNode(writer: anytype, node: LayoutNode, config: SvgConfig) !void {
 }
 
 fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
-    const from_x = edge.from_x * config.char_width + config.padding;
-    const from_y = edge.from_y * config.line_height + config.padding;
-    const to_x = edge.to_x * config.char_width + config.padding;
-    const to_y = edge.to_y * config.line_height + config.padding;
+    // For reversed (back) edges, swap from/to coordinates so the SVG path
+    // goes bottom→top. This makes marker-end point upward (correct semantic
+    // direction), while the visual route remains the same.
+    const from_x = if (edge.reversed)
+        edge.to_x * config.char_width + config.padding
+    else
+        edge.from_x * config.char_width + config.padding;
+    const from_y = if (edge.reversed)
+        edge.to_y * config.line_height + config.padding
+    else
+        edge.from_y * config.line_height + config.padding;
+    const to_x = if (edge.reversed)
+        edge.from_x * config.char_width + config.padding
+    else
+        edge.to_x * config.char_width + config.padding;
+    const to_y = if (edge.reversed)
+        edge.from_y * config.line_height + config.padding
+    else
+        edge.to_y * config.line_height + config.padding;
 
     const marker: []const u8 = if (edge.directed)
         " marker-end=\"url(#arrowhead)\""
     else
         "";
 
+    const dash: []const u8 = if (edge.reversed) " stroke-dasharray=\"6,3\"" else "";
+
     switch (edge.path) {
         .direct => {
             // Simple straight line with optional arrow
             try writer.print(
                 \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-                \\          stroke="{s}" stroke-width="{d}"{s}/>
+                \\          stroke="{s}" stroke-width="{d}"{s}{s}/>
                 \\
             , .{
                 from_x,
@@ -291,15 +313,39 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                dash,
                 marker,
             });
         },
         .corner => |c| {
-            // L-shaped path
+            // L-shaped path (reversed edges: draw bottom→top for correct arrow)
             const corner_y = c.horizontal_y * config.line_height + config.padding;
+            if (edge.reversed) {
+                // Reverse path: to → corner → from (bottom→top)
+                const real_from_x = edge.from_x * config.char_width + config.padding;
+                const real_from_y = edge.from_y * config.line_height + config.padding;
+                const real_to_x = edge.to_x * config.char_width + config.padding;
+                const real_to_y = edge.to_y * config.line_height + config.padding;
+                try writer.print(
+                    \\    <path d="M {d} {d} L {d} {d} L {d} {d}" 
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
+                    \\
+                , .{
+                    real_to_x,
+                    real_to_y,
+                    real_to_x,
+                    corner_y,
+                    real_from_x,
+                    real_from_y,
+                    config.edge_stroke,
+                    config.edge_width,
+                    dash,
+                    marker,
+                });
+            } else {
             try writer.print(
                 \\    <path d="M {d} {d} L {d} {d} L {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
                 \\
             , .{
                 from_x,
@@ -310,8 +356,10 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                dash,
                 marker,
             });
+            }
         },
         .side_channel => |sc| {
             // Side channel routing
@@ -320,7 +368,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
             const end_y = sc.end_y * config.line_height + config.padding;
             try writer.print(
                 \\    <path d="M {d} {d} L {d} {d} L {d} {d} L {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
                 \\
             , .{
                 from_x,
@@ -333,11 +381,29 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                dash,
                 marker,
             });
         },
         .multi_segment => |ms| {
-            // Path through waypoints
+            // Path through waypoints (reversed edges: reverse order for correct arrow)
+            if (edge.reversed) {
+                const real_from_x = edge.from_x * config.char_width + config.padding;
+                const real_from_y = edge.from_y * config.line_height + config.padding;
+                const real_to_x = edge.to_x * config.char_width + config.padding;
+                const real_to_y = edge.to_y * config.line_height + config.padding;
+                try writer.print("    <path d=\"M {d} {d}", .{ real_to_x, real_to_y });
+                // Waypoints in reverse order
+                var wi: usize = ms.waypoints.items.len;
+                while (wi > 0) {
+                    wi -= 1;
+                    const wp = ms.waypoints.items[wi];
+                    const wx = wp.x * config.char_width + config.padding;
+                    const wy = wp.y * config.line_height + config.padding;
+                    try writer.print(" L {d} {d}", .{ wx, wy });
+                }
+                try writer.print(" L {d} {d}\"", .{ real_from_x, real_from_y });
+            } else {
             try writer.print("    <path d=\"M {d} {d}", .{ from_x, from_y });
             for (ms.waypoints.items) |wp| {
                 const wx = wp.x * config.char_width + config.padding;
@@ -345,12 +411,14 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 try writer.print(" L {d} {d}", .{ wx, wy });
             }
             try writer.print(" L {d} {d}\"", .{ to_x, to_y });
+            }
             try writer.print(
-                \\ fill="none" stroke="{s}" stroke-width="{d}"{s}/>
+                \\ fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
                 \\
             , .{
                 config.edge_stroke,
                 config.edge_width,
+                dash,
                 marker,
             });
         },
@@ -363,7 +431,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
 
             try writer.print(
                 \\    <path d="M {d} {d} C {d} {d}, {d} {d}, {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
                 \\
             , .{
                 from_x,
@@ -376,6 +444,7 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 to_y,
                 config.edge_stroke,
                 config.edge_width,
+                dash,
                 marker,
             });
 
@@ -557,6 +626,12 @@ fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allo
 
         if (segments.items.len == 0) continue;
 
+        // Self-loops: render a loop arc to the right of the node
+        if (segments.items[0].reversed and segments.items[0].from_id == segments.items[0].to_id) {
+            try renderSelfLoop(writer, &segments.items[0], edge_idx, config, layout.nodes.items);
+            continue;
+        }
+
         // Sort segments by from_y (top to bottom)
         std.mem.sort(LayoutEdge, segments.items, {}, struct {
             fn lessThan(_: void, a: LayoutEdge, b: LayoutEdge) bool {
@@ -590,18 +665,35 @@ fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allo
         }
         const has_label = edge_label != null;
 
+        // Check if any segment is marked as reversed (back edge)
+        var is_reversed = false;
+        for (segments.items) |seg| {
+            if (seg.reversed) {
+                is_reversed = true;
+                break;
+            }
+        }
+
         // The last segment determines whether the edge carries an arrowhead.
-        // For single-segment edges the flag comes from the edge itself;
-        // for multi-segment (split through dummies) it comes from the final segment.
-        const is_directed = last_seg.directed;
+        // For reversed edges, the directed flag was moved to the first segment
+        // (since the arrow points at the semantic target, which is at the top).
+        const first_seg = segments.items[0];
+        const is_directed = if (is_reversed) first_seg.directed else last_seg.directed;
+
+        // For reversed (back) edges, reverse the waypoint order so the SVG path
+        // goes bottom→top. This makes marker-end point upward (the correct
+        // semantic direction for back edges).
+        if (is_reversed) {
+            std.mem.reverse(Point, points.items);
+        }
 
         // Render based on number of points
         if (points.items.len == 2) {
             // Simple direct edge
-            try renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, has_label, is_directed);
+            try renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, has_label, is_directed, is_reversed);
         } else {
             // Multi-point: render as smooth spline
-            try renderSplinePath(writer, points.items, edge_idx, config, has_label, is_directed);
+            try renderSplinePath(writer, points.items, edge_idx, config, has_label, is_directed, is_reversed);
         }
 
         // Render edge label (if any segment carries one)
@@ -656,18 +748,21 @@ fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allo
                     accum += slen;
                 }
 
+                // For reversed edges, offset label to the right of the bezier arc
+                const label_offset_x: f64 = if (is_reversed) 20.0 else 0.0;
+
                 try writer.print(
                     \\    <text x="{d:.0}" y="{d:.0}" font-family="monospace" font-size="12"
                     \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto">"{s}"</text>
                     \\
-                , .{ mx, my, stroke_color, label });
+                , .{ mx + label_offset_x, my, stroke_color, label });
             }
         }
     }
 }
 
 /// Render a simple two-point edge
-fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig, has_label: bool, directed: bool) !void {
+fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig, has_label: bool, directed: bool, reversed: bool) !void {
     const from_x = from.x * config.char_width + config.padding;
     const from_y = from.y * config.line_height + config.padding;
     const to_x = to.x * config.char_width + config.padding;
@@ -675,21 +770,48 @@ fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, co
 
     const color = config.getEdgeColor(edge_idx);
     const arrow_id = if (config.color_edges) edge_idx % config.edge_palette.len else 0;
+    const dash: []const u8 = if (reversed) " stroke-dasharray=\"6,3\"" else "";
 
-    // Emit visible edge as <line>, with optional arrow marker
-    if (directed) {
-        try writer.print(
-            \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-            \\          stroke="{s}" stroke-width="{d}" 
-            \\          marker-end="url(#arrow{d})"/>
-            \\
-        , .{ from_x, from_y, to_x, to_y, color, config.edge_width, arrow_id });
+    if (reversed) {
+        // Reversed edges arc to the right to avoid overlapping the forward edge.
+        // Use a cubic bezier with control points offset to the right.
+        const fx: f64 = @floatFromInt(from_x);
+        const fy: f64 = @floatFromInt(from_y);
+        const tx: f64 = @floatFromInt(to_x);
+        const ty: f64 = @floatFromInt(to_y);
+        const dist = @abs(ty - fy);
+        const bulge = @max(dist * 0.4, 20.0); // arc offset to the right
+
+        if (directed) {
+            try writer.print(
+                \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}
+                \\          marker-end="url(#arrow{d})"/>
+                \\
+            , .{ fx, fy, fx + bulge, fy, tx + bulge, ty, tx, ty, color, config.edge_width, dash, arrow_id });
+        } else {
+            try writer.print(
+                \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
+                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
+                \\
+            , .{ fx, fy, fx + bulge, fy, tx + bulge, ty, tx, ty, color, config.edge_width, dash });
+        }
     } else {
-        try writer.print(
-            \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-            \\          stroke="{s}" stroke-width="{d}"/>
-            \\
-        , .{ from_x, from_y, to_x, to_y, color, config.edge_width });
+        // Normal edge: straight line
+        if (directed) {
+            try writer.print(
+                \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+                \\          stroke="{s}" stroke-width="{d}"{s} 
+                \\          marker-end="url(#arrow{d})"/>
+                \\
+            , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash, arrow_id });
+        } else {
+            try writer.print(
+                \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+                \\          stroke="{s}" stroke-width="{d}"{s}/>
+                \\
+            , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash });
+        }
     }
 
     // Emit hidden text path (always left-to-right for readable text)
@@ -706,9 +828,73 @@ fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, co
     }
 }
 
+/// Render a self-loop: an arc that exits the right side of the node,
+/// curves above it, and re-enters with an arrowhead.
+/// Visual: a circle/arc above-right of the node pointing back into it.
+fn renderSelfLoop(writer: anytype, edge: *const LayoutEdge, edge_idx: usize, config: SvgConfig, nodes: []const LayoutNode) !void {
+    const color = config.getEdgeColor(edge_idx);
+    const arrow_id = if (config.color_edges) edge_idx % config.edge_palette.len else 0;
+
+    // Find the node to get its position and width
+    var node_left_x: usize = edge.from_x;
+    var node_width: usize = 3; // fallback
+    var node_top_y: usize = edge.from_y;
+    for (nodes) |node| {
+        if (node.id == edge.from_id) {
+            node_left_x = node.x;
+            node_width = node.width;
+            node_top_y = node.y;
+            break;
+        }
+    }
+
+    // Node rectangle position and dimensions in pixels
+    const node_x: f64 = @floatFromInt(node_left_x * config.char_width + config.padding);
+    const node_y: f64 = @floatFromInt(node_top_y * config.line_height + config.padding);
+    const node_w: f64 = @floatFromInt(node_width * config.char_width);
+    const node_h: f64 = @floatFromInt(config.line_height);
+
+    // Right edge of the node box
+    const right_x = node_x + node_w;
+    const center_y = node_y + node_h / 2.0;
+
+    // Loop arc on the right side of the node:
+    //   - Starts from the right edge, slightly above center
+    //   - Arcs outward to the right
+    //   - Ends at the right edge, slightly below center (arrow points in)
+    const gap = 6.0; // half the vertical gap between start and end points
+    const r: f64 = 14.0; // arc radius
+
+    // Start: upper point on the right edge of the node
+    const sx = right_x;
+    const sy = center_y - gap;
+    // End: lower point on the right edge — arrow tip enters here
+    const ex = right_x;
+    const ey = center_y + gap;
+
+    // SVG arc: sweep-flag=1 (clockwise) draws the arc bulging to the right
+    try writer.print(
+        \\    <path d="M {d:.0} {d:.0} A {d:.0} {d:.0} 0 1 1 {d:.0} {d:.0}"
+        \\          fill="none" stroke="{s}" stroke-width="{d}" stroke-dasharray="6,3"
+        \\          marker-end="url(#arrow{d})"/>
+        \\
+    , .{ sx, sy, r, r, ex, ey, color, config.edge_width, arrow_id });
+
+    // Label: positioned to the right of the arc
+    if (edge.label) |label| {
+        const label_x = right_x + r * 2.0 + 4.0;
+        const label_y = center_y + 4.0;
+        try writer.print(
+            \\    <text x="{d:.0}" y="{d:.0}" font-family="monospace" font-size="12"
+            \\          fill="{s}" text-anchor="start" dominant-baseline="auto">"{s}"</text>
+            \\
+        , .{ label_x, label_y, color, label });
+    }
+}
+
 /// Render a multi-point path as a smooth cubic bezier spline.
 /// Uses Catmull-Rom to Bezier conversion for smooth curves through all points.
-fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, has_label: bool, directed: bool) !void {
+fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, has_label: bool, directed: bool, reversed: bool) !void {
     if (points.len < 2) return;
 
     const color = config.getEdgeColor(edge_idx);
@@ -774,17 +960,19 @@ fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, con
         try writer.writeAll("\"");
     }
 
+    const dash: []const u8 = if (reversed) " stroke-dasharray=\"6,3\"" else "";
+
     if (directed) {
         try writer.print(
-            \\ fill="none" stroke="{s}" stroke-width="{d}" 
+            \\ fill="none" stroke="{s}" stroke-width="{d}"{s} 
             \\          marker-end="url(#arrow{d})"/>
             \\
-        , .{ color, config.edge_width, arrow_id });
+        , .{ color, config.edge_width, dash, arrow_id });
     } else {
         try writer.print(
-            \\ fill="none" stroke="{s}" stroke-width="{d}"/>
+            \\ fill="none" stroke="{s}" stroke-width="{d}"{s}/>
             \\
-        , .{ color, config.edge_width });
+        , .{ color, config.edge_width, dash });
     }
 
     // Render control points if debugging

@@ -67,6 +67,9 @@ pub const coordCast = ir.coordCast;
 // Algorithms
 // ============================================================================
 
+/// Cycle-breaking algorithms — detect and mark back edges
+pub const cycle_breaking = @import("algorithms/sugiyama/cycle_breaking.zig");
+
 /// Layering algorithms - assign nodes to horizontal levels
 pub const layering = struct {
     pub const longest_path = @import("algorithms/sugiyama/layering/longest_path.zig");
@@ -158,6 +161,22 @@ pub const colors = @import("render/colors.zig");
 // Layout configuration
 // ============================================================================
 
+/// Cycle-breaking strategy for handling cyclic graphs in Sugiyama layout.
+///
+/// The classic Sugiyama pipeline requires a DAG. When the input graph has
+/// cycles, back edges must be virtually reversed so that layering can
+/// proceed. The reversed edges are restored in the final IR with the
+/// `reversed` flag set, allowing renderers to style them differently.
+pub const CycleBreaking = enum {
+    /// Reject cyclic graphs with error.CycleDetected (default).
+    /// Use this when you know your input is acyclic or want strict validation.
+    none,
+    /// DFS-based back-edge reversal.
+    /// Detects back edges via depth-first search and virtually reverses them.
+    /// O(V + E) time. Produces a valid DAG for any input.
+    depth_first,
+};
+
 /// Available layering algorithms
 pub const Layering = enum {
     /// Longest path layering - simple, fast, may produce more layers
@@ -212,6 +231,9 @@ pub const LayoutConfig = struct {
     algorithm: Algorithm = .sugiyama,
 
     // Sugiyama-specific options (ignored for force-directed algorithms)
+    /// Cycle-breaking strategy (default: none — rejects cyclic graphs)
+    /// Set to .depth_first to automatically handle cyclic graphs.
+    cycle_breaking: CycleBreaking = .none,
     /// Layering algorithm (default: longest_path)
     layering: Layering = .longest_path,
     /// Crossing reduction pipeline (default: median + adjacent exchange)
@@ -259,7 +281,9 @@ pub const LayoutError = error{
 /// and force-directed algorithms. Default is Sugiyama.
 ///
 /// Returns error.EmptyGraph if the graph has no nodes.
-/// Returns error.CycleDetected if the graph contains a cycle (Sugiyama only).
+/// Returns error.CycleDetected if the graph contains a cycle (Sugiyama only,
+/// and only when `cycle_breaking` is `.none`). Set `cycle_breaking` to
+/// `.depth_first` to automatically handle cyclic graphs.
 /// Custom crossing reducers may return additional errors.
 /// Use `graph.validate()` before calling for detailed cycle info.
 pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
@@ -386,25 +410,37 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 
         switch (validation_result) {
             .empty => return error.EmptyGraph,
-            .cycle => return error.CycleDetected,
+            .cycle => |_| {
+                // If cycle breaking is enabled, we handle cycles below.
+                // If not, reject the graph.
+                if (config.cycle_breaking == .none) return error.CycleDetected;
+            },
             .ok => {},
         }
     }
 
-    // Step 1: Layer assignment
+    // Step 0b: Cycle breaking — detect and virtually reverse back edges
+    const reversed_edges: ?[]bool = switch (config.cycle_breaking) {
+        .none => null,
+        .depth_first => try cycle_breaking.detectBackEdges(g, allocator),
+    };
+    defer if (reversed_edges) |re| allocator.free(re);
+
+    // Step 1: Layer assignment (with reversed edges for cycle breaking)
     var layer_assignment = switch (config.layering) {
-        .longest_path => try layering.longest_path.compute(g, allocator),
-        .network_simplex => try layering.network_simplex.compute(g, allocator),
-        .network_simplex_fast => try layering.network_simplex.computeFast(g, allocator),
+        .longest_path => try layering.longest_path.computeWithReversed(g, allocator, reversed_edges),
+        .network_simplex => try layering.network_simplex.computeWithReversed(g, allocator, reversed_edges),
+        .network_simplex_fast => try layering.network_simplex.computeFastWithReversed(g, allocator, reversed_edges),
     };
     defer layer_assignment.deinit();
 
     // Step 2: Build virtual levels (includes dummy nodes for skip-level edges)
-    var virtual_levels = try layering.virtual.buildVirtualLevels(
+    var virtual_levels = try layering.virtual.buildVirtualLevelsWithReversed(
         g,
         layer_assignment.levels,
         layer_assignment.max_level,
         allocator,
+        reversed_edges,
     );
     defer virtual_levels.deinit();
 
@@ -568,6 +604,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             &result.id_to_index,
             &dummy_positions,
             allocator,
+            reversed_edges,
         ),
         .spline => try routing.spline.routeWithDummies(
             g,
@@ -576,6 +613,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             &dummy_positions,
             allocator,
             .{},
+            reversed_edges,
         ),
     };
     // Note: we don't defer deinit on paths - ownership transfers to result.edges
@@ -590,7 +628,12 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             const from_node = result.nodes.items[result.id_to_index.get(edge.from_id).?];
             const to_node = result.nodes.items[result.id_to_index.get(edge.to_id).?];
 
-            const level_span = to_node.level - from_node.level;
+            // Reversed edges have already been flipped by routing, so they
+            // flow downward and get proper level_span like normal edges.
+            const level_span = if (to_node.level > from_node.level)
+                to_node.level - from_node.level
+            else
+                0;
 
             if (level_span > 1) {
                 // This is a long edge - split it through dummies
@@ -660,6 +703,51 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         // No dummies: add all edges as-is
         for (routed_edges.items) |edge| {
             try result.addEdge(edge);
+        }
+    }
+
+    // Step 6b: Mark reversed (back) edges in the IR.
+    // The pipeline routed them downward (from→to flipped), so now we:
+    //   1. Swap from_id/to_id back to the original semantic direction
+    //   2. Keep coordinates as-is (they represent the visual downward path)
+    //   3. Set reversed=true so renderers draw dashed lines
+    //   4. Move 'directed' flag from last segment to first segment (arrow at top)
+    if (reversed_edges) |re| {
+        for (result.edges.items) |*result_edge| {
+            if (result_edge.edge_index < re.len and re[result_edge.edge_index]) {
+                result_edge.reversed = true;
+                // Swap from/to IDs back to original direction
+                const tmp_id = result_edge.from_id;
+                result_edge.from_id = result_edge.to_id;
+                result_edge.to_id = tmp_id;
+            }
+        }
+
+        // For multi-segment reversed edges, move the 'directed' (arrowhead) flag
+        // from the last segment (bottom, where routing put it) to the first
+        // segment (top, where the semantic target is for back edges).
+        for (0..re.len) |edge_idx| {
+            if (!re[edge_idx]) continue;
+
+            // Find first and last segments of this reversed edge (by from_y)
+            var first_seg: ?*ir.LayoutEdge(usize) = null;
+            var last_seg: ?*ir.LayoutEdge(usize) = null;
+            for (result.edges.items) |*seg| {
+                if (seg.edge_index != edge_idx) continue;
+                if (first_seg == null or seg.from_y < first_seg.?.from_y) {
+                    first_seg = seg;
+                }
+                if (last_seg == null or seg.from_y > last_seg.?.from_y) {
+                    last_seg = seg;
+                }
+            }
+
+            // Swap: move arrow from last segment to first segment
+            if (first_seg != null and last_seg != null and first_seg != last_seg) {
+                const was_directed = last_seg.?.directed;
+                last_seg.?.directed = false;
+                first_seg.?.directed = was_directed;
+            }
         }
     }
 
@@ -1048,6 +1136,107 @@ test "layout: cyclic graph returns error" {
 
     const result = layout(&g, allocator, .{});
     try std.testing.expectError(error.CycleDetected, result);
+}
+
+test "layout: cyclic graph with cycle_breaking produces valid layout" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // A -> B -> C -> A (cycle)
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addEdge(1, 2);
+    try g.addEdge(2, 3);
+    try g.addEdge(3, 1); // Back edge
+
+    var result = try layout(&g, allocator, .{
+        .cycle_breaking = .depth_first,
+    });
+    defer result.deinit();
+
+    // Should produce a valid layout with 3 real nodes (plus dummies for back edge routing)
+    var real_node_count: usize = 0;
+    for (result.nodes.items) |node| {
+        if (node.kind != .dummy) real_node_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), real_node_count);
+
+    // At least one edge should be marked as reversed
+    var has_reversed = false;
+    for (result.edges.items) |edge| {
+        if (edge.reversed) has_reversed = true;
+    }
+    try std.testing.expect(has_reversed);
+
+    // Width and height should be reasonable
+    try std.testing.expect(result.width > 0);
+    try std.testing.expect(result.height > 0);
+}
+
+test "layout: cycle_breaking preserves acyclic graph behavior" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // Acyclic: A -> B -> C
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addEdge(1, 2);
+    try g.addEdge(2, 3);
+
+    // With cycle_breaking enabled on an acyclic graph, should work identically
+    var result_cb = try layout(&g, allocator, .{
+        .cycle_breaking = .depth_first,
+    });
+    defer result_cb.deinit();
+
+    var result_no_cb = try layout(&g, allocator, .{});
+    defer result_no_cb.deinit();
+
+    // Same number of nodes and edges
+    try std.testing.expectEqual(result_no_cb.nodes.items.len, result_cb.nodes.items.len);
+
+    // No reversed edges (graph is acyclic)
+    for (result_cb.edges.items) |edge| {
+        try std.testing.expect(!edge.reversed);
+    }
+}
+
+test "layout: cycle_breaking works with all layering algorithms" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // A -> B -> C -> A (cycle)
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addEdge(1, 2);
+    try g.addEdge(2, 3);
+    try g.addEdge(3, 1);
+
+    // Test with each layering algorithm
+    const layerings = [_]Layering{ .longest_path, .network_simplex, .network_simplex_fast };
+    for (layerings) |lay| {
+        var result = try layout(&g, allocator, .{
+            .cycle_breaking = .depth_first,
+            .layering = lay,
+        });
+        defer result.deinit();
+
+        var real_count: usize = 0;
+        for (result.nodes.items) |node| {
+            if (node.kind != .dummy) real_count += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 3), real_count);
+        try std.testing.expect(result.width > 0);
+    }
 }
 
 test "layout: positioning config affects output" {

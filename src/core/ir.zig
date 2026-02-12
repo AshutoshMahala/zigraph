@@ -158,6 +158,11 @@ pub fn LayoutEdge(comptime Coord: type) type {
         edge_index: usize,
         /// Whether this edge is directed (arrow) or undirected (no arrow)
         directed: bool = true,
+        /// Whether this edge was reversed for cycle breaking.
+        /// When true, the edge originally pointed to→from but was flipped
+        /// so Sugiyama could treat the graph as a DAG. Renderers can use
+        /// this to style back-edges differently (e.g., dashed lines).
+        reversed: bool = false,
         /// Optional edge label text (e.g., "depends on")
         label: ?[]const u8 = null,
         /// Computed label X position (set during layout)
@@ -384,6 +389,7 @@ pub fn LayoutIR(comptime Coord: type) type {
                     .path = converted_path,
                     .edge_index = edge.edge_index,
                     .directed = edge.directed,
+                    .reversed = edge.reversed,
                     .label = edge.label,
                     .label_x = coordCast(Target, Coord, edge.label_x),
                     .label_y = coordCast(Target, Coord, edge.label_y),

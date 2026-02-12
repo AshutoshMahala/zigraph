@@ -84,6 +84,19 @@ pub fn buildVirtualLevels(
     max_level: usize,
     allocator: Allocator,
 ) !VirtualLevels {
+    return buildVirtualLevelsWithReversed(g, node_levels, max_level, allocator, null);
+}
+
+/// Build virtual levels with optional reversed-edge mask.
+/// When reversed_edges[i] is true, edge i has its from/to flipped so
+/// dummy nodes are inserted along the correct (downward) direction.
+pub fn buildVirtualLevelsWithReversed(
+    g: *const Graph,
+    node_levels: []const usize,
+    max_level: usize,
+    allocator: Allocator,
+    reversed_edges: ?[]const bool,
+) !VirtualLevels {
     const level_count = max_level + 1;
 
     // Initialize empty levels
@@ -100,8 +113,13 @@ pub fn buildVirtualLevels(
 
     // Insert dummy nodes for skip-level edges
     for (g.edges.items, 0..) |edge, edge_idx| {
-        const from_idx = g.nodeIndex(edge.from) orelse continue;
-        const to_idx = g.nodeIndex(edge.to) orelse continue;
+        // For reversed (back) edges, flip from/to so dummies go downward
+        const is_reversed = if (reversed_edges) |re| (edge_idx < re.len and re[edge_idx]) else false;
+        const from_id = if (is_reversed) edge.to else edge.from;
+        const to_id = if (is_reversed) edge.from else edge.to;
+
+        const from_idx = g.nodeIndex(from_id) orelse continue;
+        const to_idx = g.nodeIndex(to_id) orelse continue;
 
         const from_level = node_levels[from_idx];
         const to_level = node_levels[to_idx];

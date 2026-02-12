@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" 
-     width="620" height="600" 
-     viewBox="0 0 620 600">
+     width="700" height="600" 
+     viewBox="0 0 700 600">
 
   <!-- Arrow marker definitions -->
   <defs>
@@ -120,6 +120,12 @@
     <text font-family="monospace" font-size="12" fill="#89ddff" dy="-4">
       <textPath href="#edgepath10" startOffset="50%"
               text-anchor="middle" dominant-baseline="auto">"merge"</textPath></text>
+    <path d="M 200 560 C 218 530, 237 440, 310 380 C 383 320, 653 257, 640 200 C 627 143, 298 67, 230 40" fill="none" stroke="#d6409f" stroke-width="2" stroke-dasharray="6,3" 
+          marker-end="url(#arrow11)"/>
+    <path id="edgepath11" d="M 200 560 C 218 530, 237 440, 310 380 C 383 320, 653 257, 640 200 C 627 143, 298 67, 230 40" fill="none" stroke="none"/>
+    <text font-family="monospace" font-size="12" fill="#d6409f" dy="-4">
+      <textPath href="#edgepath11" startOffset="50%"
+              text-anchor="middle" dominant-baseline="auto">"retry"</textPath></text>
   </g>
 
   <!-- Nodes -->

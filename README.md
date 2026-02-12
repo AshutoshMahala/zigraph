@@ -39,6 +39,7 @@
 
 - **Zero dependencies** — Pure Zig, no libc required
 - **Two layout engines** — Sugiyama (hierarchical DAGs) and Fruchterman-Reingold (force-directed)
+- **Cycle breaking** — Automatic back-edge detection for cyclic graphs (DFS-based)
 - **Directed & undirected edges** — `addDiEdge` / `addUnDiEdge` with per-edge arrow control
 - **Three renderers** — Unicode (terminal), SVG (with splines), JSON (for tooling)
 - **Edge labels** — Annotate edges with text, rendered in all output formats
@@ -150,6 +151,37 @@ try graph.addDiEdge(1, 3);  // unlabeled edge
 ```
 
 Labels appear in all renderers — terminal, SVG, and JSON.
+
+## Cycle Breaking
+
+zigraph automatically handles cyclic graphs via DFS-based back-edge detection. Enable it with `.cycle_breaking = .depth_first`:
+
+```zig
+var graph = zigraph.Graph.init(allocator);
+defer graph.deinit();
+
+try graph.addNode(1, "Input");
+try graph.addNode(2, "Process");
+try graph.addNode(3, "Output");
+
+try graph.addEdge(1, 2);
+try graph.addEdge(2, 3);
+try graph.addEdgeLabeled(3, 1, "feedback"); // Creates a cycle!
+
+const output = try zigraph.render(&graph, allocator, .{
+    .cycle_breaking = .depth_first,
+});
+defer allocator.free(output);
+std.debug.print("{s}\n", .{output});
+```
+
+Back edges are **virtually reversed** — the original graph is not mutated. Reversed edges are visually distinct:
+
+- **Unicode**: dashed arrows (`⇡`) with side routing
+- **SVG**: dashed lines with bezier curves (two-node cycles arc to avoid overlap)
+- **Self-loops**: `↺` symbol in Unicode, arc above node in SVG
+
+Supported patterns: feedback loops, mutual dependencies (A ↔ B), self-loops (A → A), and complex multi-cycle graphs.
 
 ## Directed & Undirected Edges
 
@@ -410,6 +442,7 @@ zig build run-config       # Configuration options demo
 zig build run-positioning  # Positioning algorithms comparison
 zig build run-svg          # SVG with splines
 zig build run-labels       # Edge labels demo (exports SVG)
+zig build run-cycle        # Cycle breaking demo (feedback loops, self-loops)
 zig build run-ns-compare   # Compare layering algorithms
 zig build run-json         # JSON export
 zig build run-fdg          # Force-directed layout (terminal + SVG)

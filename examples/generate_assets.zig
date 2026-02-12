@@ -44,11 +44,15 @@ pub fn main() !void {
     try dag.addEdge(6, 8);  // E -> Output (skip-level edge, now on left)
     try dag.addEdge(7, 8);  // F -> Output
 
+    // Feedback loop (creates a cycle!)
+    try dag.addEdgeLabeled(8, 1, "retry");  // Output -> Root (back edge)
+
     // 1. Unicode (terminal) output - Plain (for README)
     {
         const output = try zigraph.render(&dag, allocator, .{
             .crossing_reducers = &zigraph.crossing.quality,
             .positioning = .brandes_kopf,
+            .cycle_breaking = .depth_first,
         });
         defer allocator.free(output);
 
@@ -64,6 +68,7 @@ pub fn main() !void {
             .crossing_reducers = &zigraph.crossing.quality,
             .positioning = .brandes_kopf,
             .edge_palette = &zigraph.colors.ansi_dark,
+            .cycle_breaking = .depth_first,
         });
         defer allocator.free(output);
         
@@ -78,6 +83,7 @@ pub fn main() !void {
             .routing = .direct,
             .crossing_reducers = &zigraph.crossing.quality,
             .positioning = .brandes_kopf,
+            .cycle_breaking = .depth_first,
         });
         defer ir.deinit();
 
@@ -99,6 +105,7 @@ pub fn main() !void {
             .routing = .spline,
             .crossing_reducers = &zigraph.crossing.quality,
             .positioning = .brandes_kopf,
+            .cycle_breaking = .depth_first,
         });
         defer ir.deinit();
 
@@ -115,7 +122,9 @@ pub fn main() !void {
 
     // 4. JSON export
     {
-        const json = try zigraph.exportJson(&dag, allocator, .{});
+        const json = try zigraph.exportJson(&dag, allocator, .{
+            .cycle_breaking = .depth_first,
+        });
         defer allocator.free(json);
 
         const file = try std.fs.cwd().createFile("assets/hero.json", .{});

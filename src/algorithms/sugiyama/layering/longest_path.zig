@@ -43,7 +43,14 @@ pub const LayerAssignment = struct {
 /// - Each node is at level = max(parent levels) + 1
 ///
 /// This produces a proper layering where all edges point downward.
+/// Pass `reversed_edges` to virtually flip back edges for cycle breaking.
 pub fn compute(g: *const Graph, allocator: Allocator) !LayerAssignment {
+    return computeWithReversed(g, allocator, null);
+}
+
+/// Compute layer assignment with optional reversed-edge mask.
+/// When reversed_edges[i] is true, edge i is treated as going to→from.
+pub fn computeWithReversed(g: *const Graph, allocator: Allocator, reversed_edges: ?[]const bool) !LayerAssignment {
     const node_count = g.nodeCount();
 
     if (node_count == 0) {
@@ -63,9 +70,17 @@ pub fn compute(g: *const Graph, allocator: Allocator) !LayerAssignment {
     while (changed) {
         changed = false;
 
-        for (g.edges.items) |edge| {
-            const from_idx = g.nodeIndex(edge.from) orelse continue;
-            const to_idx = g.nodeIndex(edge.to) orelse continue;
+        for (g.edges.items, 0..) |edge, edge_idx| {
+            // Flip direction for reversed (back) edges
+            const is_reversed = if (reversed_edges) |re| re[edge_idx] else false;
+            const from_id = if (is_reversed) edge.to else edge.from;
+            const to_id = if (is_reversed) edge.from else edge.to;
+
+            const from_idx = g.nodeIndex(from_id) orelse continue;
+            const to_idx = g.nodeIndex(to_id) orelse continue;
+
+            // Skip self-loops — they don't contribute to level ordering
+            if (from_idx == to_idx) continue;
 
             const new_level = levels[from_idx] + 1;
             if (new_level > levels[to_idx]) {

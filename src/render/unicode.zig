@@ -28,6 +28,14 @@ const CP_ARROW_DOWN: u21 = '↓';
 const CP_ARROW_UP: u21 = '↑';
 const CP_ARROW_RIGHT: u21 = '→';
 const CP_ARROW_LEFT: u21 = '←';
+// Dashed arrows for reversed (back) edges
+const CP_ARROW_DOWN_DASH: u21 = '⇣';
+const CP_ARROW_UP_DASH: u21 = '⇡';
+const CP_ARROW_RIGHT_DASH: u21 = '⇢';
+const CP_ARROW_LEFT_DASH: u21 = '⇠';
+// Dashed line characters for reversed (back) edge body segments
+const CP_V_LINE_DASH: u21 = '┊'; // light quadruple dash vertical
+const CP_H_LINE_DASH: u21 = '┈'; // light quadruple dash horizontal
 const CP_CORNER_DR: u21 = '└'; // down-right (from above, going right)
 const CP_CORNER_DL: u21 = '┘'; // down-left (from above, going left)
 const CP_CORNER_UR: u21 = '┌'; // from above-right, going down
@@ -137,20 +145,163 @@ pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {
 
 /// Render a LayoutIR to a Unicode string with configuration.
 pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config: Config) ![]u8 {
-    const width = layout_ir.getWidth();
+    const base_width = layout_ir.getWidth();
     const height = layout_ir.getHeight();
 
-    if (width == 0 or height == 0) {
+    if (base_width == 0 or height == 0) {
         const result = try allocator.alloc(u8, 0);
         return result;
     }
+
+    // Collect reversed edge groups: group segments by edge_index,
+    // find the real source/target nodes and their right edges.
+    // Each reversed edge group needs a side channel column.
+
+    var reversed_groups: std.ArrayListUnmanaged(ReversedEdgeInfo) = .{};
+    defer reversed_groups.deinit(allocator);
+
+    // Track which edge_indices are reversed (to skip their segments in paintEdge)
+    var max_edge_idx: usize = 0;
+    for (layout_ir.getEdges()) |edge| {
+        if (edge.edge_index > max_edge_idx) max_edge_idx = edge.edge_index;
+    }
+
+    const reversed_flags = try allocator.alloc(bool, max_edge_idx + 1);
+    defer allocator.free(reversed_flags);
+    @memset(reversed_flags, false);
+
+    for (layout_ir.getEdges()) |edge| {
+        if (edge.reversed) {
+            reversed_flags[edge.edge_index] = true;
+        }
+    }
+
+    // Build reversed edge groups
+    for (0..reversed_flags.len) |edge_idx| {
+        if (!reversed_flags[edge_idx]) continue;
+
+        // Find first and last segments of this edge (by from_y)
+        var first_seg: ?*const LayoutEdge = null;
+        var last_seg: ?*const LayoutEdge = null;
+        var seg_label: ?[]const u8 = null;
+        var seg_label_y: usize = 0;
+        for (layout_ir.getEdges()) |*edge| {
+            if (edge.edge_index != edge_idx) continue;
+            if (first_seg == null or edge.from_y < first_seg.?.from_y) {
+                first_seg = edge;
+            }
+            if (last_seg == null or edge.from_y > last_seg.?.from_y) {
+                last_seg = edge;
+            }
+            if (edge.label != null) {
+                seg_label = edge.label;
+                seg_label_y = edge.label_y;
+            }
+        }
+
+        if (first_seg == null or last_seg == null) continue;
+
+        // For reversed edges: from_id was swapped back to semantic direction.
+        // Visually, first_seg is at the top (semantic target), last_seg is at the bottom (semantic source).
+        // We need the node positions for source (bottom) and target (top).
+        const source_node = layout_ir.nodeById(last_seg.?.from_id);
+        const target_node = layout_ir.nodeById(first_seg.?.to_id);
+
+        // If we can't find nodes (e.g., dummy IDs), fall back to edge coords
+        const src_right_x = if (source_node) |n| n.x + n.width else last_seg.?.to_x + 1;
+        const src_y = if (source_node) |n| n.y else last_seg.?.to_y;
+        const tgt_right_x = if (target_node) |n| n.x + n.width else first_seg.?.from_x + 1;
+        const tgt_y = if (target_node) |n| n.y else first_seg.?.from_y;
+
+        const edge_color: u8 = if (config.edge_palette) |palette|
+            colors.getAnsi(palette, edge_idx)
+        else
+            0;
+
+        try reversed_groups.append(allocator, .{
+            .edge_index = edge_idx,
+            .source_right_x = src_right_x,
+            .source_y = src_y,
+            .target_right_x = tgt_right_x,
+            .target_y = tgt_y,
+            .channel_x = 0, // assigned below
+            .color = edge_color,
+            .label = seg_label,
+            .label_y = seg_label_y,
+            .from_id = last_seg.?.from_id,
+            .to_id = first_seg.?.to_id,
+        });
+    }
+
+    // Assign side channel columns for reversed edges.
+    // Place channels to the right of the layout, spaced 2 apart.
+    // Skip self-loops (source_y == target_y) — they have no visual side route.
+    var extra_width: usize = 0;
+    // Count only non-degenerate reversed edges for channel assignment
+    var channel_count: usize = 0;
+    for (reversed_groups.items) |*grp| {
+        if (grp.target_y >= grp.source_y) continue; // self-loop or degenerate
+        channel_count += 1;
+    }
+    if (channel_count > 0) {
+        // Find the rightmost extent of all involved nodes
+        var max_right: usize = base_width;
+        for (reversed_groups.items) |grp| {
+            if (grp.source_right_x + 1 > max_right) max_right = grp.source_right_x + 1;
+            if (grp.target_right_x + 1 > max_right) max_right = grp.target_right_x + 1;
+        }
+
+        // Assign channel columns (each non-degenerate reversed edge gets its own column)
+        var ch_idx: usize = 0;
+        for (reversed_groups.items) |*grp| {
+            if (grp.target_y >= grp.source_y) continue; // self-loop
+            grp.channel_x = max_right + 1 + ch_idx * 2;
+            ch_idx += 1;
+        }
+
+        var max_extent: usize = 0;
+        for (reversed_groups.items) |grp| {
+            if (grp.target_y >= grp.source_y) continue;
+            if (grp.channel_x + 2 > max_extent) max_extent = grp.channel_x + 2;
+        }
+        // Account for labels centered on the channel that extend to the right
+        for (reversed_groups.items) |grp| {
+            if (grp.target_y >= grp.source_y) continue; // self-loop
+            if (grp.label) |lbl| {
+                const label_width = lbl.len + 2; // +2 for quotes
+                const label_right = grp.channel_x + label_width / 2 + label_width % 2 + 1;
+                if (label_right > max_extent) max_extent = label_right;
+            }
+        }
+        extra_width = if (max_extent > base_width) max_extent - base_width else 0;
+    }
+
+    // Account for self-loop indicators (↺ + label) extending past base_width
+    for (reversed_groups.items) |grp| {
+        if (grp.target_y >= grp.source_y) {
+            if (layout_ir.nodeById(grp.from_id)) |node| {
+                var needed = node.x + node.width + 1; // +1 for ↺
+                if (grp.label) |label| {
+                    needed += label.len + 2; // +2 for quotes
+                }
+                if (needed > base_width + extra_width) {
+                    extra_width = needed - base_width;
+                }
+            }
+        }
+    }
+
+    const width = base_width + extra_width;
 
     // Single flat allocation for cache efficiency
     var buffer = try Buffer2D.init(allocator, width, height);
     defer buffer.deinit(allocator);
 
     // Paint edges first (so nodes overwrite them)
+    // Skip reversed edges — they'll be drawn separately with side routing.
     for (layout_ir.getEdges()) |edge| {
+        if (reversed_flags[edge.edge_index]) continue;
+
         // Get color for this edge if palette is set
         const edge_color: u8 = if (config.edge_palette) |palette|
             colors.getAnsi(palette, edge.edge_index)
@@ -159,11 +310,21 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         paintEdge(&buffer, &edge, edge_color);
     }
 
+    // Paint reversed edges with side routing
+    for (reversed_groups.items) |grp| {
+        paintReversedEdgeSide(&buffer, &grp, grp.color);
+    }
+
     // For invisible dummy nodes, paint a vertical line at their position
-    // and clean up any arrows to make a continuous line
+    // and clean up any arrows to make a continuous line.
+    // Skip dummy nodes belonging to reversed edges (those are side-routed).
     if (!config.show_dummy_nodes) {
         for (layout_ir.getNodes()) |node| {
             if (node.kind == .dummy) {
+                // Skip dummies belonging to reversed edges
+                if (node.edge_index) |ei| {
+                    if (ei < reversed_flags.len and reversed_flags[ei]) continue;
+                }
                 // Draw vertical line at dummy position
                 const x = node.center_x;
                 const y = node.y;
@@ -177,14 +338,18 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                 // Check row above
                 if (y > 0) {
                     const above = buffer.get(x, y - 1);
-                    if (above == CP_ARROW_DOWN) {
+                    if (above == CP_ARROW_DOWN or above == CP_ARROW_DOWN_DASH) {
                         buffer.set(x, y - 1, CP_V_LINE);
+                    } else if (above == CP_ARROW_UP_DASH) {
+                        buffer.set(x, y - 1, CP_V_LINE_DASH);
                     }
                 }
                 // Check row below
                 const below = buffer.get(x, y + 1);
-                if (below == CP_ARROW_DOWN) {
+                if (below == CP_ARROW_DOWN or below == CP_ARROW_DOWN_DASH) {
                     buffer.set(x, y + 1, CP_V_LINE);
+                } else if (below == CP_ARROW_UP_DASH) {
+                    buffer.set(x, y + 1, CP_V_LINE_DASH);
                 }
             }
         }
@@ -196,7 +361,53 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     var legend_edges: std.ArrayListUnmanaged(LegendEntry) = .{};
     defer legend_edges.deinit(allocator);
 
+    // Paint reversed edge labels — centered on the channel column, same logic as normal edges
+    for (reversed_groups.items) |grp| {
+        if (grp.label) |label| {
+            const top_y = grp.target_y;
+            const bot_y = grp.source_y;
+
+            // Self-loops (top_y >= bot_y) — handled after node painting with ↺ indicator
+            if (top_y >= bot_y) continue;
+
+            const label_width = label.len + 2; // +2 for quotes
+            const ch_x = grp.channel_x;
+            // Center the label on the channel column, like normal edges center on edge x
+            const label_x = if (ch_x >= label_width / 2) ch_x - label_width / 2 else 0;
+            // Preferred y: midpoint of vertical span
+            const mid_y = top_y + (bot_y - top_y) / 2;
+
+            if (canPlaceLabel(&buffer, label, label_x, mid_y)) {
+                paintLabel(&buffer, label, label_x, mid_y, grp.color);
+            } else {
+                // Slide vertically to find a clear row
+                var placed = false;
+                const min_y = top_y + 1;
+                const max_y = if (bot_y > 1) bot_y - 1 else bot_y;
+                var try_y = min_y;
+                while (try_y <= max_y) : (try_y += 1) {
+                    if (try_y == mid_y) continue;
+                    if (canPlaceLabel(&buffer, label, label_x, try_y)) {
+                        paintLabel(&buffer, label, label_x, try_y, grp.color);
+                        placed = true;
+                        break;
+                    }
+                }
+                if (!placed) {
+                    try legend_edges.append(allocator, .{
+                        .from_id = grp.from_id,
+                        .to_id = grp.to_id,
+                        .label = label,
+                        .color = grp.color,
+                    });
+                }
+            }
+        }
+    }
+
     for (layout_ir.getEdges()) |edge| {
+        // Skip reversed edges — their labels are handled above
+        if (reversed_flags[edge.edge_index]) continue;
         if (edge.label) |label| {
             const edge_color: u8 = if (config.edge_palette) |palette|
                 colors.getAnsi(palette, edge.edge_index)
@@ -235,6 +446,22 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     // Paint nodes (overwrite edges)
     for (layout_ir.getNodes()) |node| {
         paintNode(&buffer, &node, config.show_dummy_nodes);
+    }
+
+    // Paint self-loop indicators (↺) after nodes, so they appear right after the node bracket
+    for (reversed_groups.items) |grp| {
+        if (grp.target_y >= grp.source_y) {
+            // This is a self-loop — find the node to place ↺ after its closing bracket
+            if (layout_ir.nodeById(grp.from_id)) |node| {
+                const loop_x = node.x + node.width; // right after ']'
+                const loop_y = node.y;
+                buffer.setWithColor(loop_x, loop_y, 0x21BA, grp.color); // ↺
+                // Paint label right after ↺ if present
+                if (grp.label) |label| {
+                    paintLabel(&buffer, label, loop_x + 1, loop_y, grp.color);
+                }
+            }
+        }
     }
 
     // Convert to UTF-8 string with optional ANSI color escapes
@@ -371,18 +598,24 @@ fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: bool)
 /// Draw a pure-vertical direct edge between y_from and y_to at column x.
 /// Draws in the range [min(y_from,y_to) .. max(y_from,y_to)), with an
 /// arrow one step before the target (only when directed).
-fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, directed: bool) void {
+/// Reversed edges use dashed arrow characters (⇣/⇡).
+fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, directed: bool, reversed: bool) void {
     if (y_from == y_to) return;
     const lo = @min(y_from, y_to);
     const hi = @max(y_from, y_to);
     const going_down = y_to > y_from;
     const arrow_y = if (going_down) hi - 1 else lo;
-    const arrow_char: u21 = if (going_down) CP_ARROW_DOWN else CP_ARROW_UP;
+    const arrow_char: u21 = if (going_down)
+        (if (reversed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN)
+    else
+        (if (reversed) CP_ARROW_UP_DASH else CP_ARROW_UP);
 
     var y = lo;
     while (y < hi) : (y += 1) {
         if (directed and y == arrow_y) {
             buffer.setWithColor(x, y, arrow_char, color);
+        } else if (reversed) {
+            buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
         } else {
             const cur = buffer.get(x, y);
             buffer.setWithColor(x, y, mergeJunction(cur, true, true, false, false), color);
@@ -391,18 +624,24 @@ fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, c
 }
 
 /// Draw a pure-horizontal direct edge between x_from and x_to at row y.
-fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, directed: bool) void {
+/// Reversed edges use dashed arrow and line characters (⇢/⇠, ┈).
+fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, directed: bool, reversed: bool) void {
     if (x_from == x_to) return;
     const lo = @min(x_from, x_to);
     const hi = @max(x_from, x_to);
     const going_right = x_to > x_from;
     const arrow_x = if (going_right) hi - 1 else lo;
-    const arrow_char: u21 = if (going_right) CP_ARROW_RIGHT else CP_ARROW_LEFT;
+    const arrow_char: u21 = if (going_right)
+        (if (reversed) CP_ARROW_RIGHT_DASH else CP_ARROW_RIGHT)
+    else
+        (if (reversed) CP_ARROW_LEFT_DASH else CP_ARROW_LEFT);
 
     var x = lo;
     while (x < hi) : (x += 1) {
         if (directed and x == arrow_x) {
             buffer.setWithColor(x, y, arrow_char, color);
+        } else if (reversed) {
+            buffer.setWithColor(x, y, CP_H_LINE_DASH, color);
         } else {
             const cur = buffer.get(x, y);
             buffer.setWithColor(x, y, mergeJunction(cur, false, false, true, true), color);
@@ -413,7 +652,8 @@ fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize,
 /// Draw a Manhattan Z-shaped route between (x0,y0) and (x1,y1).
 /// Route: (x0,y0) → (x0,mid_y) → (x1,mid_y) → (x1,y1)
 /// Uses box-drawing corners at the two bends for clean visual connections.
-fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, directed: bool) void {
+/// Reversed edges use dashed line and arrow characters.
+fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, directed: bool, reversed: bool) void {
     const lo_y = @min(y0, y1);
     const hi_y = @max(y0, y1);
     const mid_y = lo_y + (hi_y - lo_y) / 2;
@@ -425,8 +665,12 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
         if (seg_hi > seg_lo + 1) {
             var y = seg_lo + 1;
             while (y < seg_hi) : (y += 1) {
-                const cur = buffer.get(x0, y);
-                buffer.setWithColor(x0, y, mergeJunction(cur, true, true, false, false), color);
+                if (reversed) {
+                    buffer.setWithColor(x0, y, CP_V_LINE_DASH, color);
+                } else {
+                    const cur = buffer.get(x0, y);
+                    buffer.setWithColor(x0, y, mergeJunction(cur, true, true, false, false), color);
+                }
             }
         }
     }
@@ -447,8 +691,12 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
         if (hi_x > lo_x + 1) {
             var x = lo_x + 1;
             while (x < hi_x) : (x += 1) {
-                const cur = buffer.get(x, mid_y);
-                buffer.setWithColor(x, mid_y, mergeJunction(cur, false, false, true, true), color);
+                if (reversed) {
+                    buffer.setWithColor(x, mid_y, CP_H_LINE_DASH, color);
+                } else {
+                    const cur = buffer.get(x, mid_y);
+                    buffer.setWithColor(x, mid_y, mergeJunction(cur, false, false, true, true), color);
+                }
             }
         }
     }
@@ -469,26 +717,53 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
         if (seg_hi > seg_lo + 1) {
             var y = seg_lo + 1;
             while (y < seg_hi) : (y += 1) {
-                const cur = buffer.get(x1, y);
-                buffer.setWithColor(x1, y, mergeJunction(cur, true, true, false, false), color);
+                if (reversed) {
+                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                } else {
+                    const cur = buffer.get(x1, y);
+                    buffer.setWithColor(x1, y, mergeJunction(cur, true, true, false, false), color);
+                }
             }
         }
     }
 
-    // --- Arrow: one cell before target along the last segment (directed only) ---
+    // --- Arrow ---
     if (directed) {
-        if (y1 != mid_y) {
-            const going_down_s3 = y1 > mid_y;
-            const arrow_y = if (going_down_s3) y1 - 1 else y1 + 1;
-            const arrow_char: u21 = if (going_down_s3) CP_ARROW_DOWN else CP_ARROW_UP;
-            buffer.setWithColor(x1, arrow_y, arrow_char, color);
+        if (reversed) {
+            // Reversed: arrow at FROM end (y0) pointing upward
+            // The first segment goes from y0 toward mid_y
+            if (y0 != mid_y) {
+                const going_up_s1 = y0 < mid_y;
+                if (going_up_s1) {
+                    // y0 is above mid_y, arrow at y0 pointing up
+                    buffer.setWithColor(x0, y0, CP_ARROW_UP_DASH, color);
+                } else {
+                    buffer.setWithColor(x0, y0, CP_ARROW_DOWN_DASH, color);
+                }
+            } else {
+                // y0 == mid_y: arrow on horizontal approach at FROM end
+                const going_right = x1 > x0;
+                if (going_right) {
+                    buffer.setWithColor(x0, y0, CP_ARROW_LEFT_DASH, color);
+                } else {
+                    buffer.setWithColor(x0, y0, CP_ARROW_RIGHT_DASH, color);
+                }
+            }
         } else {
-            // mid_y == y1: edge approaches horizontally — arrow on horizontal approach
-            const going_right = x1 > x0;
-            const arrow_x = if (going_right) x1 - 1 else x1 + 1;
-            const arrow_char: u21 = if (going_right) CP_ARROW_RIGHT else CP_ARROW_LEFT;
-            if (arrow_x < buffer.width) {
-                buffer.setWithColor(arrow_x, y1, arrow_char, color);
+            // Normal: arrow one cell before target at TO end
+            if (y1 != mid_y) {
+                const going_down_s3 = y1 > mid_y;
+                const arrow_y = if (going_down_s3) y1 - 1 else y1 + 1;
+                const arrow_char: u21 = if (going_down_s3) CP_ARROW_DOWN else CP_ARROW_UP;
+                buffer.setWithColor(x1, arrow_y, arrow_char, color);
+            } else {
+                // mid_y == y1: edge approaches horizontally — arrow on horizontal approach
+                const going_right = x1 > x0;
+                const arrow_x = if (going_right) x1 - 1 else x1 + 1;
+                const arrow_char: u21 = if (going_right) CP_ARROW_RIGHT else CP_ARROW_LEFT;
+                if (arrow_x < buffer.width) {
+                    buffer.setWithColor(arrow_x, y1, arrow_char, color);
+                }
             }
         }
     }
@@ -504,14 +779,22 @@ fn mergeJunction(current: u21, from_above: bool, to_below: bool, to_right: bool,
     var right = to_right;
 
     // Check what the existing character already connects
-    if (current == CP_V_LINE) {
+    if (current == CP_V_LINE or current == CP_V_LINE_DASH) {
         up = true;
         down = true;
     } else if (current == CP_ARROW_DOWN) {
         // Arrow indicates coming from above and pointing down
         up = true;
         down = true;
-    } else if (current == CP_H_LINE) {
+    } else if (current == CP_ARROW_DOWN_DASH or current == CP_ARROW_UP_DASH) {
+        // Dashed arrows (reversed edges) also connect vertically
+        up = true;
+        down = true;
+    } else if (current == CP_ARROW_RIGHT_DASH or current == CP_ARROW_LEFT_DASH) {
+        // Dashed horizontal arrows connect horizontally
+        left = true;
+        right = true;
+    } else if (current == CP_H_LINE or current == CP_H_LINE_DASH) {
         left = true;
         right = true;
     } else if (current == CP_CORNER_DR) { // └
@@ -582,16 +865,15 @@ const LegendEntry = struct {
     color: u8,
 };
 
-/// Check whether a label (rendered as `"text"`) can be placed at (x, y)
-/// without colliding with existing non-space, non-vertical-line characters.
+/// Check whether a label can be placed without overlapping anything except spaces and vertical lines.
 fn canPlaceLabel(buffer: *const Buffer2D, label: []const u8, x: usize, y: usize) bool {
     if (y >= buffer.height) return false;
     const label_width = label.len + 2; // +2 for surrounding quotes
     if (x + label_width > buffer.width) return false;
     for (0..label_width) |i| {
         const c = buffer.get(x + i, y);
-        // Allow overwriting spaces and vertical lines (the edge's own stem)
-        if (c != ' ' and c != CP_V_LINE) return false;
+        // Allow overwriting spaces and vertical lines (including dashed)
+        if (c != ' ' and c != CP_V_LINE and c != CP_V_LINE_DASH) return false;
     }
     return true;
 }
@@ -606,6 +888,79 @@ fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: u
         px += 1;
     }
     buffer.setWithColor(px, y, '"', color);
+}
+
+/// Info for a reversed (back) edge to be drawn with side routing.
+const ReversedEdgeInfo = struct {
+    edge_index: usize,
+    source_right_x: usize,
+    source_y: usize,
+    target_right_x: usize,
+    target_y: usize,
+    channel_x: usize,
+    color: u8,
+    label: ?[]const u8,
+    label_y: usize,
+    from_id: usize,
+    to_id: usize,
+};
+
+/// Paint a reversed (back) edge using side routing.
+/// Routes the edge from the RIGHT side of the source node, through a dedicated
+/// side channel column, to the RIGHT side of the target node.
+///
+/// Visual result:
+///   [Target]┈┈┐     ← dashed horizontal from target right to channel
+///      │      ┊     ← dashed vertical in channel
+///      ↓      ┊
+///    [Source]┈┈┘     ← dashed horizontal from source right to channel
+///
+/// The ⇡ arrow is placed at the top of the channel (near the semantic target).
+fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color: u8) void {
+    const ch_x = info.channel_x;
+
+    // Determine top and bottom y (target is at top, source is at bottom)
+    const top_y = info.target_y;
+    const bot_y = info.source_y;
+
+    if (top_y >= bot_y) return; // degenerate
+
+    // 1. Horizontal dashed line from source node right to channel
+    {
+        const src_x = info.source_right_x;
+        var x = src_x;
+        while (x < ch_x) : (x += 1) {
+            buffer.setWithColor(x, bot_y, CP_H_LINE_DASH, color);
+        }
+        // Corner at channel: connects from left and from above
+        buffer.setWithColor(ch_x, bot_y, mergeJunction(' ', true, false, false, true), color);
+    }
+
+    // 2. Vertical dashed line in channel from bottom to top
+    {
+        var y = top_y + 1;
+        while (y < bot_y) : (y += 1) {
+            buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+        }
+    }
+
+    // 3. Horizontal dashed line from target node right to channel, with ⇡ arrow
+    {
+        const tgt_x = info.target_right_x;
+        // Corner at channel: connects from below and from left
+        buffer.setWithColor(ch_x, top_y, mergeJunction(' ', false, true, false, true), color);
+        // Dashed horizontal from target right to channel
+        var x = tgt_x;
+        while (x < ch_x) : (x += 1) {
+            if (x == tgt_x) {
+                // Arrow at the node side pointing left (toward the target)
+                buffer.setWithColor(x, top_y, CP_ARROW_LEFT_DASH, color);
+            } else {
+                buffer.setWithColor(x, top_y, CP_H_LINE_DASH, color);
+            }
+        }
+    }
+
 }
 
 /// Paint an edge onto the buffer.
@@ -624,11 +979,11 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             if (x0 == x1 and y0 == y1) return; // degenerate
 
             if (x0 == x1) {
-                drawDirectVertical(buffer, x0, y0, y1, color, edge.directed);
+                drawDirectVertical(buffer, x0, y0, y1, color, edge.directed, edge.reversed);
             } else if (y0 == y1) {
-                drawDirectHorizontal(buffer, y0, x0, x1, color, edge.directed);
+                drawDirectHorizontal(buffer, y0, x0, x1, color, edge.directed, edge.reversed);
             } else {
-                drawDirectManhattan(buffer, x0, y0, x1, y1, color, edge.directed);
+                drawDirectManhattan(buffer, x0, y0, x1, y1, color, edge.directed, edge.reversed);
             }
         },
         .corner => |corner| {
@@ -638,19 +993,32 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const min_x = @min(x1, x2);
             const max_x = @max(x1, x2);
 
+            // For reversed edges: arrow at FROM end (top) pointing UP
+            // For normal edges: arrow at TO end (bottom) pointing DOWN
+
             // Vertical from source to horizontal
             var y = edge.from_y;
             while (y < h_y) : (y += 1) {
-                const current = buffer.get(x1, y);
-                buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+                if (edge.reversed and edge.directed and y == edge.from_y) {
+                    buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
+                } else if (edge.reversed) {
+                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                } else {
+                    const current = buffer.get(x1, y);
+                    buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+                }
             }
 
             // Horizontal segment: merge with existing characters for proper crossings
             var x = min_x;
             while (x <= max_x) : (x += 1) {
                 if (x != x1 and x != x2) {
-                    const current = buffer.get(x, h_y);
-                    buffer.setWithColor(x, h_y, mergeJunction(current, false, false, true, true), color);
+                    if (edge.reversed) {
+                        buffer.setWithColor(x, h_y, CP_H_LINE_DASH, color);
+                    } else {
+                        const current = buffer.get(x, h_y);
+                        buffer.setWithColor(x, h_y, mergeJunction(current, false, false, true, true), color);
+                    }
                 }
             }
 
@@ -665,8 +1033,10 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from horizontal to target
             y = h_y + 1;
             while (y < edge.to_y) : (y += 1) {
-                if (edge.directed and y == edge.to_y - 1) {
+                if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
+                } else if (edge.reversed) {
+                    buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
                 } else {
                     const current = buffer.get(x2, y);
                     buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
@@ -678,11 +1048,21 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const x2 = edge.to_x;
             const ch_x = sc.channel_x;
 
+            // For reversed edges: arrow at FROM end (top) pointing UP, dashed body
+            // For normal edges: arrow at TO end (bottom) pointing DOWN
+
             // Vertical from source to start_y
             var y = edge.from_y + 1;
+            const first_vert_start = edge.from_y + 1;
             while (y < sc.start_y) : (y += 1) {
-                const current = buffer.get(x1, y);
-                buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+                if (edge.reversed and edge.directed and y == first_vert_start) {
+                    buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
+                } else if (edge.reversed) {
+                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                } else {
+                    const current = buffer.get(x1, y);
+                    buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+                }
             }
 
             // Horizontal at start_y
@@ -690,15 +1070,23 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const max_x1 = @max(x1, ch_x);
             var x = min_x1;
             while (x <= max_x1) : (x += 1) {
-                const current = buffer.get(x, sc.start_y);
-                buffer.setWithColor(x, sc.start_y, mergeJunction(current, false, false, true, true), color);
+                if (edge.reversed) {
+                    buffer.setWithColor(x, sc.start_y, CP_H_LINE_DASH, color);
+                } else {
+                    const current = buffer.get(x, sc.start_y);
+                    buffer.setWithColor(x, sc.start_y, mergeJunction(current, false, false, true, true), color);
+                }
             }
 
             // Vertical in channel
             y = sc.start_y + 1;
             while (y < sc.end_y) : (y += 1) {
-                const current = buffer.get(ch_x, y);
-                buffer.setWithColor(ch_x, y, mergeJunction(current, true, true, false, false), color);
+                if (edge.reversed) {
+                    buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+                } else {
+                    const current = buffer.get(ch_x, y);
+                    buffer.setWithColor(ch_x, y, mergeJunction(current, true, true, false, false), color);
+                }
             }
 
             // Horizontal at end_y
@@ -706,15 +1094,21 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const max_x2 = @max(ch_x, x2);
             x = min_x2;
             while (x <= max_x2) : (x += 1) {
-                const current = buffer.get(x, sc.end_y);
-                buffer.setWithColor(x, sc.end_y, mergeJunction(current, false, false, true, true), color);
+                if (edge.reversed) {
+                    buffer.setWithColor(x, sc.end_y, CP_H_LINE_DASH, color);
+                } else {
+                    const current = buffer.get(x, sc.end_y);
+                    buffer.setWithColor(x, sc.end_y, mergeJunction(current, false, false, true, true), color);
+                }
             }
 
             // Vertical from end_y to target
             y = sc.end_y + 1;
             while (y < edge.to_y) : (y += 1) {
-                if (edge.directed and y == edge.to_y - 1) {
+                if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
+                } else if (edge.reversed) {
+                    buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
                 } else {
                     const current = buffer.get(x2, y);
                     buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
@@ -734,8 +1128,14 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from source to horizontal
             var y = edge.from_y;
             while (y < h_y) : (y += 1) {
-                const current = buffer.get(x1, y);
-                buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+                if (edge.reversed and edge.directed and y == edge.from_y) {
+                    buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
+                } else if (edge.reversed) {
+                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                } else {
+                    const current = buffer.get(x1, y);
+                    buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+                }
             }
 
             // Horizontal segment (only fill spaces)
@@ -744,7 +1144,11 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (x != x1 and x != x2) {
                     const current = buffer.get(x, h_y);
                     if (current == ' ') {
-                        buffer.setWithColor(x, h_y, CP_H_LINE, color);
+                        if (edge.reversed) {
+                            buffer.setWithColor(x, h_y, CP_H_LINE_DASH, color);
+                        } else {
+                            buffer.setWithColor(x, h_y, CP_H_LINE, color);
+                        }
                     }
                 }
             }
@@ -760,8 +1164,10 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical from horizontal to target
             y = h_y + 1;
             while (y < edge.to_y) : (y += 1) {
-                if (edge.directed and y == edge.to_y - 1) {
+                if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
+                } else if (edge.reversed) {
+                    buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
                 } else {
                     const current = buffer.get(x2, y);
                     buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
@@ -774,8 +1180,14 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const x = edge.from_x;
             var y = edge.from_y;
             while (y < edge.to_y) : (y += 1) {
-                if (edge.directed and y == edge.to_y - 1) {
+                if (edge.reversed and edge.directed and y == edge.from_y) {
+                    // Reversed: arrow at FROM end pointing UP
+                    buffer.setWithColor(x, y, CP_ARROW_UP_DASH, color);
+                } else if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
+                    // Normal: arrow at TO end pointing DOWN
                     buffer.setWithColor(x, y, CP_ARROW_DOWN, color);
+                } else if (edge.reversed) {
+                    buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
                 } else {
                     const current = buffer.get(x, y);
                     buffer.setWithColor(x, y, mergeJunction(current, true, true, false, false), color);

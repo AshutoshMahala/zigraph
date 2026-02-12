@@ -126,6 +126,9 @@ fn serializeImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord),
         try writer.print("\"to_y\": {d}, ", .{edge.to_y});
         try writer.print("\"edge_index\": {d}, ", .{edge.edge_index});
         try writer.print("\"directed\": {}, ", .{edge.directed});
+        if (edge.reversed) {
+            try writer.writeAll("\"reversed\": true, ");
+        }
 
         // Path
         try writer.writeAll("\"path\": ");
@@ -293,6 +296,7 @@ fn deserializeImpl(comptime Coord: type, json_bytes: []const u8, allocator: Allo
         const to_y = try getInt(Coord, eobj, "to_y");
         const edge_index = getOptionalInt(eobj.get("edge_index")) orelse 0;
         const directed = getOptionalBool(eobj.get("directed")) orelse true;
+        const reversed = getOptionalBool(eobj.get("reversed")) orelse false;
         const path_val = eobj.get("path") orelse return error.JsonFieldMissing;
         var path = try parsePath(Coord, allocator, path_val);
 
@@ -315,6 +319,7 @@ fn deserializeImpl(comptime Coord: type, json_bytes: []const u8, allocator: Allo
             .path = path,
             .edge_index = edge_index,
             .directed = directed,
+            .reversed = reversed,
             .label = label_copy,
             .label_x = label_x,
             .label_y = label_y,

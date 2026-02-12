@@ -103,6 +103,7 @@ pub fn routeWithDummies(
     node_id_to_ir_index: *const std.AutoHashMapUnmanaged(usize, usize),
     dummy_positions: *const DummyPositions,
     allocator: Allocator,
+    reversed_edges: ?[]const bool,
 ) !std.ArrayListUnmanaged(LayoutEdge) {
     var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
     errdefer {
@@ -121,9 +122,14 @@ pub fn routeWithDummies(
     @memset(level_slot_counts, 0);
 
     for (g.edges.items, 0..) |edge, edge_index| {
+        // For reversed (back) edges, flip from/to so the edge routes downward
+        const is_reversed = if (reversed_edges) |re| (edge_index < re.len and re[edge_index]) else false;
+        const edge_from = if (is_reversed) edge.to else edge.from;
+        const edge_to = if (is_reversed) edge.from else edge.to;
+
         // Look up node positions from IR
-        const from_ir_idx = node_id_to_ir_index.get(edge.from) orelse continue;
-        const to_ir_idx = node_id_to_ir_index.get(edge.to) orelse continue;
+        const from_ir_idx = node_id_to_ir_index.get(edge_from) orelse continue;
+        const to_ir_idx = node_id_to_ir_index.get(edge_to) orelse continue;
 
         const from_node = &nodes[from_ir_idx];
         const to_node = &nodes[to_ir_idx];
@@ -195,8 +201,8 @@ pub fn routeWithDummies(
         };
 
         try edges.append(allocator, .{
-            .from_id = edge.from,
-            .to_id = edge.to,
+            .from_id = edge_from,
+            .to_id = edge_to,
             .from_x = from_node.center_x,
             .from_y = from_y_edge,
             .to_x = to_node.center_x,

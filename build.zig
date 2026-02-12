@@ -433,4 +433,23 @@ pub fn build(b: *std.Build) void {
     const run_fdg_bench = b.addRunArtifact(fdg_bench_exe);
     const run_fdg_bench_step = b.step("run-fdg-bench", "Run FDG performance benchmarks");
     run_fdg_bench_step.dependOn(&run_fdg_bench.step);
+
+    // Cycle breaking example
+    const cycle_example = b.addModule("cycle_example", .{
+        .root_source_file = b.path("examples/cycle_breaking.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const cycle_exe = b.addExecutable(.{
+        .name = "cycle_breaking",
+        .root_module = cycle_example,
+    });
+    b.installArtifact(cycle_exe);
+
+    const run_cycle = b.addRunArtifact(cycle_exe);
+    const run_cycle_step = b.step("run-cycle", "Run cycle breaking example");
+    run_cycle_step.dependOn(&run_cycle.step);
 }

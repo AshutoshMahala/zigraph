@@ -43,12 +43,16 @@ pub fn main() !void {
     try dag.addEdgeLabeled(6, 8, "skip");  // E -> Output (skip-level edge, now on left)
     try dag.addEdgeLabeled(7, 8, "merge");  // F -> Output
 
+    // Feedback loop (creates a cycle!)
+    try dag.addEdgeLabeled(8, 1, "retry");  // Output -> Root (back edge)
+
     // Layout with quality settings to minimize edge crossings
     var ir = try zigraph.layout(&dag, allocator, .{
         .crossing_reducers = &zigraph.crossing.quality,
         .positioning = .brandes_kopf,
         .node_spacing = 4,
         .level_spacing = 3,
+        .cycle_breaking = .depth_first,
     });
     defer ir.deinit();
 

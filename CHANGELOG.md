@@ -35,6 +35,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Nodes: `kind` ("explicit", "implicit", "dummy"), `edge_index` (for dummy nodes)
   - Edges: `edge_index`, `directed`, `label` (optional)
 
+- **Cycle Breaking** — Automatic handling of cyclic graphs in the Sugiyama pipeline
+  - DFS-based back edge detection (O(V + E)) — `.cycle_breaking = .depth_first`
+  - Back edges virtually reversed (original graph not mutated)
+  - **SVG**: reversed edges rendered as dashed lines; two-node cycles use bezier curves to avoid overlap; self-loops rendered as arcs above the node with arrowhead
+  - **Unicode**: reversed edges rendered with dashed arrows (`⇡`); self-loops shown inline with `↺` symbol (e.g. `[A]↺"self"`)
+  - Self-loop handling in layering algorithms (longest path + network simplex)
+  - `examples/cycle_breaking.zig` — Five demo graphs (feedback loop, build system, state machine, two-node cycle, self-loop)
+
 - **Network Simplex Layering** — Optimal layer assignment algorithm (Gansner et al. 1993)
   - `.network_simplex` — Full simplex pivoting until optimal
   - `.network_simplex_fast` — Bounded iterations (V × √E) for predictable performance
@@ -70,10 +78,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Internal
 
-- 168 tests (up from 88 in v0.1.0)
+- 179 tests (up from 88 in v0.1.0)
 - `computeVirtualPositionsWithHints()` for positioning algorithm integration
 - `examples/presets_demo.zig` — All presets side-by-side comparison
-- `run-presets` build step
+- `examples/cycle_breaking.zig` — Cycle breaking demo with SVG export
+- `run-presets`, `run-cycle` build steps
 
 ## [0.1.0] — 2026-01-25
 

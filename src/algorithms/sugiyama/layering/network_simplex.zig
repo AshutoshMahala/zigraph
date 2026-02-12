@@ -124,11 +124,16 @@ const SpanningTree = struct {
 /// This finds the layering that minimizes total edge span (sum of edge lengths).
 /// Optimal but may be slow on very large graphs (>10K nodes).
 pub fn compute(g: *const Graph, allocator: Allocator) !LayerAssignment {
+    return computeWithReversed(g, allocator, null);
+}
+
+/// Compute with reversed-edge mask for cycle breaking.
+pub fn computeWithReversed(g: *const Graph, allocator: Allocator, reversed_edges: ?[]const bool) !LayerAssignment {
     // Safety bound: V*E is generous for convergence but prevents infinite cycling
     const v = g.nodeCount();
     const e = g.edges.items.len;
     const limit = @max(v * e, v * 10); // at least 10 iterations per node
-    return computeWithLimit(g, allocator, @max(limit, 100));
+    return computeWithLimit(g, allocator, @max(limit, 100), reversed_edges);
 }
 
 /// Compute layer assignment using network simplex with bounded iterations.
@@ -137,6 +142,11 @@ pub fn compute(g: *const Graph, allocator: Allocator) !LayerAssignment {
 /// this gives near-optimal results in O(V·sqrt(E)·E) worst case.
 /// Falls back gracefully: even 0 iterations gives a feasible (longest-path) result.
 pub fn computeFast(g: *const Graph, allocator: Allocator) !LayerAssignment {
+    return computeFastWithReversed(g, allocator, null);
+}
+
+/// Fast compute with reversed-edge mask for cycle breaking.
+pub fn computeFastWithReversed(g: *const Graph, allocator: Allocator, reversed_edges: ?[]const bool) !LayerAssignment {
     const v = g.nodeCount();
     const e = g.edges.items.len;
     if (v == 0) {
@@ -149,11 +159,11 @@ pub fn computeFast(g: *const Graph, allocator: Allocator) !LayerAssignment {
     // Heuristic iteration bound: V * sqrt(E) gives near-optimal for most graphs
     const sqrt_e = std.math.sqrt(@as(f64, @floatFromInt(@max(e, 1))));
     const max_iters: usize = @intFromFloat(@as(f64, @floatFromInt(v)) * sqrt_e);
-    return computeWithLimit(g, allocator, @max(max_iters, v)); // at least V iterations
+    return computeWithLimit(g, allocator, @max(max_iters, v), reversed_edges); // at least V iterations
 }
 
 /// Core implementation with configurable iteration limit (0 = unlimited).
-fn computeWithLimit(g: *const Graph, allocator: Allocator, max_iterations: usize) !LayerAssignment {
+fn computeWithLimit(g: *const Graph, allocator: Allocator, max_iterations: usize, reversed_edges: ?[]const bool) !LayerAssignment {
     const node_count = g.nodeCount();
 
     if (node_count == 0) {
@@ -183,8 +193,19 @@ fn computeWithLimit(g: *const Graph, allocator: Allocator, max_iterations: usize
     defer allocator.free(ns_edges);
 
     for (g.edges.items, 0..) |edge, i| {
-        const from_idx = g.nodeIndex(edge.from) orelse continue;
-        const to_idx = g.nodeIndex(edge.to) orelse continue;
+        // Flip direction for reversed (back) edges
+        const is_reversed = if (reversed_edges) |re| re[i] else false;
+        const from_id = if (is_reversed) edge.to else edge.from;
+        const to_id = if (is_reversed) edge.from else edge.to;
+        const from_idx = g.nodeIndex(from_id) orelse continue;
+        const to_idx = g.nodeIndex(to_id) orelse continue;
+
+        // Skip self-loops — they don't contribute to level ordering
+        if (from_idx == to_idx) {
+            ns_edges[i] = .{ .from = 0, .to = 0, .weight = 0, .min_len = 0 };
+            continue;
+        }
+
         ns_edges[i] = .{
             .from = from_idx,
             .to = to_idx,
@@ -197,7 +218,7 @@ fn computeWithLimit(g: *const Graph, allocator: Allocator, max_iterations: usize
     // Step 2: Compute initial feasible layering (longest-path)
     // =========================================================================
 
-    var init_layers = try longest_path.compute(g, allocator);
+    var init_layers = try longest_path.computeWithReversed(g, allocator, reversed_edges);
     defer init_layers.deinit();
 
     var tree = try SpanningTree.init(allocator, node_count, ns_edges);

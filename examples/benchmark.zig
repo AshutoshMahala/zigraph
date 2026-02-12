@@ -124,7 +124,7 @@ pub fn main() !void {
     std.debug.print("┌─────────────────────┬────────────────┐\n", .{});
     std.debug.print("│  Algorithm          │   Layout (µs)  │\n", .{});
     std.debug.print("├─────────────────────┼────────────────┤\n", .{});
-    std.debug.print("│ Barycentric          │ {d:>14} │\n", .{positioning_results.barycentric_us});
+    std.debug.print("│ Barycentric         │ {d:>14} │\n", .{positioning_results.barycentric_us});
     std.debug.print("│ Brandes-Köpf        │ {d:>14} │\n", .{positioning_results.brandes_kopf_us});
     std.debug.print("└─────────────────────┴────────────────┘\n\n", .{});
 
@@ -198,7 +198,7 @@ pub fn main() !void {
     std.debug.print("├───────────────────────────┼──────────┼─────────────┼────────────────┼────────────────┤\n", .{});
 
     for (stress_results) |s| {
-        std.debug.print("│ {s} │ {d:>8} │ {d:>11} │ {d:>14} │ {d:>14} │\n", .{
+        std.debug.print("│ {s}  │ {d:>8} │ {d:>11} │ {d:>14} │ {d:>14} │\n", .{
             s.name,
             s.result.nodes,
             s.result.edges,
