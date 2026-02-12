@@ -225,23 +225,43 @@ pub const ComptimeGraph = struct {
                 }
             }
 
-            // Render vertical edges to next level
+            // Render edges to next level
             if (lvl < max_level) {
                 const edge_y = y + 1;
+                const arrow_y = y + 2;
                 for (0..self.edge_count) |e| {
                     const from = self.edges[e][0];
                     const to = self.edges[e][1];
                     if (levels[from] == lvl and levels[to] == lvl + 1) {
-                        const from_x = positions[from] + 1 + self.node_label_lens[from] / 2;
-                        const row_start = edge_y * width;
-                        if (row_start + from_x < MAX_OUTPUT) {
-                            buffer[row_start + from_x] = '|';
-                        }
-                        // Arrow
-                        const arrow_y = edge_y + 1;
+                        const from_center: usize = positions[from] + 1 + self.node_label_lens[from] / 2;
+                        const to_center: usize = positions[to] + 1 + self.node_label_lens[to] / 2;
+                        const edge_row = edge_y * width;
                         const arrow_row = arrow_y * width;
-                        if (arrow_row + from_x < MAX_OUTPUT) {
-                            buffer[arrow_row + from_x] = 'v';
+
+                        if (from_center == to_center) {
+                            // Straight vertical edge
+                            if (edge_row + from_center < MAX_OUTPUT) {
+                                buffer[edge_row + from_center] = '|';
+                            }
+                            if (arrow_row + to_center < MAX_OUTPUT) {
+                                buffer[arrow_row + to_center] = 'v';
+                            }
+                        } else {
+                            // Manhattan routing: horizontal line on edge row, arrow at target
+                            const min_x = @min(from_center, to_center);
+                            const max_x = @max(from_center, to_center);
+                            for (min_x..max_x + 1) |x| {
+                                if (edge_row + x < MAX_OUTPUT) {
+                                    if (x == from_center or x == to_center) {
+                                        buffer[edge_row + x] = '+';
+                                    } else {
+                                        buffer[edge_row + x] = '-';
+                                    }
+                                }
+                            }
+                            if (arrow_row + to_center < MAX_OUTPUT) {
+                                buffer[arrow_row + to_center] = 'v';
+                            }
                         }
                     }
                 }

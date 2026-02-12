@@ -43,9 +43,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Positioning default changed** to `.none` (left-to-right packing)
-  - `.simple` and `.brandes_kopf` currently have collision issues with dummy nodes
-  - Use `.none` for reliable layouts without overlaps
+- **Positioning algorithms renamed and fixed**
+  - `.compact` (was `.none`) — left-to-right packing (fast, default)
+  - `.barycentric` (was `.simple`) — single-pass barycentric nudge (graph-aware)
+  - `.brandes_kopf` — multi-pass parent/child centering (best quality)
+  - All three produce correct, collision-free output
 
 - **WDP Error Codes** now use comptime composition for consistency:
   ```zig
@@ -63,7 +65,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - JSON labels containing quotes no longer produce invalid JSON output
 - Memory leak: `errdefer` for edge label allocation moved outside conditional block
-- Collision fix: Default positioning reverted to avoid dummy node overlaps
+- Dummy-node collisions in `.barycentric` and `.brandes_kopf` positioning (per-level compaction)
+- Symmetric bidirectional compaction eliminates left-bias in positioned layouts
 
 ### Internal
 
@@ -84,7 +87,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Brandes-Köpf and simple positioning
   - Direct and spline edge routing
 - Three renderers: Unicode (terminal), SVG (with Catmull-Rom splines), JSON
-- Comptime graph support — build diagrams at compile time with zero runtime allocation
 - Color palettes: Radix UI, ANSI dark/light
 - Layout IR intermediate representation
 - Graph validation

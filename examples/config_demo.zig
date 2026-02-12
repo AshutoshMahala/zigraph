@@ -45,12 +45,12 @@ pub fn main() !void {
     }
 
     // =========================================================================
-    // Example 2: Simple positioning (left-to-right, no centering)
+    // Example 2: Barycentric positioning (graph-aware)
     // =========================================================================
-    std.debug.print("\n=== Simple positioning ===\n\n", .{});
+    std.debug.print("\n=== Barycentric positioning ===\n\n", .{});
     {
         const output = try zigraph.render(&g, allocator, .{
-            .positioning = .simple,
+            .positioning = .barycentric,
         });
         defer allocator.free(output);
         std.debug.print("{s}\n", .{output});
@@ -94,7 +94,7 @@ pub fn main() !void {
     std.debug.print("\nMANUAL CONFIG:\n", .{});
     std.debug.print("Layering:    .longest_path (default), .network_simplex, .network_simplex_fast\n", .{});
     std.debug.print("Crossing:    crossing.balanced (default), crossing.fast, crossing.quality, crossing.none\n", .{});
-    std.debug.print("Positioning: .none (default), .simple, .brandes_kopf\n", .{});
+    std.debug.print("Positioning: .compact (default), .barycentric, .brandes_kopf\n", .{});
     std.debug.print("Routing:     .direct (default), .spline\n", .{});
     std.debug.print("\nTuning:\n", .{});
     std.debug.print("  .node_spacing   = 3 (default)\n", .{});

@@ -102,6 +102,24 @@ pub fn build(b: *std.Build) void {
     const run_hero_step = b.step("run-hero", "Run the README hero example");
     run_hero_step.dependOn(&run_hero.step);
 
+    // Hero positioning comparison
+    const hero_pos_example = b.addExecutable(.{
+        .name = "hero_positioning",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/hero_positioning.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(hero_pos_example);
+
+    const run_hero_pos = b.addRunArtifact(hero_pos_example);
+    const run_hero_pos_step = b.step("run-hero-pos", "Hero graph with all positioning algorithms");
+    run_hero_pos_step.dependOn(&run_hero_pos.step);
+
     // Edge labels example
     const labels_example = b.addExecutable(.{
         .name = "edge_labels",
@@ -156,24 +174,6 @@ pub fn build(b: *std.Build) void {
     const run_stress_step = b.step("run-stress", "Run the stress test suite");
     run_stress_step.dependOn(&run_stress.step);
 
-    // Comptime example
-    const comptime_example = b.addExecutable(.{
-        .name = "comptime_example",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/comptime_example.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zigraph", .module = zigraph_mod },
-            },
-        }),
-    });
-    b.installArtifact(comptime_example);
-
-    const run_comptime = b.addRunArtifact(comptime_example);
-    const run_comptime_step = b.step("run-comptime", "Run the comptime graph example");
-    run_comptime_step.dependOn(&run_comptime.step);
-
     // Error handling example
     const error_example = b.addExecutable(.{
         .name = "error_handling",
@@ -227,6 +227,24 @@ pub fn build(b: *std.Build) void {
     const run_config = b.addRunArtifact(config_example);
     const run_config_step = b.step("run-config", "Run the config demo example");
     run_config_step.dependOn(&run_config.step);
+
+    // Positioning demo example
+    const positioning_example = b.addExecutable(.{
+        .name = "positioning_demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/positioning_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(positioning_example);
+
+    const run_positioning = b.addRunArtifact(positioning_example);
+    const run_positioning_step = b.step("run-positioning", "Run the positioning algorithms demo");
+    run_positioning_step.dependOn(&run_positioning.step);
 
     // Presets demo example
     const presets_example = b.addExecutable(.{

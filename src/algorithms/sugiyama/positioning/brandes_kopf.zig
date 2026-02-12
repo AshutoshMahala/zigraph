@@ -83,34 +83,47 @@ pub fn compute(
     }
 
     // =========================================================================
-    // Phase 1: Initial bottom-up placement
-    // Start from the deepest level and work up, centering parents over children
+    // Phase 1: Initial placement from the widest level
+    //
+    // Place the widest level left-to-right, then work outward in both
+    // directions: upward (centering parents over children) and downward
+    // (centering children under parents).  This avoids the bias that
+    // bottom-up-only or top-down-only placement creates on fan-in/out
+    // graphs.
     // =========================================================================
 
-    // First, place the bottom level left-to-right
-    const bottom_level = levels[levels.len - 1];
-    var current_x: f64 = 0;
-    for (bottom_level.items) |node_idx| {
-        float_x[node_idx] = current_x;
-        const w: f64 = @floatFromInt(widths[node_idx]);
-        current_x += w + spacing;
+    // Find the widest level (most nodes)
+    var widest_level_idx: usize = 0;
+    var widest_count: usize = 0;
+    for (levels, 0..) |level, li| {
+        if (level.items.len > widest_count) {
+            widest_count = level.items.len;
+            widest_level_idx = li;
+        }
     }
 
-    // Work upward: center each parent over its children
-    if (levels.len > 1) {
-        var level_idx = levels.len - 1;
+    // Place the widest level left-to-right
+    {
+        var cx: f64 = 0;
+        for (levels[widest_level_idx].items) |node_idx| {
+            float_x[node_idx] = cx;
+            cx += @as(f64, @floatFromInt(widths[node_idx])) + spacing;
+        }
+    }
+
+    // Work upward from widest: center each parent over its children
+    if (widest_level_idx > 0) {
+        var level_idx = widest_level_idx;
         while (level_idx > 0) {
             level_idx -= 1;
             const level = levels[level_idx];
             const child_level = levels[level_idx + 1];
 
-            // For each node in this level, compute its ideal position
             for (level.items) |node_idx| {
                 const children = g.getChildren(node_idx);
                 const w: f64 = @floatFromInt(widths[node_idx]);
 
                 if (children.len > 0) {
-                    // Find children that are in the next level
                     var min_child_left: f64 = std.math.floatMax(f64);
                     var max_child_right: f64 = 0;
                     var found_children: usize = 0;
@@ -128,35 +141,26 @@ pub fn compute(
                     }
 
                     if (found_children > 0) {
-                        // Center over children
                         const children_center = (min_child_left + max_child_right) / 2.0;
                         float_x[node_idx] = children_center - w / 2.0;
                     }
                 }
             }
 
-            // Ensure no overlaps within this level
             compactLevel(level.items, float_x, widths, spacing);
         }
     }
 
-    // =========================================================================
-    // Phase 2: Top-down refinement
-    // Push children toward their parent centers
-    // =========================================================================
-
-    for (0..3) |_| {
-        // Top-down pass
-        for (levels, 0..) |level, level_idx| {
-            if (level_idx == 0) continue;
-
+    // Work downward from widest: center each child under its parents
+    if (widest_level_idx + 1 < levels.len) {
+        for ((widest_level_idx + 1)..levels.len) |level_idx| {
+            const level = levels[level_idx];
             const parent_level = levels[level_idx - 1];
 
             for (level.items) |node_idx| {
                 const parents = g.getParents(node_idx);
                 if (parents.len == 0) continue;
 
-                // Find the center of parents
                 var parent_center_sum: f64 = 0;
                 var parent_count: usize = 0;
 
@@ -174,26 +178,68 @@ pub fn compute(
                 if (parent_count > 0) {
                     const w: f64 = @floatFromInt(widths[node_idx]);
                     const parent_center = parent_center_sum / @as(f64, @floatFromInt(parent_count));
-                    const current_center = float_x[node_idx] + w / 2.0;
-
-                    // If parent is to the right, shift right (always ok)
-                    // If parent is to the left, we can shift left only if space allows
-                    const shift = parent_center - current_center;
-                    if (shift > 0) {
-                        float_x[node_idx] += shift;
-                    }
+                    float_x[node_idx] = parent_center - w / 2.0;
                 }
             }
 
-            // Compact to fix overlaps
+            compactLevel(level.items, float_x, widths, spacing);
+        }
+    }
+
+    // =========================================================================
+    // Phase 2: Iterative refinement
+    // Nudge nodes toward their connected neighbours (50% blend per pass)
+    // to converge on balanced positions without destroying Phase 1 layout.
+    // =========================================================================
+
+    for (0..3) |_| {
+        // Top-down pass: nudge children toward parent centres
+        for (levels, 0..) |level, level_idx| {
+            if (level_idx == 0) continue;
+
+            const parent_level = levels[level_idx - 1];
+
+            for (level.items) |node_idx| {
+                const parents = g.getParents(node_idx);
+                if (parents.len == 0) continue;
+
+                var parent_center_sum: f64 = 0;
+                var parent_count: usize = 0;
+
+                for (parent_level.items) |parent_idx| {
+                    for (parents) |p| {
+                        if (p == parent_idx) {
+                            const pw: f64 = @floatFromInt(widths[parent_idx]);
+                            parent_center_sum += float_x[parent_idx] + pw / 2.0;
+                            parent_count += 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (parent_count > 0) {
+                    const w: f64 = @floatFromInt(widths[node_idx]);
+                    const target = parent_center_sum / @as(f64, @floatFromInt(parent_count)) - w / 2.0;
+                    const current = float_x[node_idx];
+                    float_x[node_idx] = current + (target - current) * 0.5;
+                }
+            }
+
             compactLevel(level.items, float_x, widths, spacing);
         }
 
-        // Bottom-up pass to re-center parents
+        // Bottom-up pass: nudge parents toward child span centres
+        // Filter children to the adjacent level to avoid cross-level pull.
         var level_idx = levels.len;
         while (level_idx > 0) {
             level_idx -= 1;
             const level = levels[level_idx];
+
+            if (level_idx + 1 >= levels.len) {
+                // Bottom level — no children level to inspect
+                continue;
+            }
+            const child_level = levels[level_idx + 1];
 
             for (level.items) |node_idx| {
                 const children = g.getChildren(node_idx);
@@ -201,24 +247,28 @@ pub fn compute(
 
                 const w: f64 = @floatFromInt(widths[node_idx]);
 
-                // Find span of children
+                // Find span of children that are actually in the next level
                 var min_child_left: f64 = std.math.floatMax(f64);
                 var max_child_right: f64 = 0;
+                var found_children: usize = 0;
 
-                for (children) |child_idx| {
-                    const cw: f64 = @floatFromInt(widths[child_idx]);
-                    min_child_left = @min(min_child_left, float_x[child_idx]);
-                    max_child_right = @max(max_child_right, float_x[child_idx] + cw);
+                for (child_level.items) |child_idx| {
+                    for (children) |c| {
+                        if (c == child_idx) {
+                            const cw: f64 = @floatFromInt(widths[child_idx]);
+                            min_child_left = @min(min_child_left, float_x[child_idx]);
+                            max_child_right = @max(max_child_right, float_x[child_idx] + cw);
+                            found_children += 1;
+                            break;
+                        }
+                    }
                 }
 
-                if (min_child_left < std.math.floatMax(f64)) {
+                if (found_children > 0) {
                     const children_center = (min_child_left + max_child_right) / 2.0;
-                    const ideal_x = children_center - w / 2.0;
-
-                    // Only shift right (to center over children that moved right)
-                    if (ideal_x > float_x[node_idx]) {
-                        float_x[node_idx] = ideal_x;
-                    }
+                    const target = children_center - w / 2.0;
+                    const current = float_x[node_idx];
+                    float_x[node_idx] = current + (target - current) * 0.5;
                 }
             }
 
@@ -242,37 +292,6 @@ pub fn compute(
             float_x[i] -= min_x;
         }
         max_x -= min_x;
-    }
-
-    // =========================================================================
-    // Phase 3.5: Center levels within the overall width
-    // This reduces left-bias from bottom-up placement
-    // =========================================================================
-
-    for (levels) |level| {
-        if (level.items.len == 0) continue;
-
-        // Find this level's extent
-        var level_min: f64 = std.math.floatMax(f64);
-        var level_max: f64 = 0;
-        for (level.items) |node_idx| {
-            level_min = @min(level_min, float_x[node_idx]);
-            const w: f64 = @floatFromInt(widths[node_idx]);
-            level_max = @max(level_max, float_x[node_idx] + w);
-        }
-
-        // Shift this level to center it within max_x
-        const level_width = level_max - level_min;
-        const ideal_left = (max_x - level_width) / 2.0;
-        const shift = ideal_left - level_min;
-
-        // Center levels that have significant empty space on the left
-        // (shift > 2 means there's at least 2 units of potential centering)
-        if (shift > 2.0) {
-            for (level.items) |node_idx| {
-                float_x[node_idx] += shift;
-            }
-        }
     }
 
     // =========================================================================
@@ -315,26 +334,43 @@ pub fn compute(
     };
 }
 
-/// Ensure nodes in a level don't overlap, maintaining their order
+/// Ensure nodes in a level don't overlap, maintaining their order.
+///
+/// Uses symmetric (bidirectional) compaction: a forward pass pushes right,
+/// a backward pass pushes left, and the average gives a balanced result
+/// that avoids systematic left- or right-bias.
 fn compactLevel(nodes: []const usize, float_x: []f64, widths: []const usize, spacing: f64) void {
+    if (nodes.len == 0) return;
+
+    // --- Forward pass: push right to fix overlaps (same as before) ---
     var prev_right: f64 = 0;
     for (nodes, 0..) |node_idx, pos| {
         const w: f64 = @floatFromInt(widths[node_idx]);
-
         if (pos == 0) {
-            // First node: ensure non-negative
-            if (float_x[node_idx] < 0) {
-                float_x[node_idx] = 0;
-            }
+            if (float_x[node_idx] < 0) float_x[node_idx] = 0;
         } else {
-            // Ensure spacing from previous node
             const min_x = prev_right + spacing;
             if (float_x[node_idx] < min_x) {
                 float_x[node_idx] = min_x;
             }
         }
-
         prev_right = float_x[node_idx] + w;
+    }
+
+    // --- Backward pass: push left from the right edge ---
+    // Use the rightmost position from the forward pass as the boundary.
+    const right_edge = prev_right;
+    var next_left: f64 = right_edge;
+    var i: usize = nodes.len;
+    while (i > 0) {
+        i -= 1;
+        const node_idx = nodes[i];
+        const w: f64 = @floatFromInt(widths[node_idx]);
+        const max_x = next_left - w;
+        if (float_x[node_idx] > max_x) {
+            float_x[node_idx] = max_x;
+        }
+        next_left = float_x[node_idx] - spacing;
     }
 }
 

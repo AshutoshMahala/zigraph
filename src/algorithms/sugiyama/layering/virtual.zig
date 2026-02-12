@@ -354,6 +354,36 @@ pub fn computeVirtualPositionsWithHints(
                 max_width = @max(max_width, x + w);
             }
         }
+
+        // =================================================================
+        // Compaction: fix overlaps while preserving crossing-reduction order
+        //
+        // The hints + interpolation can place two nodes at the same x.
+        // Walk each level left-to-right and push nodes right as needed.
+        // =================================================================
+        max_width = 0;
+        for (virtual_levels.levels.items, 0..) |level, level_idx| {
+            var prev_right: usize = 0;
+            for (level.items, 0..) |vnode, pos| {
+                const w = vnode.width(g);
+                const cur_x = x_positions.items[level_idx].items[pos];
+
+                if (pos == 0) {
+                    // First node — nothing to collide with
+                    max_width = @max(max_width, cur_x + w);
+                } else {
+                    const min_x = prev_right + node_spacing;
+                    if (cur_x < min_x) {
+                        x_positions.items[level_idx].items[pos] = min_x;
+                        max_width = @max(max_width, min_x + w);
+                    } else {
+                        max_width = @max(max_width, cur_x + w);
+                    }
+                }
+
+                prev_right = x_positions.items[level_idx].items[pos] + w;
+            }
+        }
     } else {
         // =====================================================================
         // Default mode: simple left-to-right placement with centering

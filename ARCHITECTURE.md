@@ -64,7 +64,6 @@ zigraph/
 ├── src/
 │   ├── root.zig              # Library entry point, re-exports, layout()
 │   ├── presets.zig           # Curated layout configurations (sugiyama.*, fdg.*)
-│   ├── comptime_graph.zig    # ComptimeGraph for zero-runtime-cost diagrams
 │   ├── fuzz_tests.zig        # Property-based and security tests
 │   │
 │   ├── core/
@@ -273,9 +272,9 @@ const preset = zigraph.presets.sugiyama.preset(.quality);
 
 | Preset | Layering | Crossing | Positioning | Routing | Requirements |
 |--------|----------|----------|-------------|---------|---------------|
-| `sugiyama.standard()` | longest_path | balanced | none | direct | non_empty, acyclic, all_directed |
-| `sugiyama.fast()` | longest_path | fast | none | direct | non_empty, acyclic, all_directed |
-| `sugiyama.quality()` | network_simplex_fast | quality | none | spline | non_empty, acyclic, all_directed |
+| `sugiyama.standard()` | longest_path | balanced | compact | direct | non_empty, acyclic, all_directed |
+| `sugiyama.fast()` | longest_path | fast | compact | direct | non_empty, acyclic, all_directed |
+| `sugiyama.quality()` | network_simplex_fast | quality | compact | spline | non_empty, acyclic, all_directed |
 | `fdg_presets.standard()` | — | — | — | direct | non_empty |
 | `fdg_presets.fast()` | — | — | — | direct | non_empty |
 
@@ -432,7 +431,7 @@ All limits return `error.OutOfMemory` when exceeded.
 | Network simplex fast | O(V + E + iters·E) | Bounded V×√E iterations |
 | Median crossing | O(passes * (V + E)) | Default 4 passes, optimized with position maps |
 | Adjacent exchange | O(L * N^2 * passes) | L=layers, N=nodes/layer |
-| Simple positioning | O(V) | Linear scan |
+| Barycentric positioning | O(V) | Linear scan |
 | Brandes-Kopf | O(V + E) | Two passes |
 | FR Standard | O(V² · iters) | 300 iterations default |
 | FR-Fast (Barnes-Hut) | O(V log V · iters) | θ=0.8, 300 iterations |

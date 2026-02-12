@@ -43,7 +43,6 @@
 - **Three renderers** — Unicode (terminal), SVG (with splines), JSON (for tooling)
 - **Edge labels** — Annotate edges with text, rendered in all output formats
 - **Pluggable algorithms** — Bring your own crossing reduction, positioning, routing
-- **Comptime graphs** — Build diagrams at compile time, embed as string literals
 - **Embedded-first** — Explicit allocators, ~40KB WASM target
 
 ## Installation
@@ -277,9 +276,9 @@ const output = try zigraph.render(&graph, allocator, .{
     // .layering = .network_simplex_fast, // bounded iterations, good for large graphs
 
     // Positioning
-    .positioning = .none,  // default: left-to-right packing (no collisions)
-    // .positioning = .simple,        // level centering (has collision issues)
-    // .positioning = .brandes_kopf,  // parent/child centering (has collision issues)
+    .positioning = .compact,  // default: left-to-right packing (no collisions)
+    // .positioning = .barycentric,     // single-pass barycentric (graph-aware)
+    // .positioning = .brandes_kopf,  // multi-pass parent/child centering (best quality)
 
     // Crossing reduction
     .crossing_reducers = &zigraph.crossing.balanced,  // default
@@ -321,26 +320,6 @@ fn myReducer(self: *const zigraph.crossing.Reducer, levels: *VirtualLevels, g: *
     zigraph.crossing.medianReducer(2),
     .{ .runFn = myReducer, .passes = 5 },
 },
-```
-
-## Comptime Graphs
-
-Build diagrams at compile time with zero runtime allocation:
-
-```zig
-const ComptimeGraph = @import("zigraph").ComptimeGraph;
-
-const diagram = comptime blk: {
-    var g = ComptimeGraph.init();
-    g.edge(1, 2);
-    g.edge(2, 3);
-    break :blk g.render();
-};
-
-pub fn main() void {
-    // diagram is embedded in binary - no allocations!
-    std.debug.print("{s}\n", .{diagram});
-}
 ```
 
 ## Performance
@@ -428,11 +407,11 @@ zig build run-example      # Basic usage
 zig build run-hero         # README hero diagram
 zig build run-presets      # Presets demo (all presets side-by-side)
 zig build run-config       # Configuration options demo
+zig build run-positioning  # Positioning algorithms comparison
 zig build run-svg          # SVG with splines
 zig build run-labels       # Edge labels demo (exports SVG)
 zig build run-ns-compare   # Compare layering algorithms
 zig build run-json         # JSON export
-zig build run-comptime     # Comptime graphs
 zig build run-fdg          # Force-directed layout (terminal + SVG)
 zig build run-fdg-bench    # FDG performance benchmarks
 zig build run-stress       # Stress test suite

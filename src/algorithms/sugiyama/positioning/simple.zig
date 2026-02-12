@@ -1,14 +1,16 @@
-//! Simple left-to-right positioning
+//! Simple barycentric positioning
 //!
-//! Assigns x-coordinates to nodes by packing left-to-right
-//! with fixed spacing. This is the simplest positioning algorithm.
+//! A graph-aware positioning algorithm that places nodes near the average
+//! center of their connected neighbours.  One top-down pass aligns children
+//! under parents; one bottom-up pass re-centres parents over children.
 //!
-//! ## Algorithm
+//! Compared to the other strategies:
 //!
-//! For each level:
-//! 1. Calculate total width of nodes + spacing
-//! 2. Center the level horizontally
-//! 3. Assign x-coordinates left to right
+//! | Algorithm      | Graph-aware? | Passes | Quality |
+//! |----------------|-------------|--------|---------|
+//! | `.none`        | No          | 0      | ★       |
+//! | `.simple`      | Yes         | 2      | ★★      |
+//! | `.brandes_kopf`| Yes         | 6+     | ★★★     |
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -20,7 +22,11 @@ const common = @import("common.zig");
 pub const Config = common.Config;
 pub const PositionAssignment = common.PositionAssignment(usize);
 
-/// Compute node positions using simple left-to-right packing.
+/// Compute node positions using single-pass barycentric placement.
+///
+/// 1. **Top-down**: place each node near the average centre of its parents.
+/// 2. **Bottom-up**: re-centre each parent over its children.
+/// 3. Normalise so the leftmost node sits at x = 0.
 pub fn compute(
     g: *const Graph,
     levels: []const std.ArrayListUnmanaged(usize),
@@ -40,62 +46,194 @@ pub fn compute(
         };
     }
 
-    // Allocate position arrays
+    // Allocate result arrays
     const x = try allocator.alloc(usize, node_count);
+    errdefer allocator.free(x);
     const y = try allocator.alloc(usize, node_count);
+    errdefer allocator.free(y);
     const center_x = try allocator.alloc(usize, node_count);
+    errdefer allocator.free(center_x);
     @memset(x, 0);
     @memset(y, 0);
     @memset(center_x, 0);
 
-    // Calculate width of each level
-    var level_widths = try allocator.alloc(usize, levels.len);
-    defer allocator.free(level_widths);
+    // Working buffer in float space (avoids rounding errors between passes)
+    const float_x = try allocator.alloc(f64, node_count);
+    defer allocator.free(float_x);
+    @memset(float_x, 0.0);
+
+    const widths = try allocator.alloc(usize, node_count);
+    defer allocator.free(widths);
+    for (0..node_count) |i| {
+        widths[i] = if (g.nodeAt(i)) |node| node.width else 3;
+    }
+
+    const spacing: f64 = @floatFromInt(config.node_spacing);
+
+    if (levels.len == 0) {
+        return .{
+            .x = x,
+            .y = y,
+            .center_x = center_x,
+            .total_width = 0,
+            .total_height = 0,
+            .allocator = allocator,
+        };
+    }
+
+    // =====================================================================
+    // Phase 1: Baseline — left-to-right packing with level centering
+    //
+    // This is the same layout as .none.  We build on top of it so that the
+    // result is always at least as good as .none.
+    // =====================================================================
+
+    // Pack each level left-to-right
+    var level_widths_buf = try allocator.alloc(usize, levels.len);
+    defer allocator.free(level_widths_buf);
+
+    var max_level_width: usize = 0;
+    for (levels, 0..) |level, li| {
+        var cx: f64 = 0;
+        for (level.items) |node_idx| {
+            float_x[node_idx] = cx;
+            cx += @as(f64, @floatFromInt(widths[node_idx])) + spacing;
+        }
+        const lw: usize = if (cx > spacing) @intFromFloat(cx - spacing) else 0;
+        level_widths_buf[li] = lw;
+        max_level_width = @max(max_level_width, lw);
+    }
+
+    // Centre each level within the max width
+    for (levels, 0..) |level, li| {
+        if (level_widths_buf[li] < max_level_width) {
+            const offset: f64 = @floatFromInt((max_level_width - level_widths_buf[li]) / 2);
+            for (level.items) |node_idx| {
+                float_x[node_idx] += offset;
+            }
+        }
+    }
+
+    // =====================================================================
+    // Phase 2: Barycentric nudge — shift nodes toward connected neighbours
+    //
+    // For each node, compute the average centre of its parents + children.
+    // Blend current position toward that target (50 % weight) so we improve
+    // alignment without blowing up the compact baseline.
+    // Two iterations (down+up each) are enough for most graphs.
+    // =====================================================================
+
+    for (0..2) |_| {
+        // Top-down: nudge children toward parents
+        for (1..levels.len) |li| {
+            const level = levels[li];
+            const parent_level = levels[li - 1];
+
+            for (level.items) |node_idx| {
+                const parents = g.getParents(node_idx);
+                if (parents.len == 0) continue;
+
+                var sum: f64 = 0;
+                var count: usize = 0;
+                for (parent_level.items) |parent_idx| {
+                    for (parents) |p| {
+                        if (p == parent_idx) {
+                            const pw: f64 = @floatFromInt(widths[parent_idx]);
+                            sum += float_x[parent_idx] + pw / 2.0;
+                            count += 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (count > 0) {
+                    const w: f64 = @floatFromInt(widths[node_idx]);
+                    const target = sum / @as(f64, @floatFromInt(count)) - w / 2.0;
+                    const current = float_x[node_idx];
+                    float_x[node_idx] = current + (target - current) * 0.5;
+                }
+            }
+
+            compactLevel(level.items, float_x, widths, spacing);
+        }
+
+        // Bottom-up: nudge parents toward children
+        var li = levels.len;
+        while (li > 0) {
+            li -= 1;
+            const level = levels[li];
+
+            for (level.items) |node_idx| {
+                const children = g.getChildren(node_idx);
+                if (children.len == 0) continue;
+
+                var min_child_left: f64 = std.math.floatMax(f64);
+                var max_child_right: f64 = 0;
+                for (children) |child_idx| {
+                    const cw: f64 = @floatFromInt(widths[child_idx]);
+                    min_child_left = @min(min_child_left, float_x[child_idx]);
+                    max_child_right = @max(max_child_right, float_x[child_idx] + cw);
+                }
+
+                if (min_child_left < std.math.floatMax(f64)) {
+                    const w: f64 = @floatFromInt(widths[node_idx]);
+                    const target = (min_child_left + max_child_right) / 2.0 - w / 2.0;
+                    const current = float_x[node_idx];
+                    float_x[node_idx] = current + (target - current) * 0.5;
+                }
+            }
+
+            compactLevel(level.items, float_x, widths, spacing);
+        }
+    }
+
+    // =====================================================================
+    // Phase 3: Normalise — shift so leftmost node is at x = 0
+    // =====================================================================
+
+    var min_x: f64 = std.math.floatMax(f64);
+    for (0..node_count) |i| {
+        min_x = @min(min_x, float_x[i]);
+    }
+    if (min_x > 0 and min_x < std.math.floatMax(f64)) {
+        for (0..node_count) |i| {
+            float_x[i] -= min_x;
+        }
+    } else if (min_x < 0) {
+        for (0..node_count) |i| {
+            float_x[i] -= min_x;
+        }
+    }
+
+    // =====================================================================
+    // Phase 4: Convert to integer coordinates
+    // =====================================================================
 
     var max_width: usize = 0;
-    for (levels, 0..) |level, level_idx| {
-        var width: usize = 0;
-        for (level.items, 0..) |node_idx, pos| {
-            const node = g.nodeAt(node_idx) orelse continue;
-            if (pos > 0) {
-                width += config.node_spacing;
-            }
-            width += node.width;
-        }
-        level_widths[level_idx] = width;
-        max_width = @max(max_width, width);
-    }
-
-    // Assign positions
-    var current_y: usize = 0;
-    for (levels, 0..) |level, level_idx| {
-        // Center this level
-        const level_width = level_widths[level_idx];
-        const offset = (max_width - level_width) / 2;
-
-        var current_x = offset;
+    for (levels) |level| {
+        var level_right: usize = 0;
         for (level.items) |node_idx| {
-            const node = g.nodeAt(node_idx) orelse continue;
-
-            x[node_idx] = current_x;
-            y[node_idx] = current_y;
-            center_x[node_idx] = current_x + node.width / 2;
-
-            current_x += node.width + config.node_spacing;
+            const fx = float_x[node_idx];
+            const ix: usize = @intFromFloat(@max(0, @round(fx)));
+            x[node_idx] = ix;
+            center_x[node_idx] = ix + widths[node_idx] / 2;
+            level_right = @max(level_right, ix + widths[node_idx]);
         }
+        max_width = @max(max_width, level_right);
+    }
 
-        // Move to next level
-        if (level_idx < levels.len - 1) {
-            current_y += 1 + config.level_spacing; // 1 for node height
+    // Y coordinates
+    var current_y: usize = 0;
+    for (levels, 0..) |level, li| {
+        for (level.items) |node_idx| {
+            y[node_idx] = current_y;
+        }
+        if (li < levels.len - 1) {
+            current_y += 1 + config.level_spacing;
         }
     }
 
-    // Calculate total dimensions
-    // Node height = 1 line
-    const total_height = if (levels.len > 0)
-        current_y + 1 // Last level + node height
-    else
-        0;
+    const total_height = if (levels.len > 0) current_y + 1 else 0;
 
     return .{
         .x = x,
@@ -105,6 +243,45 @@ pub fn compute(
         .total_height = total_height,
         .allocator = allocator,
     };
+}
+
+/// Ensure nodes in a level don't overlap, maintaining their order.
+///
+/// Uses symmetric (bidirectional) compaction: a forward pass pushes right,
+/// a backward pass pushes left, and the average gives a balanced result
+/// that avoids systematic left- or right-bias.
+fn compactLevel(nodes: []const usize, float_x: []f64, widths_arr: []const usize, spacing: f64) void {
+    if (nodes.len == 0) return;
+
+    // --- Forward pass: push right to fix overlaps ---
+    var prev_right: f64 = 0;
+    for (nodes, 0..) |node_idx, pos| {
+        const w: f64 = @floatFromInt(widths_arr[node_idx]);
+        if (pos == 0) {
+            if (float_x[node_idx] < 0) float_x[node_idx] = 0;
+        } else {
+            const min_x = prev_right + spacing;
+            if (float_x[node_idx] < min_x) {
+                float_x[node_idx] = min_x;
+            }
+        }
+        prev_right = float_x[node_idx] + w;
+    }
+
+    // --- Backward pass: push left from the right edge ---
+    const right_edge = prev_right;
+    var next_left: f64 = right_edge;
+    var i: usize = nodes.len;
+    while (i > 0) {
+        i -= 1;
+        const node_idx = nodes[i];
+        const w: f64 = @floatFromInt(widths_arr[node_idx]);
+        const max_x = next_left - w;
+        if (float_x[node_idx] > max_x) {
+            float_x[node_idx] = max_x;
+        }
+        next_left = float_x[node_idx] - spacing;
+    }
 }
 
 // ============================================================================
@@ -171,38 +348,87 @@ test "simple positioning: two levels" {
     try std.testing.expectEqual(@as(usize, 3), pos.y[1]); // 1 + 2 spacing
 }
 
-test "simple positioning: centering" {
+test "simple positioning: parent centres over children" {
     const allocator = std.testing.allocator;
 
     var g = Graph.init(allocator);
     defer g.deinit();
 
-    try g.addNode(1, "Wide Node Here");
-    try g.addNode(2, "X");
-    try g.addEdge(1, 2);
+    try g.addNode(0, "Root");
+    try g.addNode(1, "Left");
+    try g.addNode(2, "Right");
+    try g.addEdge(0, 1);
+    try g.addEdge(0, 2);
 
     var level0: std.ArrayListUnmanaged(usize) = .{};
-    try level0.append(allocator, 0);
     defer level0.deinit(allocator);
+    try level0.append(allocator, 0);
 
     var level1: std.ArrayListUnmanaged(usize) = .{};
-    try level1.append(allocator, 1);
     defer level1.deinit(allocator);
+    try level1.append(allocator, 1);
+    try level1.append(allocator, 2);
 
     const levels = [_]std.ArrayListUnmanaged(usize){ level0, level1 };
 
     var pos = try compute(&g, &levels, .{}, allocator);
     defer pos.deinit();
 
-    // Narrow node should be centered under wide node
-    const wide_center = pos.center_x[0];
-    const narrow_center = pos.center_x[1];
+    // Parent centre should be between children centres (barycentric)
+    const parent_center = pos.center_x[0];
+    const left_center = pos.center_x[1];
+    const right_center = pos.center_x[2];
 
-    // Centers should be close (within a few chars due to centering)
-    const diff = if (wide_center > narrow_center)
-        wide_center - narrow_center
+    try std.testing.expect(parent_center >= left_center);
+    try std.testing.expect(parent_center <= right_center);
+}
+
+test "simple positioning: asymmetric tree differs from left-packing" {
+    const allocator = std.testing.allocator;
+
+    // Root -> Leaf, Root -> Branch -> A, B
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(0, "Root");
+    try g.addNode(1, "Leaf");
+    try g.addNode(2, "Branch");
+    try g.addNode(3, "A");
+    try g.addNode(4, "B");
+    try g.addEdge(0, 1);
+    try g.addEdge(0, 2);
+    try g.addEdge(2, 3);
+    try g.addEdge(2, 4);
+
+    var level0: std.ArrayListUnmanaged(usize) = .{};
+    defer level0.deinit(allocator);
+    try level0.append(allocator, 0); // Root
+
+    var level1: std.ArrayListUnmanaged(usize) = .{};
+    defer level1.deinit(allocator);
+    try level1.append(allocator, 1); // Leaf
+    try level1.append(allocator, 2); // Branch
+
+    var level2: std.ArrayListUnmanaged(usize) = .{};
+    defer level2.deinit(allocator);
+    try level2.append(allocator, 3); // A
+    try level2.append(allocator, 4); // B
+
+    const levels = [_]std.ArrayListUnmanaged(usize){ level0, level1, level2 };
+
+    var pos = try compute(&g, &levels, .{}, allocator);
+    defer pos.deinit();
+
+    // Branch should be centred over A and B
+    const branch_center = pos.center_x[2];
+    const a_center = pos.center_x[3];
+    const b_center = pos.center_x[4];
+    const children_mid = (a_center + b_center) / 2;
+
+    // Allow ±1 rounding tolerance
+    const diff = if (branch_center > children_mid)
+        branch_center - children_mid
     else
-        narrow_center - wide_center;
-
-    try std.testing.expect(diff <= 1); // Should be well-centered
+        children_mid - branch_center;
+    try std.testing.expect(diff <= 1);
 }

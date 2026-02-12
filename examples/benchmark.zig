@@ -124,7 +124,7 @@ pub fn main() !void {
     std.debug.print("┌─────────────────────┬────────────────┐\n", .{});
     std.debug.print("│  Algorithm          │   Layout (µs)  │\n", .{});
     std.debug.print("├─────────────────────┼────────────────┤\n", .{});
-    std.debug.print("│ Simple              │ {d:>14} │\n", .{positioning_results.simple_us});
+    std.debug.print("│ Barycentric          │ {d:>14} │\n", .{positioning_results.barycentric_us});
     std.debug.print("│ Brandes-Köpf        │ {d:>14} │\n", .{positioning_results.brandes_kopf_us});
     std.debug.print("└─────────────────────┴────────────────┘\n\n", .{});
 
@@ -491,7 +491,7 @@ fn benchmarkRandomDAG(allocator: std.mem.Allocator, node_count: usize, edge_coun
 }
 
 const PositioningResults = struct {
-    simple_us: u64,
+    barycentric_us: u64,
     brandes_kopf_us: u64,
 };
 
@@ -523,9 +523,9 @@ fn benchmarkPositioning(allocator: std.mem.Allocator, node_count: usize) !Positi
         }
     }
 
-    // Benchmark simple
+    // Benchmark barycentric
     const simple_start = std.time.nanoTimestamp();
-    var ir1 = try zigraph.layout(&graph, alloc, .{ .positioning = .simple });
+    var ir1 = try zigraph.layout(&graph, alloc, .{ .positioning = .barycentric });
     _ = &ir1;
     const simple_end = std.time.nanoTimestamp();
 
@@ -536,7 +536,7 @@ fn benchmarkPositioning(allocator: std.mem.Allocator, node_count: usize) !Positi
     const bk_end = std.time.nanoTimestamp();
 
     return .{
-        .simple_us = @as(u64, @intCast(@divFloor(simple_end - simple_start, 1000))),
+        .barycentric_us = @as(u64, @intCast(@divFloor(simple_end - simple_start, 1000))),
         .brandes_kopf_us = @as(u64, @intCast(@divFloor(bk_end - bk_start, 1000))),
     };
 }

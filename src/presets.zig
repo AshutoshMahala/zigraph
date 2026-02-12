@@ -56,7 +56,7 @@ pub const sugiyama = struct {
     ///
     /// - Layering: longest_path (fast, good results)
     /// - Crossing: balanced (median + adjacent exchange, 4 iterations)
-    /// - Positioning: none (left-to-right packing, no collisions)
+    /// - Positioning: compact (left-to-right packing, no collisions)
     /// - Routing: direct (Manhattan routing)
     ///
     /// Requirements: non_empty, acyclic, all_directed
@@ -65,7 +65,7 @@ pub const sugiyama = struct {
             .algorithm = .sugiyama,
             .layering = .longest_path,
             .crossing_reducers = &crossing.balanced,
-            .positioning = .none,
+            .positioning = .compact,
             .routing = .direct,
         };
     }
@@ -74,7 +74,7 @@ pub const sugiyama = struct {
     ///
     /// - Layering: longest_path (fast)
     /// - Crossing: fast (single median pass)
-    /// - Positioning: none (fastest, no collisions)
+    /// - Positioning: compact (fastest, no collisions)
     /// - Routing: direct
     ///
     /// Requirements: non_empty, acyclic, all_directed
@@ -83,7 +83,7 @@ pub const sugiyama = struct {
             .algorithm = .sugiyama,
             .layering = .longest_path,
             .crossing_reducers = &crossing.fast,
-            .positioning = .none,
+            .positioning = .compact,
             .routing = .direct,
         };
     }
@@ -92,7 +92,7 @@ pub const sugiyama = struct {
     ///
     /// - Layering: network_simplex_fast (minimizes edge span)
     /// - Crossing: quality (more iterations for fewer crossings)
-    /// - Positioning: none (TODO: brandes_kopf when collision-free)
+    /// - Positioning: compact (TODO: brandes_kopf for best quality)
     /// - Routing: spline (smooth bezier curves)
     ///
     /// Requirements: non_empty, acyclic, all_directed
@@ -101,7 +101,7 @@ pub const sugiyama = struct {
             .algorithm = .sugiyama,
             .layering = .network_simplex_fast,
             .crossing_reducers = &crossing.quality,
-            .positioning = .none, // TODO: .brandes_kopf when fixed
+            .positioning = .compact, // TODO: .brandes_kopf for best quality
             .routing = .spline,
         };
     }
@@ -191,7 +191,7 @@ test "sugiyama.standard returns valid config" {
     const config = sugiyama.standard();
     try std.testing.expect(config.algorithm == .sugiyama);
     try std.testing.expect(config.layering == .longest_path);
-    try std.testing.expect(config.positioning == .none);
+    try std.testing.expect(config.positioning == .compact);
     try std.testing.expect(config.routing == .direct);
 }
 

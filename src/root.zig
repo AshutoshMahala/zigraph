@@ -155,14 +155,6 @@ pub const svg = @import("render/svg.zig");
 pub const colors = @import("render/colors.zig");
 
 // ============================================================================
-// Comptime Support
-// ============================================================================
-
-/// Comptime graph builder for zero-runtime-cost diagrams
-pub const comptime_graph = @import("comptime_graph.zig");
-pub const ComptimeGraph = comptime_graph.ComptimeGraph;
-
-// ============================================================================
 // Layout configuration
 // ============================================================================
 
@@ -178,14 +170,14 @@ pub const Layering = enum {
 
 /// Available positioning algorithms
 pub const Positioning = enum {
-    /// No special positioning - left-to-right packing respecting crossing order.
+    /// Left-to-right packing respecting crossing order.
     /// This is the fastest and guarantees no overlaps. Dummy nodes are properly spaced.
-    none,
-    /// Simple left-to-right positioning with level centering.
-    /// NOTE: Currently has collision issues with dummy nodes - use .none instead.
-    simple,
-    /// Brandes-Köpf - centers parents over children, better tree layouts.
-    /// NOTE: Currently has collision issues with dummy nodes - use .none instead.
+    compact,
+    /// Single-pass barycentric: nudges nodes toward connected neighbours.
+    /// Starts from compact baseline, then refines with parent/child averaging.
+    barycentric,
+    /// Multi-pass (Brandes-Köpf): best visual quality for trees/DAGs.
+    /// Widest-level-first placement with iterative parent/child centering.
     brandes_kopf,
 };
 
@@ -226,9 +218,9 @@ pub const LayoutConfig = struct {
     /// Use presets: crossing.fast, crossing.balanced, crossing.quality, crossing.none
     /// Or build custom: &[_]crossing.Reducer{ crossing.medianReducer(4), ... }
     crossing_reducers: []const crossing.Reducer = &crossing.balanced,
-    /// Positioning algorithm (default: none - left-to-right packing)
-    /// Note: .simple and .brandes_kopf currently have collision issues with dummy nodes.
-    positioning: Positioning = .none,
+    /// Positioning algorithm (default: compact - left-to-right packing)
+    /// .barycentric = single-pass barycentric, .brandes_kopf = multi-pass (best quality)
+    positioning: Positioning = .compact,
     /// Edge routing algorithm (default: direct)
     routing: Routing = .direct,
 
@@ -446,17 +438,17 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     };
 
     // Step 4: Position nodes
-    // For .none: use left-to-right packing on virtual levels (fast, no collisions)
-    // For .simple/.brandes_kopf: run positioning algorithm (currently has collision issues)
+    // For .compact: use left-to-right packing on virtual levels (fast, no collisions)
+    // For .barycentric/.brandes_kopf: run positioning algorithm
     var virtual_positions = switch (config.positioning) {
-        .none => try layering.virtual.computeVirtualPositions(
+        .compact => try layering.virtual.computeVirtualPositions(
             g,
             &virtual_levels,
             config.node_spacing,
             effective_level_spacing,
             allocator,
         ),
-        .simple, .brandes_kopf => blk: {
+        .barycentric, .brandes_kopf => blk: {
             // Extract real-node-only levels for positioning algorithms
             var real_node_levels = try layering.virtual.extractRealNodeLevels(&virtual_levels, allocator);
             defer {
@@ -472,13 +464,12 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 
             var pos_assignment = switch (config.positioning) {
                 .brandes_kopf => try positioning.brandes_kopf.compute(g, levels_slice, pos_config, allocator),
-                .simple => try positioning.simple.compute(g, levels_slice, pos_config, allocator),
-                .none => unreachable,
+                .barycentric => try positioning.simple.compute(g, levels_slice, pos_config, allocator),
+                .compact => unreachable,
             };
             defer pos_assignment.deinit();
 
             // Position virtual levels using real node positions as hints
-            // NOTE: This has collision issues - dummies can overlap real nodes
             break :blk try layering.virtual.computeVirtualPositionsWithHints(
                 g,
                 &virtual_levels,
@@ -1081,9 +1072,9 @@ test "layout: positioning config affects output" {
     });
     defer result_bk.deinit();
 
-    // Layout with simple (left-to-right packing)
+    // Layout with barycentric (single-pass barycentric)
     var result_simple = try layout(&g, allocator, .{
-        .positioning = .simple,
+        .positioning = .barycentric,
     });
     defer result_simple.deinit();
 
