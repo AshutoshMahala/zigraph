@@ -28,6 +28,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const graph_mod = @import("../../../core/graph.zig");
 const Graph = graph_mod.Graph;
+const errors = @import("../../../core/errors.zig");
 const virtual_mod = @import("../layering/virtual.zig");
 const VirtualLevels = virtual_mod.VirtualLevels;
 
@@ -178,6 +179,9 @@ const LevelSnapshot = struct {
     fn validate(self: *const LevelSnapshot, levels: *const VirtualLevels) ReducerError!void {
         // Check level count unchanged
         if (levels.levels.items.len != self.level_count) {
+            var buf: [96]u8 = undefined;
+            const detail = std.fmt.bufPrint(&buf, "expected {d} levels, got {d}", .{ self.level_count, levels.levels.items.len }) catch "level count changed";
+            errors.captureErrorWithDetail(error.ReducerCorruptedLevels, @src(), detail);
             return error.ReducerCorruptedLevels;
         }
 
@@ -186,6 +190,9 @@ const LevelSnapshot = struct {
         for (levels.levels.items, 0..) |level, i| {
             if (i < 64) {
                 if (level.items.len != self.level_sizes[i]) {
+                    var buf: [96]u8 = undefined;
+                    const detail = std.fmt.bufPrint(&buf, "level {d}: expected {d} nodes, got {d}", .{ i, self.level_sizes[i], level.items.len }) catch "node count changed";
+                    errors.captureErrorWithDetail(error.ReducerCorruptedNodeCount, @src(), detail);
                     return error.ReducerCorruptedNodeCount;
                 }
                 current_total += level.items.len;
@@ -194,6 +201,9 @@ const LevelSnapshot = struct {
 
         // Check total node count
         if (current_total != self.total_nodes) {
+            var buf: [96]u8 = undefined;
+            const detail = std.fmt.bufPrint(&buf, "expected {d} total nodes, got {d}", .{ self.total_nodes, current_total }) catch "total node count changed";
+            errors.captureErrorWithDetail(error.ReducerMissingNode, @src(), detail);
             return error.ReducerMissingNode;
         }
     }

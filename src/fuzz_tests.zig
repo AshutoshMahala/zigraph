@@ -312,7 +312,7 @@ test "fuzz: boundary conditions" {
         0, // Zero ID
         1, // Normal
         std.math.maxInt(usize) - 1, // Near max
-        // Note: maxInt itself may cause issues with +1 operations
+            // Note: maxInt itself may cause issues with +1 operations
     };
 
     for (edge_case_ids) |id| {
@@ -914,14 +914,14 @@ test "security: max node limit enforced" {
     try graph.addNode(3, "C");
 
     // 4th node should fail
-    try std.testing.expectError(error.OutOfMemory, graph.addNode(4, "D"));
+    try std.testing.expectError(error.NodeLimitExceeded, graph.addNode(4, "D"));
 
     // Add 2 edges (at limit)
     try graph.addEdge(1, 2);
     try graph.addEdge(2, 3);
 
     // 3rd edge should fail
-    try std.testing.expectError(error.OutOfMemory, graph.addEdge(1, 3));
+    try std.testing.expectError(error.EdgeLimitExceeded, graph.addEdge(1, 3));
 }
 
 // ============================================================================

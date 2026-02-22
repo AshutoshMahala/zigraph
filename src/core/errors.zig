@@ -88,6 +88,9 @@ pub const Code = struct {
     /// Referenced node does not exist (021 = NOT_FOUND)
     pub const NODE_NOT_FOUND = code(E, Graph, Node, NOT_FOUND);
 
+    /// Node limit exceeded (026 = EXHAUSTED)
+    pub const NODE_LIMIT_EXCEEDED = code(E, Graph, Node, EXHAUSTED);
+
     // ========================================================================
     // Graph.Edge errors
     // ========================================================================
@@ -97,6 +100,9 @@ pub const Code = struct {
 
     /// Self-loop not allowed in DAG (003 = INVALID)
     pub const SELF_LOOP = code(E, Graph, Edge, INVALID);
+
+    /// Edge limit exceeded (026 = EXHAUSTED)
+    pub const EDGE_LIMIT_EXCEEDED = code(E, Graph, Edge, EXHAUSTED);
 
     /// Graph has undirected edges but algorithm requires all directed (002 = MISMATCH)
     pub const GRAPH_HAS_UNDIRECTED = code(E, Graph, Edge, MISMATCH);
@@ -191,17 +197,57 @@ pub const Code = struct {
     pub const JSON_WAYPOINTS_INVALID = code(E, Json, Waypoints, INVALID);
 };
 
-/// Detailed error information with WDP code
-pub const ErrorDetail = struct {
+// ============================================================================
+// Diagnostic System
+// ============================================================================
+
+/// Comptime-known diagnostic metadata for each error code.
+///
+/// Every ZigraphError has a corresponding DiagnosticInfo with:
+/// - WDP code (structured, parsable)
+/// - Human-readable message (what happened)
+/// - Actionable hint (what to do about it)
+///
+/// All fields are comptime string literals — zero allocation, zero cost.
+pub const DiagnosticInfo = struct {
     /// WDP structured code (e.g., "E.Graph.Node.001")
     code: []const u8,
-    /// Human-readable message
+    /// What happened (e.g., "Graph has no nodes")
     message: []const u8,
-    /// Optional: involved node IDs (for cycle, missing node, etc.)
+    /// What to do about it (e.g., "Add at least one node with graph.addNode(id, label)")
+    hint: []const u8,
+};
+
+/// Rich runtime diagnostic — carries full context for a single error.
+///
+/// Produced by `diagnosticInfo()` for comptime metadata, or by
+/// `lastDiagnostic()` for full context including source location.
+///
+/// ## Usage
+/// ```zig
+/// const ir = zigraph.layout(&graph, allocator, .{}) catch |err| {
+///     const info = zigraph.errors.diagnosticInfo(err);
+///     std.debug.print("[{s}] {s}\n", .{ info.code, info.message });
+///     std.debug.print("  Hint: {s}\n", .{ info.hint });
+///     return err;
+/// };
+/// ```
+pub const Diagnostic = struct {
+    /// WDP structured code (e.g., "E.Graph.Node.001")
+    code: []const u8,
+    /// What happened
+    message: []const u8,
+    /// What to do about it
+    hint: []const u8,
+    /// Specific details (e.g., "node 42 does not exist", "A -> B -> C -> A")
+    detail: ?[]const u8 = null,
+    /// Involved node IDs — machine-readable (e.g., cycle path, missing node)
     nodes: ?[]const usize = null,
+    /// Source location where the error was emitted (via @src())
+    src: ?std.builtin.SourceLocation = null,
 
     pub fn format(
-        self: ErrorDetail,
+        self: Diagnostic,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
@@ -209,16 +255,294 @@ pub const ErrorDetail = struct {
         _ = fmt;
         _ = options;
         try writer.print("[{s}] {s}", .{ self.code, self.message });
+        if (self.detail) |detail| {
+            try writer.print("\n  Detail: {s}", .{detail});
+        }
         if (self.nodes) |nodes| {
-            try writer.print(" (nodes: ", .{});
-            for (nodes, 0..) |node, i| {
-                if (i > 0) try writer.print(", ", .{});
-                try writer.print("{d}", .{node});
+            try writer.print("\n  Nodes:", .{});
+            for (nodes, 0..) |id, i| {
+                if (i > 0) try writer.print(",", .{});
+                try writer.print(" {d}", .{id});
             }
-            try writer.print(")", .{});
+        }
+        try writer.print("\n  Hint: {s}", .{self.hint});
+        if (self.src) |src| {
+            try writer.print("\n  at {s}:{d} in {s}", .{ src.file, src.line, src.fn_name });
         }
     }
 };
+
+/// Get comptime diagnostic metadata for any ZigraphError.
+///
+/// Returns the WDP code, human-readable message, and actionable hint.
+/// All returned strings are comptime literals — zero allocation.
+///
+/// ## Example
+/// ```zig
+/// const ir = zigraph.layout(&graph, allocator, .{}) catch |err| {
+///     const info = zigraph.errors.diagnosticInfo(err);
+///     std.log.err("[{s}] {s}\n  Hint: {s}", .{ info.code, info.message, info.hint });
+///     return err;
+/// };
+/// ```
+pub fn diagnosticInfo(err: ZigraphError) DiagnosticInfo {
+    return switch (err) {
+        // ── Graph.Node ──────────────────────────────────────────────
+        error.EmptyGraph => .{
+            .code = Code.EMPTY_GRAPH,
+            .message = "Graph has no nodes",
+            .hint = "Add at least one node with graph.addNode(id, label) before calling layout",
+        },
+        error.NodeNotFound => .{
+            .code = Code.NODE_NOT_FOUND,
+            .message = "Referenced node does not exist in the graph",
+            .hint = "Ensure both endpoint nodes exist (added via graph.addNode) before adding an edge between them",
+        },
+        error.NodeLimitExceeded => .{
+            .code = Code.NODE_LIMIT_EXCEEDED,
+            .message = "Node count exceeds configured maximum",
+            .hint = "Increase max_nodes in Graph.initWithOptions() (default: 100,000; set to 0 for unlimited)",
+        },
+
+        // ── Graph.Edge ──────────────────────────────────────────────
+        error.EdgeLimitExceeded => .{
+            .code = Code.EDGE_LIMIT_EXCEEDED,
+            .message = "Edge count exceeds configured maximum",
+            .hint = "Increase max_edges in Graph.initWithOptions() (default: 500,000; set to 0 for unlimited)",
+        },
+        error.GraphHasUndirectedEdges => .{
+            .code = Code.GRAPH_HAS_UNDIRECTED,
+            .message = "Graph contains undirected edges but algorithm requires all directed",
+            .hint = "Use graph.addDiEdge() instead of graph.addUnDiEdge(), or choose a force-directed algorithm that accepts undirected edges",
+        },
+        error.GraphHasDirectedEdges => .{
+            .code = Code.GRAPH_HAS_DIRECTED,
+            .message = "Graph contains directed edges but algorithm requires all undirected",
+            .hint = "Use graph.addUnDiEdge() instead of graph.addDiEdge()",
+        },
+
+        // ── Graph.Dag ───────────────────────────────────────────────
+        error.CycleDetected => .{
+            .code = Code.CYCLE_DETECTED,
+            .message = "Graph contains a cycle — not a valid DAG",
+            .hint = "Use .cycle_breaking = .depth_first to handle cycles automatically, or ensure your graph is acyclic",
+        },
+
+        // ── Graph.Component ─────────────────────────────────────────
+        error.GraphDisconnected => .{
+            .code = Code.GRAPH_DISCONNECTED,
+            .message = "Graph is disconnected (multiple components)",
+            .hint = "Ensure all nodes are reachable from each other, or process each connected component separately",
+        },
+
+        // ── Layout.Algo ─────────────────────────────────────────────
+        error.OutOfMemory => .{
+            .code = Code.OUT_OF_MEMORY,
+            .message = "Memory allocation failed",
+            .hint = "Reduce graph size or use an allocator with more capacity (e.g., std.heap.page_allocator or a larger arena)",
+        },
+
+        // ── Layout.Reducer ──────────────────────────────────────────
+        error.ReducerCorruptedLevels => .{
+            .code = Code.REDUCER_LEVEL_COUNT_MISMATCH,
+            .message = "Crossing reducer corrupted level structure — level count changed",
+            .hint = "Custom reducers must only reorder nodes within levels, never add or remove levels",
+        },
+        error.ReducerCorruptedNodeCount => .{
+            .code = Code.REDUCER_NODE_COUNT_MISMATCH,
+            .message = "Crossing reducer changed node count in a level",
+            .hint = "Custom reducers must not move nodes between levels — only reorder within each level",
+        },
+        error.ReducerDuplicateNode => .{
+            .code = Code.REDUCER_DUPLICATE_NODE,
+            .message = "Crossing reducer created duplicate node entries",
+            .hint = "Each node must appear exactly once across all levels — check for accidental duplication in custom reducer logic",
+        },
+        error.ReducerMissingNode => .{
+            .code = Code.REDUCER_MISSING_NODE,
+            .message = "Crossing reducer lost nodes — total count decreased",
+            .hint = "Custom reducers must preserve all nodes — verify no nodes are dropped during reordering",
+        },
+
+        // ── Json.* ──────────────────────────────────────────────────
+        error.JsonRootTypeMismatch => .{
+            .code = Code.JSON_ROOT_TYPE_MISMATCH,
+            .message = "JSON root is not an object",
+            .hint = "The JSON IR must be a top-level object with 'version', 'nodes', and 'edges' fields",
+        },
+        error.JsonVersionMissing => .{
+            .code = Code.JSON_VERSION_MISSING,
+            .message = "JSON 'version' field is missing",
+            .hint = "Add a 'version' field to the root object (e.g., \"version\": \"1.0\")",
+        },
+        error.JsonVersionTypeMismatch => .{
+            .code = Code.JSON_VERSION_TYPE_MISMATCH,
+            .message = "JSON 'version' field is not a string",
+            .hint = "The 'version' field must be a string (e.g., \"version\": \"1.0\")",
+        },
+        error.JsonVersionUnsupported => .{
+            .code = Code.JSON_VERSION_UNSUPPORTED,
+            .message = "JSON IR version is not supported",
+            .hint = "Use version \"1.0\" — this is the only currently supported IR version",
+        },
+        error.JsonNodesMissing => .{
+            .code = Code.JSON_NODES_MISSING,
+            .message = "JSON 'nodes' array is missing",
+            .hint = "Add a 'nodes' array to the root object containing node objects",
+        },
+        error.JsonNodesTypeMismatch => .{
+            .code = Code.JSON_NODES_TYPE_MISMATCH,
+            .message = "JSON 'nodes' field is not an array",
+            .hint = "The 'nodes' field must be a JSON array of node objects",
+        },
+        error.JsonNodeTypeMismatch => .{
+            .code = Code.JSON_NODE_TYPE_MISMATCH,
+            .message = "JSON node entry is not an object",
+            .hint = "Each element in the 'nodes' array must be an object with 'id', 'label', 'x', 'y', 'width', 'center_x', 'level', 'level_position' fields",
+        },
+        error.JsonEdgesMissing => .{
+            .code = Code.JSON_EDGES_MISSING,
+            .message = "JSON 'edges' array is missing",
+            .hint = "Add an 'edges' array to the root object containing edge objects",
+        },
+        error.JsonEdgesTypeMismatch => .{
+            .code = Code.JSON_EDGES_TYPE_MISMATCH,
+            .message = "JSON 'edges' field is not an array",
+            .hint = "The 'edges' field must be a JSON array of edge objects",
+        },
+        error.JsonEdgeTypeMismatch => .{
+            .code = Code.JSON_EDGE_TYPE_MISMATCH,
+            .message = "JSON edge entry is not an object",
+            .hint = "Each element in the 'edges' array must be an object with 'from', 'to', 'from_x', 'from_y', 'to_x', 'to_y' fields",
+        },
+        error.JsonFieldMissing => .{
+            .code = Code.JSON_FIELD_MISSING,
+            .message = "Required JSON field is missing",
+            .hint = "Check the JSON IR schema in JSON_SCHEMA.md for required fields on each element",
+        },
+        error.JsonFieldTypeMismatch => .{
+            .code = Code.JSON_FIELD_TYPE_MISMATCH,
+            .message = "JSON field has wrong type",
+            .hint = "Check the JSON IR schema — numeric fields must be integers, string fields must be strings",
+        },
+        error.JsonPathInvalid => .{
+            .code = Code.JSON_PATH_INVALID,
+            .message = "JSON edge path object is invalid",
+            .hint = "Edge path must have a 'type' field with value 'direct', 'corner', 'side_channel', 'multi_segment', or 'spline'",
+        },
+        error.JsonWaypointsInvalid => .{
+            .code = Code.JSON_WAYPOINTS_INVALID,
+            .message = "JSON waypoints array is invalid",
+            .hint = "Waypoints must be an array of [x, y] coordinate pairs (arrays of two integers)",
+        },
+    };
+}
+
+// ============================================================================
+// Source Location Capture
+// ============================================================================
+
+/// Most recent error source location (single-threaded; set by captureSrc).
+/// This is module-level state — safe because zigraph is single-threaded.
+var last_src: ?std.builtin.SourceLocation = null;
+
+/// Most recent error code (set alongside last_src).
+var last_err: ?ZigraphError = null;
+
+/// Buffer for the most recent error detail string (no allocation needed).
+var last_detail_buf: [512]u8 = undefined;
+var last_detail_len: usize = 0;
+
+/// Buffer for the most recent error node IDs (no allocation needed).
+const max_captured_nodes = 64;
+var last_nodes_buf: [max_captured_nodes]usize = undefined;
+var last_nodes_len: usize = 0;
+
+/// Record source location for the most recent error.
+///
+/// Call this immediately before returning an error to capture where it happened:
+/// ```zig
+/// captureSrc(@src());
+/// return error.NodeNotFound;
+/// ```
+pub fn captureSrc(src: std.builtin.SourceLocation) void {
+    last_src = src;
+}
+
+/// Record both the error and source location.
+///
+/// Convenience for capturing context in a single call:
+/// ```zig
+/// captureError(error.CycleDetected, @src());
+/// return error.CycleDetected;
+/// ```
+pub fn captureError(err: ZigraphError, src: std.builtin.SourceLocation) void {
+    last_err = err;
+    last_src = src;
+    last_detail_len = 0;
+    last_nodes_len = 0;
+}
+
+/// Record error, source location, and a runtime detail string.
+///
+/// The detail is copied into an internal fixed buffer (truncated at 512 bytes).
+pub fn captureErrorWithDetail(err: ZigraphError, src: std.builtin.SourceLocation, detail: []const u8) void {
+    last_err = err;
+    last_src = src;
+    const len = @min(detail.len, last_detail_buf.len);
+    @memcpy(last_detail_buf[0..len], detail[0..len]);
+    last_detail_len = len;
+    last_nodes_len = 0;
+}
+
+/// Record error, source location, detail string, and involved node IDs.
+///
+/// Both detail and nodes are copied into internal fixed buffers — zero allocation.
+/// Detail truncates at 512 bytes, nodes at 64 entries.
+///
+/// ```zig
+/// errors.captureErrorFull(error.CycleDetected, @src(), "A -> B -> C -> A", &.{1, 2, 3, 1});
+/// ```
+pub fn captureErrorFull(
+    err: ZigraphError,
+    src: std.builtin.SourceLocation,
+    detail: []const u8,
+    node_ids: []const usize,
+) void {
+    last_err = err;
+    last_src = src;
+    const dlen = @min(detail.len, last_detail_buf.len);
+    @memcpy(last_detail_buf[0..dlen], detail[0..dlen]);
+    last_detail_len = dlen;
+    const nlen = @min(node_ids.len, max_captured_nodes);
+    @memcpy(last_nodes_buf[0..nlen], node_ids[0..nlen]);
+    last_nodes_len = nlen;
+}
+
+/// Retrieve a full Diagnostic for the most recently captured error.
+///
+/// Returns null if no error has been captured via captureSrc/captureError.
+/// Combines the comptime DiagnosticInfo with the runtime source location.
+pub fn lastDiagnostic() ?Diagnostic {
+    const err = last_err orelse return null;
+    const info = diagnosticInfo(err);
+    return Diagnostic{
+        .code = info.code,
+        .message = info.message,
+        .hint = info.hint,
+        .detail = if (last_detail_len > 0) last_detail_buf[0..last_detail_len] else null,
+        .nodes = if (last_nodes_len > 0) last_nodes_buf[0..last_nodes_len] else null,
+        .src = last_src,
+    };
+}
+
+/// Clear the captured error state.
+pub fn clearDiagnostic() void {
+    last_src = null;
+    last_err = null;
+    last_detail_len = 0;
+    last_nodes_len = 0;
+}
 
 /// Cycle information returned when a cycle is detected
 pub const CycleInfo = struct {
@@ -475,6 +799,10 @@ pub const ZigraphError = error{
     NodeNotFound,
     /// The graph is empty (no nodes)
     EmptyGraph,
+    /// Node count exceeds configured max_nodes limit
+    NodeLimitExceeded,
+    /// Edge count exceeds configured max_edges limit
+    EdgeLimitExceeded,
     /// The graph contains a cycle
     CycleDetected,
     /// Graph has undirected edges but algorithm requires all directed
@@ -528,6 +856,8 @@ pub fn errorCode(err: ZigraphError) []const u8 {
     return switch (err) {
         error.NodeNotFound => Code.NODE_NOT_FOUND,
         error.EmptyGraph => Code.EMPTY_GRAPH,
+        error.NodeLimitExceeded => Code.NODE_LIMIT_EXCEEDED,
+        error.EdgeLimitExceeded => Code.EDGE_LIMIT_EXCEEDED,
         error.CycleDetected => Code.CYCLE_DETECTED,
         error.GraphHasUndirectedEdges => Code.GRAPH_HAS_UNDIRECTED,
         error.GraphHasDirectedEdges => Code.GRAPH_HAS_DIRECTED,
@@ -563,6 +893,8 @@ test "WDP code format" {
     try std.testing.expectEqualStrings("E.Graph.Node.001", Code.EMPTY_GRAPH);
     try std.testing.expectEqualStrings("E.Graph.Dag.003", Code.CYCLE_DETECTED);
     try std.testing.expectEqualStrings("E.Graph.Node.021", Code.NODE_NOT_FOUND);
+    try std.testing.expectEqualStrings("E.Graph.Node.026", Code.NODE_LIMIT_EXCEEDED);
+    try std.testing.expectEqualStrings("E.Graph.Edge.026", Code.EDGE_LIMIT_EXCEEDED);
     try std.testing.expectEqualStrings("E.Layout.Algo.026", Code.OUT_OF_MEMORY);
     try std.testing.expectEqualStrings("E.Graph.Edge.002", Code.GRAPH_HAS_UNDIRECTED);
     try std.testing.expectEqualStrings("E.Graph.Edge.002", Code.GRAPH_HAS_DIRECTED);
@@ -570,21 +902,166 @@ test "WDP code format" {
 }
 
 test "error detail formatting" {
-    const detail = ErrorDetail{
+    const detail = Diagnostic{
         .code = Code.CYCLE_DETECTED,
         .message = "Graph contains a cycle",
+        .hint = "Use .cycle_breaking = .depth_first",
+        .detail = "A -> B -> C -> A",
         .nodes = &[_]usize{ 1, 2, 3, 1 },
     };
 
     try std.testing.expectEqualStrings(Code.CYCLE_DETECTED, detail.code);
     try std.testing.expectEqualStrings("Graph contains a cycle", detail.message);
+    try std.testing.expectEqualStrings("A -> B -> C -> A", detail.detail.?);
     try std.testing.expectEqual(@as(usize, 4), detail.nodes.?.len);
+    try std.testing.expectEqual(@as(usize, 1), detail.nodes.?[0]);
+    try std.testing.expectEqual(@as(usize, 3), detail.nodes.?[2]);
+}
+
+test "diagnosticInfo provides hints for all errors" {
+    // Every ZigraphError must have a non-empty hint
+    const info_empty = diagnosticInfo(error.EmptyGraph);
+    try std.testing.expectEqualStrings(Code.EMPTY_GRAPH, info_empty.code);
+    try std.testing.expect(info_empty.hint.len > 0);
+    try std.testing.expect(info_empty.message.len > 0);
+
+    const info_cycle = diagnosticInfo(error.CycleDetected);
+    try std.testing.expectEqualStrings(Code.CYCLE_DETECTED, info_cycle.code);
+    try std.testing.expect(std.mem.indexOf(u8, info_cycle.hint, "cycle_breaking") != null);
+
+    const info_node = diagnosticInfo(error.NodeNotFound);
+    try std.testing.expectEqualStrings(Code.NODE_NOT_FOUND, info_node.code);
+    try std.testing.expect(std.mem.indexOf(u8, info_node.hint, "addNode") != null);
+
+    const info_node_limit = diagnosticInfo(error.NodeLimitExceeded);
+    try std.testing.expectEqualStrings(Code.NODE_LIMIT_EXCEEDED, info_node_limit.code);
+    try std.testing.expect(std.mem.indexOf(u8, info_node_limit.hint, "max_nodes") != null);
+
+    const info_edge_limit = diagnosticInfo(error.EdgeLimitExceeded);
+    try std.testing.expectEqualStrings(Code.EDGE_LIMIT_EXCEEDED, info_edge_limit.code);
+    try std.testing.expect(std.mem.indexOf(u8, info_edge_limit.hint, "max_edges") != null);
+
+    const info_oom = diagnosticInfo(error.OutOfMemory);
+    try std.testing.expectEqualStrings(Code.OUT_OF_MEMORY, info_oom.code);
+
+    const info_json = diagnosticInfo(error.JsonVersionUnsupported);
+    try std.testing.expectEqualStrings(Code.JSON_VERSION_UNSUPPORTED, info_json.code);
+    try std.testing.expect(std.mem.indexOf(u8, info_json.hint, "1.0") != null);
+}
+
+test "diagnosticInfo code matches errorCode" {
+    // Verify diagnosticInfo and errorCode return the same WDP code for every error
+    const all_errors = [_]ZigraphError{
+        error.EmptyGraph,
+        error.NodeNotFound,
+        error.NodeLimitExceeded,
+        error.EdgeLimitExceeded,
+        error.CycleDetected,
+        error.GraphHasUndirectedEdges,
+        error.GraphHasDirectedEdges,
+        error.GraphDisconnected,
+        error.OutOfMemory,
+        error.ReducerCorruptedLevels,
+        error.ReducerCorruptedNodeCount,
+        error.ReducerDuplicateNode,
+        error.ReducerMissingNode,
+        error.JsonRootTypeMismatch,
+        error.JsonVersionMissing,
+        error.JsonVersionTypeMismatch,
+        error.JsonVersionUnsupported,
+        error.JsonNodesMissing,
+        error.JsonNodesTypeMismatch,
+        error.JsonNodeTypeMismatch,
+        error.JsonEdgesMissing,
+        error.JsonEdgesTypeMismatch,
+        error.JsonEdgeTypeMismatch,
+        error.JsonFieldMissing,
+        error.JsonFieldTypeMismatch,
+        error.JsonPathInvalid,
+        error.JsonWaypointsInvalid,
+    };
+    for (all_errors) |err| {
+        const info = diagnosticInfo(err);
+        const code_from_fn = errorCode(err);
+        try std.testing.expectEqualStrings(code_from_fn, info.code);
+    }
+}
+
+test "captureSrc and lastDiagnostic" {
+    // Initially no diagnostic
+    clearDiagnostic();
+    try std.testing.expect(lastDiagnostic() == null);
+
+    // Capture an error
+    captureError(error.EmptyGraph, @src());
+    const diag = lastDiagnostic().?;
+    try std.testing.expectEqualStrings(Code.EMPTY_GRAPH, diag.code);
+    try std.testing.expect(diag.src != null);
+    try std.testing.expect(diag.hint.len > 0);
+    try std.testing.expect(diag.detail == null);
+
+    // Clear
+    clearDiagnostic();
+    try std.testing.expect(lastDiagnostic() == null);
+}
+
+test "captureErrorWithDetail" {
+    clearDiagnostic();
+
+    // NodeNotFound with detail only — nodes should be null
+    captureErrorWithDetail(error.NodeNotFound, @src(), "node 42 does not exist");
+    const diag = lastDiagnostic().?;
+    try std.testing.expectEqualStrings(Code.NODE_NOT_FOUND, diag.code);
+    try std.testing.expect(diag.detail != null);
+    try std.testing.expectEqualStrings("node 42 does not exist", diag.detail.?);
+    try std.testing.expect(diag.nodes == null);
+
+    // Overlong detail is truncated, not a crash
+    var long: [600]u8 = undefined;
+    @memset(&long, 'x');
+    captureErrorWithDetail(error.OutOfMemory, @src(), &long);
+    const diag2 = lastDiagnostic().?;
+    try std.testing.expectEqual(@as(usize, 512), diag2.detail.?.len);
+
+    clearDiagnostic();
+}
+
+test "captureErrorFull with nodes" {
+    clearDiagnostic();
+
+    // CycleDetected with detail + node IDs
+    captureErrorFull(error.CycleDetected, @src(), "A -> B -> C -> A", &.{ 1, 2, 3, 1 });
+    const diag = lastDiagnostic().?;
+    try std.testing.expectEqualStrings(Code.CYCLE_DETECTED, diag.code);
+    try std.testing.expectEqualStrings("A -> B -> C -> A", diag.detail.?);
+    try std.testing.expect(diag.nodes != null);
+    try std.testing.expectEqual(@as(usize, 4), diag.nodes.?.len);
+    try std.testing.expectEqual(@as(usize, 1), diag.nodes.?[0]);
+    try std.testing.expectEqual(@as(usize, 2), diag.nodes.?[1]);
+    try std.testing.expectEqual(@as(usize, 3), diag.nodes.?[2]);
+    try std.testing.expectEqual(@as(usize, 1), diag.nodes.?[3]);
+
+    // NodeNotFound with single node ID
+    captureErrorFull(error.NodeNotFound, @src(), "node 42 does not exist", &.{42});
+    const diag2 = lastDiagnostic().?;
+    try std.testing.expectEqual(@as(usize, 1), diag2.nodes.?.len);
+    try std.testing.expectEqual(@as(usize, 42), diag2.nodes.?[0]);
+
+    // captureError clears nodes
+    captureError(error.EmptyGraph, @src());
+    const diag3 = lastDiagnostic().?;
+    try std.testing.expect(diag3.nodes == null);
+    try std.testing.expect(diag3.detail == null);
+
+    clearDiagnostic();
 }
 
 test "error to WDP code mapping" {
     try std.testing.expectEqualStrings(Code.EMPTY_GRAPH, errorCode(error.EmptyGraph));
     try std.testing.expectEqualStrings(Code.CYCLE_DETECTED, errorCode(error.CycleDetected));
     try std.testing.expectEqualStrings(Code.NODE_NOT_FOUND, errorCode(error.NodeNotFound));
+    try std.testing.expectEqualStrings(Code.NODE_LIMIT_EXCEEDED, errorCode(error.NodeLimitExceeded));
+    try std.testing.expectEqualStrings(Code.EDGE_LIMIT_EXCEEDED, errorCode(error.EdgeLimitExceeded));
     try std.testing.expectEqualStrings(Code.OUT_OF_MEMORY, errorCode(error.OutOfMemory));
     try std.testing.expectEqualStrings(Code.GRAPH_HAS_UNDIRECTED, errorCode(error.GraphHasUndirectedEdges));
     try std.testing.expectEqualStrings(Code.GRAPH_HAS_DIRECTED, errorCode(error.GraphHasDirectedEdges));

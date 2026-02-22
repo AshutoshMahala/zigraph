@@ -162,7 +162,7 @@ pub const Graph = struct {
     /// Add a node to the graph.
     ///
     /// If a node with the same ID already exists, this is a no-op.
-    /// Returns error.OutOfMemory if max_nodes limit would be exceeded.
+    /// Returns error.NodeLimitExceeded if max_nodes limit would be exceeded.
     pub fn addNode(self: *Self, id: usize, label: []const u8) !void {
         // Check if node already exists
         if (self.id_to_index.contains(id)) {
@@ -171,7 +171,10 @@ pub const Graph = struct {
 
         // Security: enforce max node limit to prevent DoS (0 = unlimited)
         if (self.max_nodes > 0 and self.nodes.items.len >= self.max_nodes) {
-            return error.OutOfMemory;
+            var detail_buf: [96]u8 = undefined;
+            const detail = std.fmt.bufPrint(&detail_buf, "{d} nodes at limit of {d}", .{ self.nodes.items.len, self.max_nodes }) catch "node limit exceeded";
+            errors.captureErrorWithDetail(error.NodeLimitExceeded, @src(), detail);
+            return error.NodeLimitExceeded;
         }
 
         const idx = self.nodes.items.len;
@@ -188,7 +191,7 @@ pub const Graph = struct {
     /// Add a directed edge from → to.
     ///
     /// Both nodes must already exist. Returns error if either node is missing.
-    /// Returns error.OutOfMemory if max_edges limit would be exceeded.
+    /// Returns error.EdgeLimitExceeded if max_edges limit would be exceeded.
     pub fn addDiEdge(self: *Self, from: usize, to: usize) !void {
         try self.addEdgeInternal(from, to, true, null);
     }
@@ -256,12 +259,25 @@ pub const Graph = struct {
         directed: bool,
         label: ?[]const u8,
     ) !void {
-        const from_idx = self.id_to_index.get(from) orelse return error.NodeNotFound;
-        const to_idx = self.id_to_index.get(to) orelse return error.NodeNotFound;
+        const from_idx = self.id_to_index.get(from) orelse {
+            var detail_buf: [64]u8 = undefined;
+            const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{from}) catch "node does not exist";
+            errors.captureErrorFull(error.NodeNotFound, @src(), detail, &.{from});
+            return error.NodeNotFound;
+        };
+        const to_idx = self.id_to_index.get(to) orelse {
+            var detail_buf: [64]u8 = undefined;
+            const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{to}) catch "node does not exist";
+            errors.captureErrorFull(error.NodeNotFound, @src(), detail, &.{to});
+            return error.NodeNotFound;
+        };
 
         // Security: enforce max edge limit to prevent DoS (0 = unlimited)
         if (self.max_edges > 0 and self.edges.items.len >= self.max_edges) {
-            return error.OutOfMemory;
+            var detail_buf: [96]u8 = undefined;
+            const detail = std.fmt.bufPrint(&detail_buf, "{d} edges at limit of {d}", .{ self.edges.items.len, self.max_edges }) catch "edge limit exceeded";
+            errors.captureErrorWithDetail(error.EdgeLimitExceeded, @src(), detail);
+            return error.EdgeLimitExceeded;
         }
 
         try self.edges.append(self.allocator, .{

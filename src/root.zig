@@ -40,11 +40,13 @@ pub const CycleInfo = graph.CycleInfo;
 /// Error types (WDP Level 0 compliant)
 pub const errors = @import("core/errors.zig");
 pub const Code = errors.Code;
-pub const ErrorDetail = errors.ErrorDetail;
+pub const Diagnostic = errors.Diagnostic;
+pub const DiagnosticInfo = errors.DiagnosticInfo;
 pub const ZigraphError = errors.ZigraphError;
 pub const ValidationFailures = errors.ValidationFailures;
 pub const Requirements = errors.Requirements;
 pub const GraphProperties = errors.GraphProperties;
+pub const diagnosticInfo = errors.diagnosticInfo;
 
 /// Validation algorithms
 pub const validation = @import("core/validation.zig");
@@ -303,7 +305,10 @@ fn layoutFdg(
     fast: bool,
 ) anyerror!LayoutIR(usize) {
     const n = g.nodeCount();
-    if (n == 0) return error.EmptyGraph;
+    if (n == 0) {
+        errors.captureError(error.EmptyGraph, @src());
+        return error.EmptyGraph;
+    }
 
     // Run the force-directed algorithm
     var fdg_result = if (fast)
@@ -418,11 +423,44 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         defer validation_result.deinit();
 
         switch (validation_result) {
-            .empty => return error.EmptyGraph,
-            .cycle => |_| {
+            .empty => {
+                errors.captureError(error.EmptyGraph, @src());
+                return error.EmptyGraph;
+            },
+            .cycle => |cycle_info| {
                 // If cycle breaking is enabled, we handle cycles below.
-                // If not, reject the graph.
-                if (config.cycle_breaking == .none) return error.CycleDetected;
+                // If not, reject the graph with detail and node IDs.
+                if (config.cycle_breaking == .none) {
+                    // Build human-readable detail (capped at 5 nodes)
+                    var detail_buf: [256]u8 = undefined;
+                    var fbs = std.io.fixedBufferStream(&detail_buf);
+                    const w = fbs.writer();
+                    const max_shown = 5;
+                    const path = cycle_info.path;
+                    const total = path.len;
+                    const show = @min(total, max_shown);
+                    for (path[0..show], 0..) |node_idx, i| {
+                        if (i > 0) w.writeAll(" -> ") catch {};
+                        if (g.nodeAt(node_idx)) |node| {
+                            w.writeAll(node.label) catch {};
+                        } else {
+                            w.print("{d}", .{node_idx}) catch {};
+                        }
+                    }
+                    if (total > max_shown) {
+                        w.print(" -> ... (+{d} more)", .{total - max_shown}) catch {};
+                    }
+
+                    // Build machine-readable node IDs (indices → IDs)
+                    var id_buf: [64]usize = undefined;
+                    const id_count = @min(total, 64);
+                    for (path[0..id_count], 0..) |node_idx, i| {
+                        id_buf[i] = if (g.nodeAt(node_idx)) |node| node.id else node_idx;
+                    }
+
+                    errors.captureErrorFull(error.CycleDetected, @src(), fbs.getWritten(), id_buf[0..id_count]);
+                    return error.CycleDetected;
+                }
             },
             .ok => {},
         }
