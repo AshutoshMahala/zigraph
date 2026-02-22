@@ -245,44 +245,7 @@ pub fn compute(
     };
 }
 
-/// Ensure nodes in a level don't overlap, maintaining their order.
-///
-/// Uses symmetric (bidirectional) compaction: a forward pass pushes right,
-/// a backward pass pushes left, and the average gives a balanced result
-/// that avoids systematic left- or right-bias.
-fn compactLevel(nodes: []const usize, float_x: []f64, widths_arr: []const usize, spacing: f64) void {
-    if (nodes.len == 0) return;
-
-    // --- Forward pass: push right to fix overlaps ---
-    var prev_right: f64 = 0;
-    for (nodes, 0..) |node_idx, pos| {
-        const w: f64 = @floatFromInt(widths_arr[node_idx]);
-        if (pos == 0) {
-            if (float_x[node_idx] < 0) float_x[node_idx] = 0;
-        } else {
-            const min_x = prev_right + spacing;
-            if (float_x[node_idx] < min_x) {
-                float_x[node_idx] = min_x;
-            }
-        }
-        prev_right = float_x[node_idx] + w;
-    }
-
-    // --- Backward pass: push left from the right edge ---
-    const right_edge = prev_right;
-    var next_left: f64 = right_edge;
-    var i: usize = nodes.len;
-    while (i > 0) {
-        i -= 1;
-        const node_idx = nodes[i];
-        const w: f64 = @floatFromInt(widths_arr[node_idx]);
-        const max_x = next_left - w;
-        if (float_x[node_idx] > max_x) {
-            float_x[node_idx] = max_x;
-        }
-        next_left = float_x[node_idx] - spacing;
-    }
-}
+const compactLevel = common.compactLevel;
 
 // ============================================================================
 // Tests

@@ -92,7 +92,7 @@ pub const sugiyama = struct {
     ///
     /// - Layering: network_simplex_fast (minimizes edge span)
     /// - Crossing: quality (more iterations for fewer crossings)
-    /// - Positioning: compact (TODO: brandes_kopf for best quality)
+    /// - Positioning: brandes_kopf (best quality centering)
     /// - Routing: spline (smooth bezier curves)
     ///
     /// Requirements: non_empty, acyclic, all_directed
@@ -101,7 +101,7 @@ pub const sugiyama = struct {
             .algorithm = .sugiyama,
             .layering = .network_simplex_fast,
             .crossing_reducers = &crossing.quality,
-            .positioning = .compact, // TODO: .brandes_kopf for best quality
+            .positioning = .brandes_kopf,
             .routing = .spline,
         };
     }

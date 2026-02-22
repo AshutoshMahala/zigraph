@@ -90,8 +90,6 @@ pub const Graph = struct {
         max_nodes: usize = default_max_nodes,
         /// Maximum edges allowed. Set to 0 for unlimited (not recommended).
         max_edges: usize = default_max_edges,
-        /// Number of crossing reduction passes (default: 4)
-        crossing_passes: usize = 4,
     };
 
     allocator: Allocator,
@@ -110,9 +108,6 @@ pub const Graph = struct {
 
     /// Adjacency list: parents[idx] = indices of parent nodes
     parents: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)),
-
-    /// Number of crossing reduction passes (default: 4)
-    crossing_passes: usize,
 
     /// Resource limits
     max_nodes: usize,
@@ -134,7 +129,6 @@ pub const Graph = struct {
             .id_to_index = .{},
             .children = .{},
             .parents = .{},
-            .crossing_passes = options.crossing_passes,
             .max_nodes = options.max_nodes,
             .max_edges = options.max_edges,
         };
@@ -386,11 +380,6 @@ pub const Graph = struct {
             }
         }
         return leaves;
-    }
-
-    /// Set the number of crossing reduction passes.
-    pub fn setCrossingPasses(self: *Self, passes: usize) void {
-        self.crossing_passes = passes;
     }
 
     /// Validate the graph for layout operations.

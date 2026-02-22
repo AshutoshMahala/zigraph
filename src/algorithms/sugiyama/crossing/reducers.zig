@@ -101,8 +101,8 @@ fn medianRun(self: *const Reducer, levels: *VirtualLevels, g: *const Graph, allo
     try median_mod.reduceVirtual(g, levels, self.passes, allocator);
 }
 
-fn adjacentExchangeRun(self: *const Reducer, levels: *VirtualLevels, g: *const Graph, _: Allocator) !void {
-    adjacent_exchange_mod.refine(g, levels, self.passes);
+fn adjacentExchangeRun(self: *const Reducer, levels: *VirtualLevels, g: *const Graph, allocator: Allocator) !void {
+    try adjacent_exchange_mod.refine(allocator, g, levels, self.passes);
 }
 
 // ============================================================================

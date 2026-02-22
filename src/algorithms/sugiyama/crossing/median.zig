@@ -504,3 +504,100 @@ test "median: compute median" {
     const med_empty = computeMedian(empty, 5);
     try std.testing.expectEqual(@as(f32, 5.0), med_empty);
 }
+
+test "median: reduceVirtual basic crossing" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // A->D, B->C — crossing pattern
+    try g.addNode(0, "A");
+    try g.addNode(1, "B");
+    try g.addNode(2, "C");
+    try g.addNode(3, "D");
+    try g.addEdge(0, 3); // A -> D
+    try g.addEdge(1, 2); // B -> C
+
+    // Build VirtualLevels with real nodes only
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A
+    try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B
+    try vlevels.levels.items[1].append(allocator, .{ .real = 2 }); // C
+    try vlevels.levels.items[1].append(allocator, .{ .real = 3 }); // D
+
+    try reduceVirtual(&g, &vlevels, 4, allocator);
+
+    // After reduction: crossing should be eliminated
+    // Level 1 should be reordered so D comes before C
+    const level1 = vlevels.levels.items[1].items;
+    try std.testing.expectEqual(@as(usize, 2), level1.len);
+    try std.testing.expectEqual(@as(?usize, 3), level1[0].realIndex()); // D first
+    try std.testing.expectEqual(@as(?usize, 2), level1[1].realIndex()); // C second
+}
+
+test "median: reduceVirtual with dummy nodes" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // A->C (skip-level, will have a dummy on level 1), B->C (direct)
+    try g.addNode(0, "A");
+    try g.addNode(1, "B");
+    try g.addNode(2, "C");
+    try g.addEdge(0, 2); // edge 0: A -> C (skip)
+    try g.addEdge(1, 2); // edge 1: B -> C
+
+    // VirtualLevels: level0=[A], level1=[B, dummy_for_edge0], level2=[C]
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A
+    try vlevels.levels.items[1].append(allocator, .{ .real = 1 }); // B
+    try vlevels.levels.items[1].append(allocator, .{ .dummy = 0 }); // dummy for edge 0
+    try vlevels.levels.items[2].append(allocator, .{ .real = 2 }); // C
+
+    try reduceVirtual(&g, &vlevels, 4, allocator);
+
+    // Structure should be preserved: 3 levels, correct node counts
+    try std.testing.expectEqual(@as(usize, 3), vlevels.levels.items.len);
+    try std.testing.expectEqual(@as(usize, 1), vlevels.levels.items[0].items.len);
+    try std.testing.expectEqual(@as(usize, 2), vlevels.levels.items[1].items.len);
+    try std.testing.expectEqual(@as(usize, 1), vlevels.levels.items[2].items.len);
+}
+
+test "median: reduceVirtual single level is noop" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(0, "A");
+
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
+
+    // Should not crash on single level
+    try reduceVirtual(&g, &vlevels, 4, allocator);
+    try std.testing.expectEqual(@as(usize, 1), vlevels.levels.items[0].items.len);
+}

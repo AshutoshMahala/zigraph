@@ -401,6 +401,15 @@ fn layoutFdg(
     return result;
 }
 
+// Dummy node ID encoding constants.
+// Dummy nodes get synthetic IDs in a separate namespace from real nodes:
+//   dummy_id = dummy_id_base + edge_index * dummy_id_edge_stride + level_index
+// The lookup key for (edge, level) → dummy_id is:
+//   key = edge_index * dummy_key_stride + level_index
+const dummy_id_base: usize = 0x80000000;
+const dummy_id_edge_stride: usize = 1000;
+const dummy_key_stride: usize = 10000;
+
 /// Compute layout using the Sugiyama hierarchical algorithm.
 fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
     // Step 0: Validate graph (unless skipped)
@@ -560,7 +569,6 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     }
 
     // Build dummy node mapping for edge splitting
-    // Map: (edge_idx * 10000 + level) → dummy_node_id
     // Always add dummy nodes - renderer decides whether to display them
     var dummy_id_map = std.AutoHashMap(usize, usize).init(allocator);
     defer dummy_id_map.deinit();
@@ -573,8 +581,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
                 const x = virtual_positions.x.items[level_idx].items[pos_in_level];
                 const y = level_idx * (1 + effective_level_spacing);
 
-                // Create a synthetic ID for this dummy
-                const dummy_id = 0x80000000 + edge_idx * 1000 + level_idx;
+                const dummy_id = dummy_id_base + edge_idx * dummy_id_edge_stride + level_idx;
 
                 try result.addNode(.{
                     .id = dummy_id,
@@ -590,7 +597,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
                 });
 
                 // Store mapping for edge splitting
-                const key = edge_idx * 10000 + level_idx;
+                const key = edge_idx * dummy_key_stride + level_idx;
                 try dummy_id_map.put(key, dummy_id);
             }
         }
@@ -646,7 +653,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 
                 // Add segments through each intermediate level
                 for ((from_node.level + 1)..(to_node.level)) |intermediate_level| {
-                    const key = edge_idx * 10000 + intermediate_level;
+                    const key = edge_idx * dummy_key_stride + intermediate_level;
                     if (dummy_id_map.get(key)) |dummy_id| {
                         const dummy_node = result.nodes.items[result.id_to_index.get(dummy_id).?];
 
@@ -1001,9 +1008,9 @@ pub fn exportSvgTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.
 // Version info
 // ============================================================================
 
-pub const version = "0.1.0";
+pub const version = "0.2.0";
 pub const version_major = 0;
-pub const version_minor = 1;
+pub const version_minor = 2;
 pub const version_patch = 0;
 
 // ============================================================================
@@ -1011,7 +1018,7 @@ pub const version_patch = 0;
 // ============================================================================
 
 test "version is defined" {
-    try std.testing.expectEqualStrings("0.1.0", version);
+    try std.testing.expectEqualStrings("0.2.0", version);
 }
 
 test "core modules are accessible" {

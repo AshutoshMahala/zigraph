@@ -288,3 +288,112 @@ test "direct routing: skip level with offset" {
         }
     }
 }
+
+test "direct routing: fan-out staggering" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // One source, three targets — edges should get staggered horizontal rows
+    try g.addNode(1, "Root");
+    try g.addNode(2, "A");
+    try g.addNode(3, "B");
+    try g.addNode(4, "C");
+    try g.addEdge(1, 2);
+    try g.addEdge(1, 3);
+    try g.addEdge(1, 4);
+
+    const nodes = [_]LayoutNode{
+        .{ .id = 1, .label = "Root", .x = 5, .y = 0, .width = 6, .center_x = 8, .level = 0, .level_position = 0 },
+        .{ .id = 2, .label = "A", .x = 0, .y = 5, .width = 3, .center_x = 1, .level = 1, .level_position = 0 },
+        .{ .id = 3, .label = "B", .x = 5, .y = 5, .width = 3, .center_x = 6, .level = 1, .level_position = 1 },
+        .{ .id = 4, .label = "C", .x = 10, .y = 5, .width = 3, .center_x = 11, .level = 1, .level_position = 2 },
+    };
+
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    defer id_map.deinit(allocator);
+    try id_map.put(allocator, 1, 0);
+    try id_map.put(allocator, 2, 1);
+    try id_map.put(allocator, 3, 2);
+    try id_map.put(allocator, 4, 3);
+
+    var edges = try route(&g, &nodes, &id_map, allocator);
+    defer edges.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), edges.items.len);
+
+    // All edges should be corner paths (different X positions from root)
+    for (edges.items) |e| {
+        try std.testing.expect(e.path == .corner);
+    }
+
+    // Staggered: each edge should use a different horizontal_y
+    const h0 = edges.items[0].path.corner.horizontal_y;
+    const h1 = edges.items[1].path.corner.horizontal_y;
+    const h2 = edges.items[2].path.corner.horizontal_y;
+    // At least some should differ (staggering with 3 slots in 3 available rows)
+    try std.testing.expect(h0 != h1 or h1 != h2 or h0 != h2);
+}
+
+test "direct routing: vertically aligned nodes get direct path" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addEdge(1, 2);
+
+    // Both nodes centered at x=5
+    const nodes = [_]LayoutNode{
+        .{ .id = 1, .label = "A", .x = 4, .y = 0, .width = 3, .center_x = 5, .level = 0, .level_position = 0 },
+        .{ .id = 2, .label = "B", .x = 4, .y = 4, .width = 3, .center_x = 5, .level = 1, .level_position = 0 },
+    };
+
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    defer id_map.deinit(allocator);
+    try id_map.put(allocator, 1, 0);
+    try id_map.put(allocator, 2, 1);
+
+    var edges = try route(&g, &nodes, &id_map, allocator);
+    defer edges.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), edges.items.len);
+    try std.testing.expect(edges.items[0].path == .direct);
+}
+
+test "direct routing: edge coordinates match node positions" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(10, "X");
+    try g.addNode(20, "Y");
+    try g.addEdge(10, 20);
+
+    const nodes = [_]LayoutNode{
+        .{ .id = 10, .label = "X", .x = 3, .y = 0, .width = 3, .center_x = 4, .level = 0, .level_position = 0 },
+        .{ .id = 20, .label = "Y", .x = 8, .y = 5, .width = 3, .center_x = 9, .level = 1, .level_position = 0 },
+    };
+
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    defer id_map.deinit(allocator);
+    try id_map.put(allocator, 10, 0);
+    try id_map.put(allocator, 20, 1);
+
+    var edges = try route(&g, &nodes, &id_map, allocator);
+    defer edges.deinit(allocator);
+
+    const e = edges.items[0];
+    // from_x should be source center_x
+    try std.testing.expectEqual(@as(usize, 4), e.from_x);
+    // from_y should be source y + 1 (bottom of node)
+    try std.testing.expectEqual(@as(usize, 1), e.from_y);
+    // to_x should be target center_x
+    try std.testing.expectEqual(@as(usize, 9), e.to_x);
+    // to_y should be target y (top of node)
+    try std.testing.expectEqual(@as(usize, 5), e.to_y);
+}

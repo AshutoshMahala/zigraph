@@ -923,3 +923,257 @@ test "security: max node limit enforced" {
     // 3rd edge should fail
     try std.testing.expectError(error.OutOfMemory, graph.addEdge(1, 3));
 }
+
+// ============================================================================
+// Stress: Large Graphs
+// ============================================================================
+
+test "stress: 200 node wide graph" {
+    const allocator = std.testing.allocator;
+
+    var graph = Graph.init(allocator);
+    defer graph.deinit();
+
+    // 3 layers: 1 root, 100 middle nodes, 100 leaf nodes
+    try graph.addNode(0, "root");
+    for (1..101) |i| {
+        var buf: [16]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "M{d}", .{i}) catch "?";
+        try graph.addNode(i, label);
+        try graph.addEdge(0, i);
+    }
+    for (101..201) |i| {
+        var buf: [16]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "L{d}", .{i}) catch "?";
+        try graph.addNode(i, label);
+        try graph.addEdge(i - 100, i);
+    }
+
+    try std.testing.expectEqual(@as(usize, 201), graph.nodeCount());
+
+    var result = try zigraph.layout(&graph, allocator, .{});
+    defer result.deinit();
+
+    // All real nodes should appear
+    var real_count: usize = 0;
+    for (result.getNodes()) |node| {
+        if (node.kind != .dummy) real_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 201), real_count);
+}
+
+test "stress: 500 node deep chain" {
+    const allocator = std.testing.allocator;
+
+    var graph = Graph.init(allocator);
+    defer graph.deinit();
+
+    for (0..500) |i| {
+        var buf: [16]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "N{d}", .{i}) catch "?";
+        try graph.addNode(i, label);
+        if (i > 0) {
+            try graph.addEdge(i - 1, i);
+        }
+    }
+
+    var result = try zigraph.layout(&graph, allocator, .{});
+    defer result.deinit();
+
+    try std.testing.expect(result.getNodes().len >= 500);
+    try std.testing.expect(result.getLevelCount() == 500);
+}
+
+test "stress: dense diamond 100 nodes" {
+    const allocator = std.testing.allocator;
+
+    var graph = Graph.init(allocator);
+    defer graph.deinit();
+
+    // Top node -> 50 middle nodes -> bottom node
+    try graph.addNode(0, "top");
+    for (1..51) |i| {
+        var buf: [16]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "M{d}", .{i}) catch "?";
+        try graph.addNode(i, label);
+        try graph.addEdge(0, i);
+    }
+    try graph.addNode(51, "bottom");
+    for (1..51) |i| {
+        try graph.addEdge(i, 51);
+    }
+
+    var result = try zigraph.layout(&graph, allocator, .{});
+    defer result.deinit();
+
+    var real_count: usize = 0;
+    for (result.getNodes()) |node| {
+        if (node.kind != .dummy) real_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 52), real_count);
+    try std.testing.expectEqual(@as(usize, 3), result.getLevelCount());
+}
+
+// ============================================================================
+// Property-Based: Layout Invariants
+// ============================================================================
+
+test "property: Y coordinate always increases by level" {
+    const allocator = std.testing.allocator;
+
+    // Test across multiple graph shapes
+    const shapes = [_]struct { nodes: usize, edges_per_layer: usize }{
+        .{ .nodes = 5, .edges_per_layer = 1 },
+        .{ .nodes = 10, .edges_per_layer = 2 },
+        .{ .nodes = 20, .edges_per_layer = 3 },
+        .{ .nodes = 50, .edges_per_layer = 2 },
+    };
+
+    for (shapes) |shape| {
+        var graph = Graph.init(allocator);
+        defer graph.deinit();
+
+        // Build a layered graph
+        for (0..shape.nodes) |i| {
+            var buf: [16]u8 = undefined;
+            const label = std.fmt.bufPrint(&buf, "N{d}", .{i}) catch "?";
+            try graph.addNode(i, label);
+            if (i > 0) {
+                try graph.addEdge(i - 1, i);
+                // Add extra edges for width
+                if (i >= shape.edges_per_layer) {
+                    try graph.addEdge(i - shape.edges_per_layer, i);
+                }
+            }
+        }
+
+        var result = try zigraph.layout(&graph, allocator, .{});
+        defer result.deinit();
+
+        // For every pair of real nodes, if level_a < level_b then y_a < y_b
+        const nodes = result.getNodes();
+        for (nodes) |a| {
+            if (a.kind == .dummy) continue;
+            for (nodes) |b| {
+                if (b.kind == .dummy) continue;
+                if (a.level < b.level) {
+                    try std.testing.expect(a.y < b.y);
+                }
+            }
+        }
+    }
+}
+
+test "property: no horizontal node overlap within same level" {
+    const allocator = std.testing.allocator;
+
+    var graph = Graph.init(allocator);
+    defer graph.deinit();
+
+    // Wide fan-out: 1 parent, 10 children
+    try graph.addNode(0, "root");
+    for (1..11) |i| {
+        var buf: [16]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "child{d}", .{i}) catch "?";
+        try graph.addNode(i, label);
+        try graph.addEdge(0, i);
+    }
+
+    var result = try zigraph.layout(&graph, allocator, .{});
+    defer result.deinit();
+
+    // Check no two nodes on the same level overlap horizontally
+    const nodes = result.getNodes();
+    for (nodes, 0..) |a, i| {
+        if (a.kind == .dummy) continue;
+        for (nodes[i + 1 ..]) |b| {
+            if (b.kind == .dummy) continue;
+            if (a.level == b.level) {
+                // Intervals [a.x, a.x + a.width) and [b.x, b.x + b.width) must not overlap
+                const a_right = a.x + a.width;
+                const b_right = b.x + b.width;
+                const no_overlap = a_right <= b.x or b_right <= a.x;
+                try std.testing.expect(no_overlap);
+            }
+        }
+    }
+}
+
+test "property: all edges connect existing nodes in IR" {
+    const allocator = std.testing.allocator;
+
+    // Test with multiple configurations
+    const configs = [_]zigraph.LayoutConfig{
+        .{},
+        .{ .positioning = .barycentric },
+        .{ .positioning = .brandes_kopf },
+        .{ .layering = .network_simplex_fast },
+    };
+
+    for (configs) |config| {
+        var graph = Graph.init(allocator);
+        defer graph.deinit();
+
+        // Build a non-trivial graph
+        for (0..8) |i| {
+            var buf: [16]u8 = undefined;
+            const label = std.fmt.bufPrint(&buf, "N{d}", .{i}) catch "?";
+            try graph.addNode(i, label);
+        }
+        try graph.addEdge(0, 1);
+        try graph.addEdge(0, 2);
+        try graph.addEdge(1, 3);
+        try graph.addEdge(2, 3);
+        try graph.addEdge(3, 4);
+        try graph.addEdge(4, 5);
+        try graph.addEdge(4, 6);
+        try graph.addEdge(5, 7);
+        try graph.addEdge(6, 7);
+
+        var result = try zigraph.layout(&graph, allocator, config);
+        defer result.deinit();
+
+        // Build node ID set
+        var ids = std.AutoHashMap(usize, void).init(allocator);
+        defer ids.deinit();
+        for (result.getNodes()) |node| {
+            try ids.put(node.id, {});
+        }
+
+        // Every edge must reference valid nodes
+        for (result.edges.items) |edge| {
+            try std.testing.expect(ids.contains(edge.from_id));
+            try std.testing.expect(ids.contains(edge.to_id));
+        }
+    }
+}
+
+test "property: dummy node conservation" {
+    const allocator = std.testing.allocator;
+
+    var graph = Graph.init(allocator);
+    defer graph.deinit();
+
+    // Create skip-level edges that require dummies
+    // 0 -> 1 -> 2 -> 3 (chain)
+    // 0 -> 3 (skip 2 levels, needs 2 dummies)
+    for (0..4) |i| {
+        var buf: [16]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "N{d}", .{i}) catch "?";
+        try graph.addNode(i, label);
+        if (i > 0) try graph.addEdge(i - 1, i);
+    }
+    try graph.addEdge(0, 3); // skip-level
+
+    var result = try zigraph.layout(&graph, allocator, .{ .include_dummy_nodes = true });
+    defer result.deinit();
+
+    // Count dummies
+    var dummy_count: usize = 0;
+    for (result.getNodes()) |node| {
+        if (node.kind == .dummy) dummy_count += 1;
+    }
+
+    // Edge 0->3 spans 3 levels, so needs 2 dummy nodes
+    try std.testing.expect(dummy_count >= 2);
+}

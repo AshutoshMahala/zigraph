@@ -1114,3 +1114,132 @@ test "svg: edge rendering" {
     // Should contain line element for direct edge
     try std.testing.expect(std.mem.indexOf(u8, svg, "<line") != null);
 }
+
+test "svg: corner edge rendering" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1, .label = "A", .x = 0, .y = 0, .width = 3,
+        .center_x = 1, .level = 0, .level_position = 0,
+    });
+    try layout.addNode(.{
+        .id = 2, .label = "B", .x = 5, .y = 4, .width = 3,
+        .center_x = 6, .level = 1, .level_position = 0,
+    });
+
+    try layout.addEdge(.{
+        .from_id = 1, .to_id = 2, .from_x = 1, .from_y = 1,
+        .to_x = 6, .to_y = 4, .path = .{ .corner = .{ .horizontal_y = 2 } },
+        .edge_index = 0,
+    });
+
+    layout.setDimensions(10, 6);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // Corner edges use path elements
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<path") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "marker-end") != null);
+}
+
+test "svg: multiple nodes and edges" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    // Build a small diamond: A -> B, A -> C, B -> D, C -> D
+    try layout.addNode(.{
+        .id = 1, .label = "A", .x = 5, .y = 0, .width = 3,
+        .center_x = 6, .level = 0, .level_position = 0,
+    });
+    try layout.addNode(.{
+        .id = 2, .label = "B", .x = 0, .y = 4, .width = 3,
+        .center_x = 1, .level = 1, .level_position = 0,
+    });
+    try layout.addNode(.{
+        .id = 3, .label = "C", .x = 10, .y = 4, .width = 3,
+        .center_x = 11, .level = 1, .level_position = 1,
+    });
+    try layout.addNode(.{
+        .id = 4, .label = "D", .x = 5, .y = 8, .width = 3,
+        .center_x = 6, .level = 2, .level_position = 0,
+    });
+
+    for ([_]struct { from: usize, to: usize, idx: usize }{
+        .{ .from = 1, .to = 2, .idx = 0 },
+        .{ .from = 1, .to = 3, .idx = 1 },
+        .{ .from = 2, .to = 4, .idx = 2 },
+        .{ .from = 3, .to = 4, .idx = 3 },
+    }) |e| {
+        try layout.addEdge(.{
+            .from_id = e.from, .to_id = e.to,
+            .from_x = 6, .from_y = 1,
+            .to_x = 6, .to_y = 4,
+            .path = .direct, .edge_index = e.idx,
+        });
+    }
+
+    layout.setDimensions(15, 10);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // Should contain all 4 node labels
+    try std.testing.expect(std.mem.indexOf(u8, svg, ">A<") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, ">B<") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, ">C<") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, ">D<") != null);
+    // Should have valid SVG structure
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<svg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "</svg>") != null);
+}
+
+test "svg: empty layout" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    layout.setDimensions(0, 0);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // Should still produce valid SVG
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<svg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "</svg>") != null);
+}
+
+test "svg: colored edges" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1, .label = "A", .x = 0, .y = 0, .width = 3,
+        .center_x = 1, .level = 0, .level_position = 0,
+    });
+    try layout.addNode(.{
+        .id = 2, .label = "B", .x = 0, .y = 4, .width = 3,
+        .center_x = 1, .level = 1, .level_position = 0,
+    });
+
+    try layout.addEdge(.{
+        .from_id = 1, .to_id = 2, .from_x = 1, .from_y = 1,
+        .to_x = 1, .to_y = 4, .path = .direct, .edge_index = 0,
+    });
+
+    layout.setDimensions(5, 5);
+
+    const svg = try render(&layout, allocator, .{ .color_edges = true });
+    defer allocator.free(svg);
+
+    // Should contain colored stroke from palette
+    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=") != null);
+}
