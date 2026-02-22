@@ -63,6 +63,7 @@ pub const Code = struct {
     const Field = "Field";
     const Path = "Path";
     const Waypoints = "Waypoints";
+    const Subgraphs = "Subgraph";
 
     // Sequences (WDP Part 6 conventions)
     const MISSING = "001";
@@ -123,6 +124,16 @@ pub const Code = struct {
 
     /// Graph is disconnected but algorithm requires connected (003 = INVALID)
     pub const GRAPH_DISCONNECTED = code(E, Graph, Component, INVALID);
+
+    // ========================================================================
+    // Graph.Subgraph errors
+    // ========================================================================
+
+    /// Referenced subgraph does not exist (021 = NOT_FOUND)
+    pub const SUBGRAPH_NOT_FOUND = code(E, Graph, Subgraphs, NOT_FOUND);
+
+    /// Subgraph nesting would create a cycle (003 = INVALID)
+    pub const SUBGRAPH_CYCLE_DETECTED = code(E, Graph, Subgraphs, INVALID);
 
     // ========================================================================
     // Layout.Algo errors
@@ -333,6 +344,18 @@ pub fn diagnosticInfo(err: ZigraphError) DiagnosticInfo {
             .code = Code.GRAPH_DISCONNECTED,
             .message = "Graph is disconnected (multiple components)",
             .hint = "Ensure all nodes are reachable from each other, or process each connected component separately",
+        },
+
+        // ── Graph.Subgraph ───────────────────────────────────────────
+        error.SubgraphNotFound => .{
+            .code = Code.SUBGRAPH_NOT_FOUND,
+            .message = "Referenced subgraph does not exist",
+            .hint = "Ensure the subgraph was created with graph.addSubgraph(label) before referencing its ID",
+        },
+        error.SubgraphCycleDetected => .{
+            .code = Code.SUBGRAPH_CYCLE_DETECTED,
+            .message = "Subgraph nesting would create a cycle in the hierarchy",
+            .hint = "Subgraphs must form a tree — a subgraph cannot be nested inside its own descendant",
         },
 
         // ── Layout.Algo ─────────────────────────────────────────────
@@ -849,6 +872,10 @@ pub const ZigraphError = error{
     JsonPathInvalid,
     /// JSON waypoints invalid [E.Json.Waypoints.003]
     JsonWaypointsInvalid,
+    /// Referenced subgraph does not exist [E.Graph.Subgraph.021]
+    SubgraphNotFound,
+    /// Subgraph nesting would create a cycle [E.Graph.Subgraph.003]
+    SubgraphCycleDetected,
 };
 
 /// Map Zig error to WDP code
@@ -881,6 +908,8 @@ pub fn errorCode(err: ZigraphError) []const u8 {
         error.JsonFieldTypeMismatch => Code.JSON_FIELD_TYPE_MISMATCH,
         error.JsonPathInvalid => Code.JSON_PATH_INVALID,
         error.JsonWaypointsInvalid => Code.JSON_WAYPOINTS_INVALID,
+        error.SubgraphNotFound => Code.SUBGRAPH_NOT_FOUND,
+        error.SubgraphCycleDetected => Code.SUBGRAPH_CYCLE_DETECTED,
     };
 }
 

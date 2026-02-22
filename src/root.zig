@@ -34,6 +34,7 @@ pub const Graph = graph.Graph;
 pub const Node = graph.Node;
 pub const Edge = graph.Edge;
 pub const NodeKind = graph.NodeKind;
+pub const Subgraph = graph.Subgraph;
 pub const ValidationResult = graph.ValidationResult;
 pub const CycleInfo = graph.CycleInfo;
 
@@ -63,6 +64,7 @@ pub const LayoutIR = ir.LayoutIR;
 pub const LayoutNode = ir.LayoutNode;
 pub const LayoutEdge = ir.LayoutEdge;
 pub const EdgePath = ir.EdgePath;
+pub const SubgraphInfo = ir.SubgraphInfo;
 pub const coordCast = ir.coordCast;
 
 // ============================================================================

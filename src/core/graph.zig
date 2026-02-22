@@ -60,6 +60,20 @@ pub const Node = struct {
     }
 };
 
+/// A subgraph (cluster) that groups nodes together.
+///
+/// Subgraphs form a tree hierarchy (not a DAG). Each node belongs to
+/// at most one immediate subgraph. Subgraphs affect layout — nodes in
+/// the same subgraph are positioned together.
+pub const Subgraph = struct {
+    /// Auto-generated subgraph ID
+    id: usize,
+    /// Display label for the subgraph
+    label: []const u8,
+    /// Parent subgraph ID (null = root-level subgraph)
+    parent_id: ?usize = null,
+};
+
 /// An edge connecting two nodes.
 pub const Edge = struct {
     /// Source node ID
@@ -113,6 +127,17 @@ pub const Graph = struct {
     max_nodes: usize,
     max_edges: usize,
 
+    // ── Subgraph storage (zero cost when unused) ────────────────────
+
+    /// All subgraphs in creation order
+    subgraphs: std.ArrayListUnmanaged(Subgraph),
+    /// Subgraph ID → index in subgraphs array
+    subgraph_id_to_index: std.AutoHashMapUnmanaged(usize, usize),
+    /// Node ID → immediate subgraph ID
+    node_subgraph: std.AutoHashMapUnmanaged(usize, usize),
+    /// Next auto-generated subgraph ID
+    next_subgraph_id: usize,
+
     const Self = @This();
 
     /// Initialize a new empty graph with default options.
@@ -131,6 +156,10 @@ pub const Graph = struct {
             .parents = .{},
             .max_nodes = options.max_nodes,
             .max_edges = options.max_edges,
+            .subgraphs = .{},
+            .subgraph_id_to_index = .{},
+            .node_subgraph = .{},
+            .next_subgraph_id = 0,
         };
     }
 
@@ -157,6 +186,11 @@ pub const Graph = struct {
         self.id_to_index.deinit(self.allocator);
         self.edges.deinit(self.allocator);
         self.nodes.deinit(self.allocator);
+
+        // Free subgraph storage
+        self.subgraphs.deinit(self.allocator);
+        self.subgraph_id_to_index.deinit(self.allocator);
+        self.node_subgraph.deinit(self.allocator);
     }
 
     /// Add a node to the graph.
@@ -184,6 +218,132 @@ pub const Graph = struct {
         // Initialize empty adjacency lists for this node
         try self.children.append(self.allocator, .{});
         try self.parents.append(self.allocator, .{});
+    }
+
+    // ── Subgraph API ────────────────────────────────────────────────
+
+    /// Add a subgraph (cluster) to the graph.
+    ///
+    /// Returns the auto-generated subgraph ID. Subgraphs are root-level
+    /// by default; use `putSubgraphs().inside()` to nest them.
+    pub fn addSubgraph(self: *Self, label: []const u8) !usize {
+        const id = self.next_subgraph_id;
+        self.next_subgraph_id += 1;
+
+        const idx = self.subgraphs.items.len;
+        try self.subgraphs.append(self.allocator, .{
+            .id = id,
+            .label = label,
+        });
+        try self.subgraph_id_to_index.put(self.allocator, id, idx);
+
+        return id;
+    }
+
+    /// Returns a fluent builder for placing nodes into a subgraph.
+    ///
+    /// Usage: `try g.putNodes(&.{ n1, n2, n3 }).inside(subgraph_id);`
+    pub fn putNodes(self: *Self, node_ids: []const usize) NodePlacer {
+        return .{ .graph = self, .items = node_ids };
+    }
+
+    /// Returns a fluent builder for nesting subgraphs inside a parent.
+    ///
+    /// Usage: `try g.putSubgraphs(&.{ sg1, sg2 }).inside(parent_id);`
+    pub fn putSubgraphs(self: *Self, subgraph_ids: []const usize) SubgraphPlacer {
+        return .{ .graph = self, .items = subgraph_ids };
+    }
+
+    /// Fluent builder for `putNodes().inside()`.
+    pub const NodePlacer = struct {
+        graph: *Graph,
+        items: []const usize,
+
+        /// Place all listed nodes inside the given subgraph.
+        ///
+        /// Each node must exist. If a node is already in a subgraph,
+        /// it is moved to the new one (replaces previous membership).
+        pub inline fn inside(self: NodePlacer, subgraph_id: usize) !void {
+            // Validate subgraph exists
+            if (!self.graph.subgraph_id_to_index.contains(subgraph_id)) {
+                errors.captureError(error.SubgraphNotFound, @src());
+                return error.SubgraphNotFound;
+            }
+            for (self.items) |node_id| {
+                // Validate node exists
+                if (!self.graph.id_to_index.contains(node_id)) {
+                    var detail_buf: [64]u8 = undefined;
+                    const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{node_id}) catch "node does not exist";
+                    errors.captureErrorFull(error.NodeNotFound, @src(), detail, &.{node_id});
+                    return error.NodeNotFound;
+                }
+                // Put or replace membership
+                try self.graph.node_subgraph.put(self.graph.allocator, node_id, subgraph_id);
+            }
+        }
+    };
+
+    /// Fluent builder for `putSubgraphs().inside()`.
+    pub const SubgraphPlacer = struct {
+        graph: *Graph,
+        items: []const usize,
+
+        /// Nest all listed subgraphs inside the given parent subgraph.
+        ///
+        /// Each child subgraph must exist. The parent must exist.
+        /// A subgraph cannot be nested inside itself.
+        pub inline fn inside(self: SubgraphPlacer, parent_id: usize) !void {
+            // Validate parent exists
+            const parent_idx = self.graph.subgraph_id_to_index.get(parent_id) orelse {
+                errors.captureError(error.SubgraphNotFound, @src());
+                return error.SubgraphNotFound;
+            };
+            _ = parent_idx;
+            for (self.items) |sg_id| {
+                if (sg_id == parent_id) {
+                    errors.captureError(error.SubgraphCycleDetected, @src());
+                    return error.SubgraphCycleDetected;
+                }
+                const idx = self.graph.subgraph_id_to_index.get(sg_id) orelse {
+                    errors.captureError(error.SubgraphNotFound, @src());
+                    return error.SubgraphNotFound;
+                };
+                // Check for ancestor cycle: parent_id must not be a descendant of sg_id
+                var current: ?usize = parent_id;
+                while (current) |cur_id| {
+                    if (cur_id == sg_id) {
+                        errors.captureError(error.SubgraphCycleDetected, @src());
+                        return error.SubgraphCycleDetected;
+                    }
+                    const cur_idx = self.graph.subgraph_id_to_index.get(cur_id).?;
+                    current = self.graph.subgraphs.items[cur_idx].parent_id;
+                }
+                self.graph.subgraphs.items[idx].parent_id = parent_id;
+            }
+        }
+    };
+
+    // ── Subgraph queries ────────────────────────────────────────────
+
+    /// Get the number of subgraphs.
+    pub fn subgraphCount(self: *const Self) usize {
+        return self.subgraphs.items.len;
+    }
+
+    /// Get the subgraph a node belongs to (null if none).
+    pub fn nodeSubgraph(self: *const Self, node_id: usize) ?usize {
+        return self.node_subgraph.get(node_id);
+    }
+
+    /// Get a subgraph by its ID.
+    pub fn subgraphById(self: *const Self, sg_id: usize) ?*const Subgraph {
+        const idx = self.subgraph_id_to_index.get(sg_id) orelse return null;
+        return &self.subgraphs.items[idx];
+    }
+
+    /// Check if the graph has any subgraphs.
+    pub fn hasSubgraphs(self: *const Self) bool {
+        return self.subgraphs.items.len > 0;
     }
 
     // ── Directed edge helpers ────────────────────────────────────────
@@ -642,4 +802,144 @@ test "Graph: diamond is acyclic" {
     defer result.deinit();
 
     try std.testing.expect(result == .ok);
+}
+
+// ============================================================================
+// Subgraph Tests
+// ============================================================================
+
+test "Graph: addSubgraph creates subgraph" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const sg1 = try g.addSubgraph("Backend");
+    const sg2 = try g.addSubgraph("Frontend");
+
+    try std.testing.expectEqual(@as(usize, 0), sg1);
+    try std.testing.expectEqual(@as(usize, 1), sg2);
+    try std.testing.expectEqual(@as(usize, 2), g.subgraphCount());
+    try std.testing.expect(g.hasSubgraphs());
+
+    const info = g.subgraphById(sg1).?;
+    try std.testing.expectEqualStrings("Backend", info.label);
+    try std.testing.expectEqual(@as(?usize, null), info.parent_id);
+}
+
+test "Graph: putNodes places nodes into subgraph" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+
+    const sg = try g.addSubgraph("Cluster");
+    try g.putNodes(&.{ 1, 2 }).inside(sg);
+
+    try std.testing.expectEqual(@as(?usize, sg), g.nodeSubgraph(1));
+    try std.testing.expectEqual(@as(?usize, sg), g.nodeSubgraph(2));
+    try std.testing.expectEqual(@as(?usize, null), g.nodeSubgraph(3)); // not placed
+}
+
+test "Graph: putNodes moves node between subgraphs" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+
+    const sg1 = try g.addSubgraph("First");
+    const sg2 = try g.addSubgraph("Second");
+
+    try g.putNodes(&.{1}).inside(sg1);
+    try std.testing.expectEqual(@as(?usize, sg1), g.nodeSubgraph(1));
+
+    // Move to different subgraph
+    try g.putNodes(&.{1}).inside(sg2);
+    try std.testing.expectEqual(@as(?usize, sg2), g.nodeSubgraph(1));
+}
+
+test "Graph: putSubgraphs nests subgraphs" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const outer = try g.addSubgraph("Outer");
+    const inner1 = try g.addSubgraph("Inner1");
+    const inner2 = try g.addSubgraph("Inner2");
+
+    try g.putSubgraphs(&.{ inner1, inner2 }).inside(outer);
+
+    try std.testing.expectEqual(@as(?usize, outer), g.subgraphById(inner1).?.parent_id);
+    try std.testing.expectEqual(@as(?usize, outer), g.subgraphById(inner2).?.parent_id);
+    try std.testing.expectEqual(@as(?usize, null), g.subgraphById(outer).?.parent_id);
+}
+
+test "Graph: putNodes rejects missing node" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const sg = try g.addSubgraph("Cluster");
+
+    // Node 99 doesn't exist
+    try std.testing.expectError(error.NodeNotFound, g.putNodes(&.{99}).inside(sg));
+}
+
+test "Graph: putNodes rejects missing subgraph" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+
+    // Subgraph 99 doesn't exist
+    try std.testing.expectError(error.SubgraphNotFound, g.putNodes(&.{1}).inside(99));
+}
+
+test "Graph: putSubgraphs rejects self-nesting" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const sg = try g.addSubgraph("Self");
+
+    try std.testing.expectError(error.SubgraphCycleDetected, g.putSubgraphs(&.{sg}).inside(sg));
+}
+
+test "Graph: putSubgraphs rejects cyclic nesting" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const a = try g.addSubgraph("A");
+    const b = try g.addSubgraph("B");
+    const c = try g.addSubgraph("C");
+
+    // A contains B, B contains C
+    try g.putSubgraphs(&.{b}).inside(a);
+    try g.putSubgraphs(&.{c}).inside(b);
+
+    // Trying to nest A inside C would create a cycle: A -> B -> C -> A
+    try std.testing.expectError(error.SubgraphCycleDetected, g.putSubgraphs(&.{a}).inside(c));
+}
+
+test "Graph: no subgraphs by default" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), g.subgraphCount());
+    try std.testing.expect(!g.hasSubgraphs());
 }
