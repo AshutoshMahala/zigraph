@@ -686,12 +686,20 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     );
     defer virtual_levels.deinit();
 
-    // Step 3: Crossing reduction pipeline on virtual levels (includes dummies)
-    try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
-
-    // Step 3c: Enforce subgraph adjacency (nodes in the same subgraph are contiguous)
-    if (g.hasSubgraphs()) {
-        try subgraph_layout.enforceSubgraphAdjacency(g, &virtual_levels, allocator);
+    // Step 3: Crossing reduction
+    if (g.hasSubgraphs() and config.crossing_reducers.len > 0) {
+        // Block-based crossing reduction: median sweep with subgraph block constraints.
+        // Each level is partitioned into blocks by subgraph membership. Nodes are
+        // sorted within blocks (intra-block median) and blocks are ordered by their
+        // average median (inter-block). Adjacency is maintained by construction.
+        var total_passes: usize = 0;
+        for (config.crossing_reducers) |r| total_passes += r.passes;
+        if (total_passes > 0) {
+            try subgraph_layout.blockBasedCrossingReduction(g, &virtual_levels, total_passes, allocator);
+        }
+    } else {
+        // Standard flat crossing reduction pipeline
+        try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
     }
 
     // Step 3b: Compute adaptive level spacing
