@@ -20,6 +20,7 @@ const Graph = graph_mod.Graph;
 const virtual_mod = @import("layering/virtual.zig");
 const VirtualLevels = virtual_mod.VirtualLevels;
 const VNode = virtual_mod.VNode;
+const VirtualPositions = virtual_mod.VirtualPositions;
 const ir_mod = @import("../../core/ir.zig");
 const LayerAssignment = @import("layering/longest_path.zig").LayerAssignment;
 const median_mod = @import("crossing/median.zig");
@@ -523,6 +524,264 @@ pub fn enforceSubgraphAdjacency(
 
         @memcpy(level.items, scratch[0..n]);
     }
+}
+
+// ============================================================================
+// Subgraph position padding
+// ============================================================================
+
+/// Compute the nesting depth of a subgraph (0 for root-level subgraphs).
+fn subgraphDepth(g: *const Graph, sg_id: usize) usize {
+    var depth: usize = 0;
+    var current = sg_id;
+    while (true) {
+        const sg = g.subgraphById(current) orelse break;
+        if (sg.parent_id) |pid| {
+            depth += 1;
+            current = pid;
+        } else break;
+    }
+    return depth;
+}
+
+/// Compute the full ancestor chain for a subgraph, ordered from
+/// innermost (the subgraph itself) to outermost.
+/// Returns the number of ancestors written into `buf`.
+fn ancestorChain(g: *const Graph, sg_id: usize, buf: []usize) usize {
+    var n: usize = 0;
+    var current = sg_id;
+    while (n < buf.len) {
+        buf[n] = current;
+        n += 1;
+        const sg = g.subgraphById(current) orelse break;
+        current = sg.parent_id orelse break;
+    }
+    return n;
+}
+
+/// Count the number of subgraph boundary transitions between two VNodes.
+///
+/// A boundary transition occurs when the set of enclosing subgraphs differs.
+/// Each entered or exited subgraph contributes one boundary line that needs
+/// a padding cell.
+///
+/// For example, if node A is in `[inner, outer]` and node B is in `[outer]`,
+/// there is 1 transition (exiting `inner`). If node B is in a completely
+/// different subgraph tree, the count is `depth(A) + depth(B)`.
+fn countBoundaryTransitions(
+    g: *const Graph,
+    sg_a: ?usize,
+    sg_b: ?usize,
+    chain_buf_a: []usize,
+    chain_buf_b: []usize,
+) usize {
+    // Same subgraph (including both null) → no transitions
+    if (sg_a == sg_b) return 0;
+
+    const depth_a = if (sg_a) |a| ancestorChain(g, a, chain_buf_a) else 0;
+    const depth_b = if (sg_b) |b| ancestorChain(g, b, chain_buf_b) else 0;
+
+    // If one is null (root), transitions = full depth of the other
+    if (sg_a == null) return depth_b;
+    if (sg_b == null) return depth_a;
+
+    // Find the lowest common ancestor
+    for (chain_buf_a[0..depth_a]) |a_id| {
+        for (chain_buf_b[0..depth_b]) |b_id| {
+            if (a_id == b_id) {
+                // a_id == b_id is the LCA.
+                // Transitions = levels above LCA in A + levels above LCA in B
+                // Find index of a_id in chain A (chain is innermost-first)
+                var idx_a: usize = 0;
+                for (chain_buf_a[0..depth_a], 0..) |x, i| {
+                    if (x == a_id) { idx_a = i; break; }
+                }
+                var idx_b: usize = 0;
+                for (chain_buf_b[0..depth_b], 0..) |x, i| {
+                    if (x == b_id) { idx_b = i; break; }
+                }
+                // idx_a = number of subgraphs between node A and the LCA
+                // idx_b = number of subgraphs between node B and the LCA
+                return idx_a + idx_b;
+            }
+        }
+    }
+
+    // No common ancestor → all boundaries crossed
+    return depth_a + depth_b;
+}
+
+/// Apply horizontal padding to virtual positions for subgraph borders.
+///
+/// After crossing reduction and initial positioning, this function shifts
+/// x-coordinates to create space for subgraph boundary lines. The padding
+/// ensures that subgraph boxes drawn by renderers don't overlap with nodes
+/// from other subgraphs.
+///
+/// For each adjacent pair of VNodes on a level, if they belong to different
+/// subgraphs (or different nesting levels), extra horizontal space is inserted
+/// proportional to the number of subgraph boundaries crossed.
+///
+/// At the left and right edges of each level, space is added for the outermost
+/// subgraph borders of the first and last nodes.
+///
+/// Only call when `g.hasSubgraphs()` is true.
+pub fn applySubgraphPadding(
+    g: *const Graph,
+    vlevels: *const VirtualLevels,
+    positions: *VirtualPositions,
+    allocator: Allocator,
+) !void {
+    const pad = default_padding;
+    const sg_count = g.subgraphCount();
+    if (sg_count == 0) return;
+
+    // Scratch buffers for ancestor chain computation
+    const max_depth: usize = 16; // support up to 16 nesting levels
+    var chain_a: [max_depth]usize = undefined;
+    var chain_b: [max_depth]usize = undefined;
+
+    // Per-level x offset accumulator (allocated once)
+    var max_width: usize = 0;
+    for (vlevels.levels.items) |level| {
+        max_width = @max(max_width, level.items.len);
+    }
+    if (max_width == 0) return;
+
+    const offsets = try allocator.alloc(usize, max_width);
+    defer allocator.free(offsets);
+
+    var new_total_width: usize = 0;
+
+    for (vlevels.levels.items, 0..) |level, level_idx| {
+        const n = level.items.len;
+        if (n == 0) continue;
+
+        // Compute cumulative x-offset for each VNode position.
+        // Offset[i] = total extra padding to add to node i's x.
+
+        // First node: offset for left-side subgraph borders
+        const first_sg = vnodeSubgraph(g, level.items[0]);
+        const first_depth = if (first_sg) |sg| ancestorChain(g, sg, &chain_a) else 0;
+        offsets[0] = first_depth * pad;
+
+        // Subsequent nodes: add transitions between adjacent pairs
+        for (1..n) |i| {
+            const prev_sg = vnodeSubgraph(g, level.items[i - 1]);
+            const curr_sg = vnodeSubgraph(g, level.items[i]);
+            const transitions = countBoundaryTransitions(
+                g, prev_sg, curr_sg, &chain_a, &chain_b,
+            );
+            // Each transition needs 'pad' space on each side of the border
+            offsets[i] = offsets[i - 1] + transitions * pad;
+        }
+
+        // Last node: additional right-side borders
+        const last_sg = vnodeSubgraph(g, level.items[n - 1]);
+        const last_depth = if (last_sg) |sg| ancestorChain(g, sg, &chain_a) else 0;
+        const right_extra = last_depth * pad;
+
+        // Apply offsets to x positions
+        for (0..n) |i| {
+            positions.x.items[level_idx].items[i] += offsets[i];
+        }
+
+        // Update total width estimate
+        if (n > 0) {
+            const last_x = positions.x.items[level_idx].items[n - 1];
+            const last_w = level.items[n - 1].width(g);
+            new_total_width = @max(new_total_width, last_x + last_w + right_extra);
+        }
+    }
+
+    positions.total_width = @max(positions.total_width, new_total_width);
+}
+
+/// Compute per-level y-offsets to create vertical space for subgraph borders.
+///
+/// Returns an array of y-offsets indexed by level. Each entry is the extra
+/// vertical space (in rows) to add before that level due to subgraph borders
+/// that start or end between the previous level and this one.
+///
+/// The caller must `allocator.free()` the returned slice.
+pub fn computeLevelYOffsets(
+    g: *const Graph,
+    vlevels: *const VirtualLevels,
+    allocator: Allocator,
+) ![]usize {
+    const num_levels = vlevels.levels.items.len;
+    if (num_levels == 0) return allocator.alloc(usize, 0);
+
+    const sg_count = g.subgraphCount();
+    const pad = default_padding;
+    const label_row: usize = 1; // extra row for subgraph label
+
+    // For each level, compute how many subgraph top/bottom borders cross it.
+    // A subgraph border crosses between levels L-1 and L if:
+    // - The subgraph has members on level L but not on level L-1 (top border)
+    // - The subgraph has members on level L-1 but not on level L (bottom border)
+
+    const y_offsets = try allocator.alloc(usize, num_levels);
+    @memset(y_offsets, 0);
+
+    if (sg_count == 0) return y_offsets;
+
+    // Compute per-subgraph level presence: sg_levels[sg_idx] = bitset of levels
+    // For simplicity, use bool arrays.
+    const sg_on_level = try allocator.alloc(bool, sg_count * num_levels);
+    defer allocator.free(sg_on_level);
+    @memset(sg_on_level, false);
+
+    // Fill level presence — check which levels each subgraph has members on
+    for (vlevels.levels.items, 0..) |level, level_idx| {
+        for (level.items) |vnode| {
+            var sg_id = vnodeSubgraph(g, vnode);
+            // Mark all ancestors as present too
+            while (sg_id) |sid| {
+                if (g.subgraph_id_to_index.get(sid)) |sg_idx| {
+                    sg_on_level[sg_idx * num_levels + level_idx] = true;
+                }
+                const sg = g.subgraphById(sid) orelse break;
+                sg_id = sg.parent_id;
+            }
+        }
+    }
+
+    // For each level boundary (between L-1 and L), count subgraph borders
+    for (1..num_levels) |level_idx| {
+        var top_borders: usize = 0; // subgraphs starting at this level
+        var bottom_borders: usize = 0; // subgraphs ending at previous level
+
+        for (0..sg_count) |sg_idx| {
+            const on_prev = sg_on_level[sg_idx * num_levels + level_idx - 1];
+            const on_curr = sg_on_level[sg_idx * num_levels + level_idx];
+
+            if (on_curr and !on_prev) {
+                // Subgraph starts at this level → top border + label
+                top_borders += 1;
+            }
+            if (on_prev and !on_curr) {
+                // Subgraph ends at previous level → bottom border
+                bottom_borders += 1;
+            }
+        }
+
+        // Each border needs 'pad' rows, top borders also need a label row
+        y_offsets[level_idx] = top_borders * (pad + label_row) + bottom_borders * pad;
+    }
+
+    // First level: if any subgraphs start here, add top border
+    {
+        var top_borders: usize = 0;
+        for (0..sg_count) |sg_idx| {
+            if (sg_on_level[sg_idx * num_levels + 0]) {
+                top_borders += 1;
+            }
+        }
+        y_offsets[0] = top_borders * (pad + label_row);
+    }
+
+    return y_offsets;
 }
 
 // ============================================================================
@@ -1392,4 +1651,254 @@ test "blockBasedCrossingReduction: integrates with graph edges" {
     try std.testing.expectEqual(@as(usize, 2), sg_a_count);
     // sg_a nodes must be adjacent (positions differ by 1)
     try std.testing.expectEqual(@as(usize, 1), sg_a_positions[1] - sg_a_positions[0]);
+}
+
+// ============================================================================
+// Padding and boundary transition tests
+// ============================================================================
+
+test "countBoundaryTransitions: same subgraph = 0" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const sg = try g.addSubgraph("SG");
+    var buf_a: [16]usize = undefined;
+    var buf_b: [16]usize = undefined;
+
+    try std.testing.expectEqual(@as(usize, 0), countBoundaryTransitions(&g, sg, sg, &buf_a, &buf_b));
+}
+
+test "countBoundaryTransitions: null to subgraph = depth" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const outer = try g.addSubgraph("outer");
+    const inner = try g.addSubgraph("inner");
+    try g.putSubgraphs(&.{inner}).inside(outer);
+
+    var buf_a: [16]usize = undefined;
+    var buf_b: [16]usize = undefined;
+
+    // null → inner (depth 2: inner + outer)
+    try std.testing.expectEqual(@as(usize, 2), countBoundaryTransitions(&g, null, inner, &buf_a, &buf_b));
+    // null → outer (depth 1: outer)
+    try std.testing.expectEqual(@as(usize, 1), countBoundaryTransitions(&g, null, outer, &buf_a, &buf_b));
+}
+
+test "countBoundaryTransitions: sibling subgraphs" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const parent = try g.addSubgraph("parent");
+    const child_a = try g.addSubgraph("child_a");
+    const child_b = try g.addSubgraph("child_b");
+    try g.putSubgraphs(&.{ child_a, child_b }).inside(parent);
+
+    var buf_a: [16]usize = undefined;
+    var buf_b: [16]usize = undefined;
+
+    // child_a → child_b: both depth 2, LCA = parent
+    // transitions = 1 (exit child_a) + 1 (enter child_b) = 2
+    // But ancestorChain returns [child_a, parent] and [child_b, parent]
+    // LCA = parent at idx 1 in both chains → idx_a=1, idx_b=1
+    // Wait, LCA matching: chain_a = [child_a, parent], chain_b = [child_b, parent]
+    // First match: when a_id == b_id → parent == parent at idx_a=1, idx_b=1
+    // Transitions = 1 + 1 = 2
+    try std.testing.expectEqual(@as(usize, 2), countBoundaryTransitions(&g, child_a, child_b, &buf_a, &buf_b));
+}
+
+test "countBoundaryTransitions: disjoint trees" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const sg_a = try g.addSubgraph("SG-A");
+    const sg_b = try g.addSubgraph("SG-B");
+
+    var buf_a: [16]usize = undefined;
+    var buf_b: [16]usize = undefined;
+
+    // No common ancestor → depth_a + depth_b = 1 + 1 = 2
+    try std.testing.expectEqual(@as(usize, 2), countBoundaryTransitions(&g, sg_a, sg_b, &buf_a, &buf_b));
+}
+
+test "applySubgraphPadding: adds horizontal space" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // Two nodes: A(root), B(sg) on same level
+    try g.addNode(1, "A"); // width 3
+    try g.addNode(2, "B"); // width 3
+    const sg = try g.addSubgraph("SG");
+    try g.putNodes(&.{2}).inside(sg);
+
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A root
+    try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B sg
+
+    // Create initial positions: A at x=0, B at x=6
+    var positions = VirtualPositions{
+        .x = .{},
+        .total_width = 9,
+        .total_height = 1,
+        .allocator = allocator,
+    };
+    defer positions.deinit();
+    try positions.x.append(allocator, .{});
+    try positions.x.items[0].append(allocator, 0); // A
+    try positions.x.items[0].append(allocator, 6); // B
+
+    try applySubgraphPadding(&g, &vlevels, &positions, allocator);
+
+    // A (root) should be at x=0 (no subgraph borders on left)
+    try std.testing.expectEqual(@as(usize, 0), positions.x.items[0].items[0]);
+
+    // B (sg, depth 1) has 1 boundary transition from root→sg
+    // Transition padding = 1 * default_padding = 1
+    // So B's offset = 0 + 1 = 1, B's x = 6 + 1 = 7
+    try std.testing.expectEqual(@as(usize, 7), positions.x.items[0].items[1]);
+}
+
+test "applySubgraphPadding: nested subgraph adds more padding" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A"); // root node
+    try g.addNode(2, "B"); // in inner subgraph
+    const outer = try g.addSubgraph("outer");
+    const inner = try g.addSubgraph("inner");
+    try g.putSubgraphs(&.{inner}).inside(outer);
+    try g.putNodes(&.{2}).inside(inner);
+
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A root
+    try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B inner
+
+    var positions = VirtualPositions{
+        .x = .{},
+        .total_width = 9,
+        .total_height = 1,
+        .allocator = allocator,
+    };
+    defer positions.deinit();
+    try positions.x.append(allocator, .{});
+    try positions.x.items[0].append(allocator, 0); // A
+    try positions.x.items[0].append(allocator, 6); // B
+
+    try applySubgraphPadding(&g, &vlevels, &positions, allocator);
+
+    // A at x=0 (no borders)
+    try std.testing.expectEqual(@as(usize, 0), positions.x.items[0].items[0]);
+
+    // B is in inner (depth 2), root→inner boundary means 2 transitions
+    // offset = 0 + 2 * 1 = 2, B's x = 6 + 2 = 8
+    try std.testing.expectEqual(@as(usize, 8), positions.x.items[0].items[1]);
+}
+
+test "computeLevelYOffsets: subgraph spanning all levels" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    const sg = try g.addSubgraph("SG");
+    try g.putNodes(&.{ 1, 2 }).inside(sg);
+
+    // Two levels: A on level 0, B on level 1
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[1].append(allocator, .{ .real = 1 });
+
+    const offsets = try computeLevelYOffsets(&g, &vlevels, allocator);
+    defer allocator.free(offsets);
+
+    try std.testing.expectEqual(@as(usize, 2), offsets.len);
+    // Level 0: subgraph starts here → top border (pad=1 + label=1 = 2)
+    try std.testing.expectEqual(@as(usize, 2), offsets[0]);
+    // Level 1: subgraph continues (no new borders) → 0
+    try std.testing.expectEqual(@as(usize, 0), offsets[1]);
+}
+
+test "computeLevelYOffsets: subgraph starts mid-graph" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "X"); // root, level 0
+    try g.addNode(2, "A"); // sg, level 1
+    try g.addNode(3, "B"); // sg, level 2
+    const sg = try g.addSubgraph("SG");
+    try g.putNodes(&.{ 2, 3 }).inside(sg);
+
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // X
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[1].append(allocator, .{ .real = 1 }); // A
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[2].append(allocator, .{ .real = 2 }); // B
+
+    const offsets = try computeLevelYOffsets(&g, &vlevels, allocator);
+    defer allocator.free(offsets);
+
+    try std.testing.expectEqual(@as(usize, 3), offsets.len);
+    // Level 0: no subgraphs → 0
+    try std.testing.expectEqual(@as(usize, 0), offsets[0]);
+    // Level 1: subgraph starts → top border (2)
+    try std.testing.expectEqual(@as(usize, 2), offsets[1]);
+    // Level 2: subgraph continues → 0
+    try std.testing.expectEqual(@as(usize, 0), offsets[2]);
+}
+
+test "computeLevelYOffsets: no subgraphs returns zeros" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+
+    var vlevels = VirtualLevels{
+        .levels = .{},
+        .allocator = allocator,
+    };
+    defer vlevels.deinit();
+
+    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
+
+    const offsets = try computeLevelYOffsets(&g, &vlevels, allocator);
+    defer allocator.free(offsets);
+
+    try std.testing.expectEqual(@as(usize, 1), offsets.len);
+    try std.testing.expectEqual(@as(usize, 0), offsets[0]);
 }

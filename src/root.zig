@@ -750,6 +750,32 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     };
     defer virtual_positions.deinit();
 
+    // Step 4a: Apply subgraph horizontal padding
+    // Shifts x-coordinates to create space for subgraph border lines between
+    // nodes of different subgraphs. Must happen before position extraction.
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.applySubgraphPadding(g, &virtual_levels, &virtual_positions, allocator);
+    }
+
+    // Step 4a-y: Compute per-level y-offsets for subgraph top/bottom borders
+    const level_y_offsets: ?[]usize = if (g.hasSubgraphs())
+        try subgraph_layout.computeLevelYOffsets(g, &virtual_levels, allocator)
+    else
+        null;
+    defer if (level_y_offsets) |offsets| allocator.free(offsets);
+
+    // Build cumulative y-offsets (each level += sum of all previous offsets)
+    var cumulative_y: []usize = &.{};
+    defer if (cumulative_y.len > 0) allocator.free(cumulative_y);
+    if (level_y_offsets) |offsets| {
+        cumulative_y = try allocator.alloc(usize, offsets.len);
+        var accum: usize = 0;
+        for (offsets, 0..) |off, i| {
+            accum += off;
+            cumulative_y[i] = accum;
+        }
+    }
+
     // Step 4b: Extract real node positions from virtual positions
     var real_positions = try layering.virtual.extractRealNodePositions(
         g,
@@ -769,6 +795,35 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         allocator,
     );
     defer dummy_positions.deinit();
+
+    // Step 4d: Apply vertical subgraph padding (y-offsets for border rows)
+    if (cumulative_y.len > 0) {
+        // Shift real node y positions
+        for (0..g.nodeCount()) |node_idx| {
+            const lvl = real_positions.level[node_idx];
+            if (lvl < cumulative_y.len) {
+                real_positions.y[node_idx] += cumulative_y[lvl];
+            }
+        }
+        // Shift dummy waypoint y positions
+        for (dummy_positions.waypoints.items) |*edge_wps| {
+            for (edge_wps.items) |*wp| {
+                // wp.level is actually the y-coordinate (level_idx * (1 + spacing))
+                // We need to find which level_idx produced this y and apply its offset
+                const base_y_per_level = 1 + effective_level_spacing;
+                if (base_y_per_level > 0) {
+                    const approx_level = wp.level / base_y_per_level;
+                    if (approx_level < cumulative_y.len) {
+                        wp.level += cumulative_y[approx_level];
+                    }
+                }
+            }
+        }
+        // Update total height
+        const total_extra_y = cumulative_y[cumulative_y.len - 1];
+        real_positions.total_height += total_extra_y;
+        virtual_positions.total_height += total_extra_y;
+    }
 
     // Step 5: Build LayoutIR
     var result = LayoutIR(usize).init(allocator);
@@ -802,7 +857,12 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             if (vnode.dummyEdge()) |edge_idx| {
                 // Get position from virtual positions
                 const x = virtual_positions.x.items[level_idx].items[pos_in_level];
-                const y = level_idx * (1 + effective_level_spacing);
+                var y = level_idx * (1 + effective_level_spacing);
+
+                // Apply subgraph y-offset for this level
+                if (cumulative_y.len > 0 and level_idx < cumulative_y.len) {
+                    y += cumulative_y[level_idx];
+                }
 
                 const dummy_id = dummy_id_base + edge_idx * dummy_id_edge_stride + level_idx;
 
