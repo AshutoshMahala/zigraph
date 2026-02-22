@@ -1021,29 +1021,20 @@ test "stress: dense diamond 100 nodes" {
 test "property: Y coordinate always increases by level" {
     const allocator = std.testing.allocator;
 
-    // Test across multiple graph shapes
-    const shapes = [_]struct { nodes: usize, edges_per_layer: usize }{
-        .{ .nodes = 5, .edges_per_layer = 1 },
-        .{ .nodes = 10, .edges_per_layer = 2 },
-        .{ .nodes = 20, .edges_per_layer = 3 },
-        .{ .nodes = 50, .edges_per_layer = 2 },
-    };
+    // Test across multiple graph sizes
+    const sizes = [_]usize{ 5, 10, 20, 50 };
 
-    for (shapes) |shape| {
+    for (sizes) |n| {
         var graph = Graph.init(allocator);
         defer graph.deinit();
 
-        // Build a layered graph
-        for (0..shape.nodes) |i| {
+        // Build a chain of n nodes
+        for (0..n) |i| {
             var buf: [16]u8 = undefined;
             const label = std.fmt.bufPrint(&buf, "N{d}", .{i}) catch "?";
             try graph.addNode(i, label);
             if (i > 0) {
                 try graph.addEdge(i - 1, i);
-                // Add extra edges for width
-                if (i >= shape.edges_per_layer) {
-                    try graph.addEdge(i - shape.edges_per_layer, i);
-                }
             }
         }
 

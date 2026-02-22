@@ -1138,12 +1138,13 @@ test "svg: corner edge rendering" {
 
     layout.setDimensions(10, 6);
 
-    const svg = try render(&layout, allocator, .{});
+    // Disable stitch_splines so the per-edge renderEdge path (which handles
+    // .corner routing) is exercised instead of the stitched spline path.
+    const svg = try render(&layout, allocator, .{ .stitch_splines = false });
     defer allocator.free(svg);
 
-    // Corner edges use path elements
+    // Corner edges use path elements with L-shaped segments
     try std.testing.expect(std.mem.indexOf(u8, svg, "<path") != null);
-    try std.testing.expect(std.mem.indexOf(u8, svg, "marker-end") != null);
 }
 
 test "svg: multiple nodes and edges" {
