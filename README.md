@@ -435,7 +435,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design decisions.
 ## Examples
 
 ```bash
-zig build run-example      # Basic usage
+zig build run-basic        # Basic usage
 zig build run-hero         # README hero diagram
 zig build run-presets      # Presets demo (all presets side-by-side)
 zig build run-config       # Configuration options demo

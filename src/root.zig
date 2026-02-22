@@ -81,21 +81,21 @@ pub const layering = struct {
 pub const crossing = struct {
     pub const median = @import("algorithms/sugiyama/crossing/median.zig");
     pub const adjacent_exchange = @import("algorithms/sugiyama/crossing/adjacent_exchange.zig");
-    
+
     // Re-export reducers for easy access
     pub const reducers = @import("algorithms/sugiyama/crossing/reducers.zig");
     pub const Reducer = reducers.Reducer;
-    
+
     // Preset pipelines
     pub const fast = reducers.fast;
     pub const balanced = reducers.balanced;
     pub const quality = reducers.quality;
     pub const none = reducers.none;
-    
+
     // Factory functions for building custom pipelines
     pub const medianReducer = reducers.median;
     pub const adjacentExchangeReducer = reducers.adjacentExchange;
-    
+
     // Pipeline runner
     pub const runPipeline = reducers.runPipeline;
 };
@@ -103,7 +103,7 @@ pub const crossing = struct {
 /// Node positioning algorithms - assign x-coordinates
 pub const positioning = struct {
     pub const common = @import("algorithms/sugiyama/positioning/common.zig");
-    pub const simple = @import("algorithms/sugiyama/positioning/simple.zig");
+    pub const barycentric = @import("algorithms/sugiyama/positioning/barycentric.zig");
     pub const brandes_kopf = @import("algorithms/sugiyama/positioning/brandes_kopf.zig");
 };
 
@@ -509,7 +509,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 
             var pos_assignment = switch (config.positioning) {
                 .brandes_kopf => try positioning.brandes_kopf.compute(g, levels_slice, pos_config, allocator),
-                .barycentric => try positioning.simple.compute(g, levels_slice, pos_config, allocator),
+                .barycentric => try positioning.barycentric.compute(g, levels_slice, pos_config, allocator),
                 .compact => unreachable,
             };
             defer pos_assignment.deinit();
@@ -1008,17 +1008,17 @@ pub fn exportSvgTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.
 // Version info
 // ============================================================================
 
-pub const version = "0.2.0";
+pub const version = "0.2.1";
 pub const version_major = 0;
 pub const version_minor = 2;
-pub const version_patch = 0;
+pub const version_patch = 1;
 
 // ============================================================================
 // Tests
 // ============================================================================
 
 test "version is defined" {
-    try std.testing.expectEqualStrings("0.2.0", version);
+    try std.testing.expectEqualStrings("0.2.1", version);
 }
 
 test "core modules are accessible" {
@@ -1480,7 +1480,7 @@ test {
     _ = errors;
     _ = layering.longest_path;
     _ = crossing.median;
-    _ = positioning.simple;
+    _ = positioning.barycentric;
     _ = routing.direct;
     _ = unicode;
     _ = @import("fuzz_tests.zig");

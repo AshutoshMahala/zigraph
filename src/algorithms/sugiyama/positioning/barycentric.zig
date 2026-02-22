@@ -1,4 +1,4 @@
-//! Simple barycentric positioning
+//! Barycentric positioning
 //!
 //! A graph-aware positioning algorithm that places nodes near the average
 //! center of their connected neighbours.  One top-down pass aligns children
@@ -7,9 +7,9 @@
 //! Compared to the other strategies:
 //!
 //! | Algorithm      | Graph-aware? | Passes | Quality |
-//! |----------------|-------------|--------|---------|
-//! | `.none`        | No          | 0      | ★       |
-//! | `.simple`      | Yes         | 2      | ★★      |
+//! |----------------|-------------|--------|----------|
+//! | `.compact`     | No          | 0      | ★       |
+//! | `.barycentric` | Yes         | 2      | ★★      |
 //! | `.brandes_kopf`| Yes         | 6+     | ★★★     |
 
 const std = @import("std");
@@ -84,8 +84,8 @@ pub fn compute(
     // =====================================================================
     // Phase 1: Baseline — left-to-right packing with level centering
     //
-    // This is the same layout as .none.  We build on top of it so that the
-    // result is always at least as good as .none.
+    // This is the same layout as .compact.  We build on top of it so that the
+    // result is always at least as good as .compact.
     // =====================================================================
 
     // Pack each level left-to-right

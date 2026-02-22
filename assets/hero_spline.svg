@@ -1,13 +1,73 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" 
-     width="650" height="600" 
-     viewBox="0 0 650 600">
+     width="700" height="600" 
+     viewBox="0 0 700 600">
 
   <!-- Arrow marker definitions -->
   <defs>
     <marker id="arrow0" markerWidth="8" markerHeight="8" 
             refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-      <polygon points="0 0, 8 4, 0 8" fill="#666666"/>
+      <polygon points="0 0, 8 4, 0 8" fill="#3e63dd"/>
+    </marker>
+    <marker id="arrow1" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#e54d2e"/>
+    </marker>
+    <marker id="arrow2" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#30a46c"/>
+    </marker>
+    <marker id="arrow3" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#f76b15"/>
+    </marker>
+    <marker id="arrow4" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#8e4ec6"/>
+    </marker>
+    <marker id="arrow5" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#12a594"/>
+    </marker>
+    <marker id="arrow6" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#e93d82"/>
+    </marker>
+    <marker id="arrow7" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#ffe629"/>
+    </marker>
+    <marker id="arrow8" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#7ce2fe"/>
+    </marker>
+    <marker id="arrow9" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#f5d90a"/>
+    </marker>
+    <marker id="arrow10" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#89ddff"/>
+    </marker>
+    <marker id="arrow11" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#d6409f"/>
+    </marker>
+    <marker id="arrow12" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#46a758"/>
+    </marker>
+    <marker id="arrow13" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#6e56cf"/>
+    </marker>
+    <marker id="arrow14" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#e5484d"/>
+    </marker>
+    <marker id="arrow15" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#0090ff"/>
     </marker>
   </defs>
 
@@ -16,50 +76,56 @@
 
   <!-- Edges (rendered first, under nodes) -->
   <g id="edges">
-    <line x1="220" y1="40" x2="60" y2="200" 
-          stroke="#666666" stroke-width="2" 
+    <line x1="230" y1="40" x2="60" y2="200" 
+          stroke="#3e63dd" stroke-width="2" 
           marker-end="url(#arrow0)"/>
-    <line x1="220" y1="40" x2="190" y2="200" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="220" y1="40" x2="300" y2="200" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="220" y1="40" x2="410" y2="200" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="220" y1="40" x2="520" y2="200" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="190" y1="220" x2="210" y2="380" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="300" y1="220" x2="210" y2="380" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="410" y1="220" x2="210" y2="380" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="520" y1="220" x2="210" y2="380" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <path d="M 60 220 C 63 247, 58 323, 80 380 C 102 437, 172 530, 190 560" fill="none" stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <line x1="210" y1="400" x2="190" y2="560" 
-          stroke="#666666" stroke-width="2" 
-          marker-end="url(#arrow0)"/>
-    <path d="M 190 560 C 205 530, 213 440, 280 380 C 347 320, 600 257, 590 200 C 580 143, 282 67, 220 40" fill="none" stroke="#666666" stroke-width="2" stroke-dasharray="6,3" 
-          marker-end="url(#arrow0)"/>
-    <text x="542" y="239" font-family="monospace" font-size="12"
-          fill="#666666" text-anchor="middle" dy="-6" dominant-baseline="auto">"retry"</text>
+    <text x="145" y="120" font-family="monospace" font-size="12"
+          fill="#3e63dd" text-anchor="middle" dy="-6" dominant-baseline="auto">"spawn"</text>
+    <line x1="230" y1="40" x2="200" y2="200" 
+          stroke="#e54d2e" stroke-width="2" 
+          marker-end="url(#arrow1)"/>
+    <line x1="230" y1="40" x2="320" y2="200" 
+          stroke="#30a46c" stroke-width="2" 
+          marker-end="url(#arrow2)"/>
+    <line x1="230" y1="40" x2="440" y2="200" 
+          stroke="#f76b15" stroke-width="2" 
+          marker-end="url(#arrow3)"/>
+    <line x1="230" y1="40" x2="560" y2="200" 
+          stroke="#8e4ec6" stroke-width="2" 
+          marker-end="url(#arrow4)"/>
+    <line x1="200" y1="220" x2="230" y2="380" 
+          stroke="#12a594" stroke-width="2" 
+          marker-end="url(#arrow5)"/>
+    <line x1="320" y1="220" x2="230" y2="380" 
+          stroke="#e93d82" stroke-width="2" 
+          marker-end="url(#arrow6)"/>
+    <line x1="440" y1="220" x2="230" y2="380" 
+          stroke="#ffe629" stroke-width="2" 
+          marker-end="url(#arrow7)"/>
+    <line x1="560" y1="220" x2="230" y2="380" 
+          stroke="#7ce2fe" stroke-width="2" 
+          marker-end="url(#arrow8)"/>
+    <path d="M 60 220 C 65 247, 67 323, 90 380 C 113 437, 182 530, 200 560" fill="none" stroke="#f5d90a" stroke-width="2" 
+          marker-end="url(#arrow9)"/>
+    <text x="103" y="401" font-family="monospace" font-size="12"
+          fill="#f5d90a" text-anchor="middle" dy="-6" dominant-baseline="auto">"skip"</text>
+    <line x1="230" y1="400" x2="200" y2="560" 
+          stroke="#89ddff" stroke-width="2" 
+          marker-end="url(#arrow10)"/>
+    <text x="215" y="480" font-family="monospace" font-size="12"
+          fill="#89ddff" text-anchor="middle" dy="-6" dominant-baseline="auto">"merge"</text>
+    <path d="M 200 560 C 218 530, 237 440, 310 380 C 383 320, 653 257, 640 200 C 627 143, 298 67, 230 40" fill="none" stroke="#d6409f" stroke-width="2" stroke-dasharray="6,3" 
+          marker-end="url(#arrow11)"/>
+    <text x="596" y="235" font-family="monospace" font-size="12"
+          fill="#d6409f" text-anchor="middle" dy="-6" dominant-baseline="auto">"retry"</text>
   </g>
 
   <!-- Nodes -->
   <g id="nodes">
-    <rect x="190" y="20" width="60" height="20" 
+    <rect x="200" y="20" width="60" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="220" y="34" 
+    <text x="230" y="34" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Root</text>
     <rect x="20" y="200" width="80" height="20" 
@@ -68,40 +134,40 @@
     <text x="60" y="214" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task E</text>
-    <rect x="150" y="200" width="80" height="20" 
+    <rect x="160" y="200" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="190" y="214" 
+    <text x="200" y="214" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task A</text>
-    <rect x="260" y="200" width="80" height="20" 
+    <rect x="280" y="200" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="300" y="214" 
+    <text x="320" y="214" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task B</text>
-    <rect x="370" y="200" width="80" height="20" 
+    <rect x="400" y="200" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="410" y="214" 
+    <text x="440" y="214" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task C</text>
-    <rect x="480" y="200" width="80" height="20" 
+    <rect x="520" y="200" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="520" y="214" 
+    <text x="560" y="214" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task D</text>
-    <rect x="170" y="380" width="80" height="20" 
+    <rect x="190" y="380" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="210" y="394" 
+    <text x="230" y="394" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Task F</text>
-    <rect x="150" y="560" width="80" height="20" 
+    <rect x="160" y="560" width="80" height="20" 
           rx="4" ry="4" 
           fill="#f0f0f0" stroke="#333333" stroke-width="1"/>
-    <text x="190" y="574" 
+    <text x="200" y="574" 
           font-family="monospace" font-size="12" 
           text-anchor="middle" fill="#333333">Output</text>
   </g>

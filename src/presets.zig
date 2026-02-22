@@ -93,7 +93,7 @@ pub const sugiyama = struct {
     /// - Layering: network_simplex_fast (minimizes edge span)
     /// - Crossing: quality (more iterations for fewer crossings)
     /// - Positioning: brandes_kopf (best quality centering)
-    /// - Routing: spline (smooth bezier curves)
+    /// - Routing: direct (works with all renderers; use `.routing = .spline` for SVG)
     ///
     /// Requirements: non_empty, acyclic, all_directed
     pub fn quality() LayoutConfig {
@@ -102,7 +102,7 @@ pub const sugiyama = struct {
             .layering = .network_simplex_fast,
             .crossing_reducers = &crossing.quality,
             .positioning = .brandes_kopf,
-            .routing = .spline,
+            .routing = .direct,
         };
     }
 
@@ -201,10 +201,11 @@ test "sugiyama.fast uses fast crossing" {
     try std.testing.expectEqual(@as(usize, 1), config.crossing_reducers.len);
 }
 
-test "sugiyama.quality uses network simplex and spline" {
+test "sugiyama.quality uses network simplex and brandes_kopf" {
     const config = sugiyama.quality();
     try std.testing.expect(config.layering == .network_simplex_fast);
-    try std.testing.expect(config.routing == .spline);
+    try std.testing.expect(config.positioning == .brandes_kopf);
+    try std.testing.expect(config.routing == .direct);
 }
 
 test "fdg.standard uses exact FR" {

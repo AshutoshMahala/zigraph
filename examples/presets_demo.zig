@@ -62,7 +62,7 @@ pub fn main() !void {
 
     // Quality preset
     std.debug.print("\n=== presets.sugiyama.quality() ===\n", .{});
-    std.debug.print("Best quality. Network simplex layering, more crossing passes, spline routing.\n\n", .{});
+    std.debug.print("Best quality. Network simplex layering, more crossing passes, brandes_kopf positioning.\n\n", .{});
     {
         const output = try zigraph.render(&dag, allocator, presets.sugiyama.quality());
         defer allocator.free(output);

@@ -276,7 +276,7 @@ pub fn computeVirtualPositions(
 /// and dummy nodes interpolate between adjacent real nodes on the edge path.
 /// When null, uses simple left-to-right placement with centering (backward compatible).
 ///
-/// This enables integration with brandes_kopf.compute() or simple.compute():
+/// This enables integration with brandes_kopf.compute() or barycentric.compute():
 /// 1. Extract real-node levels via extractRealNodeLevels()
 /// 2. Run positioning algorithm to get x-coordinates for real nodes
 /// 3. Pass those x-coordinates here as hints
