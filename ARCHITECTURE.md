@@ -418,7 +418,7 @@ All limits return `error.OutOfMemory` when exceeded.
 - **Property-based tests**: Layout invariants verified in `fuzz_tests.zig`
 - **Cycle detection tests**: Edge cases including disjoint components
 - **Security tests**: Resource limit verification
-- **168 tests total** as of v0.2.0 (presets, validation, FDG, directed/undirected)
+- **168 tests total** as of v0.2.1 (presets, validation, FDG, directed/undirected)
 
 ---
 
