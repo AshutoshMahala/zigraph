@@ -46,6 +46,15 @@ const CP_T_RIGHT: u21 = '├'; // T-junction: vertical with right
 const CP_T_LEFT: u21 = '┤'; // T-junction: vertical with left
 const CP_CROSS: u21 = '┼'; // Crossing
 
+// Double-line box-drawing characters for subgraph borders
+// (visually distinct from single-line edge characters)
+const CP_SG_UR: u21 = '╔'; // top-left
+const CP_SG_UL: u21 = '╗'; // top-right
+const CP_SG_DR: u21 = '╚'; // bottom-left
+const CP_SG_DL: u21 = '╝'; // bottom-right
+const CP_SG_H: u21 = '═'; // horizontal
+const CP_SG_V: u21 = '║'; // vertical
+
 /// 2D buffer backed by a single flat allocation for cache efficiency.
 /// Includes optional color plane for ANSI edge coloring.
 const Buffer2D = struct {
@@ -120,6 +129,9 @@ pub const Config = struct {
     /// When set, edges will be colored based on their edge_index
     /// Use colors.ansi, colors.ansi_dark, or colors.ansi_light
     edge_palette: ?[]const u8 = null,
+
+    /// Show subgraph bounding boxes (when subgraphs exist in the IR)
+    show_subgraphs: bool = true,
 };
 
 /// Render any GenericLayoutIR to a Unicode string.
@@ -297,6 +309,11 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     var buffer = try Buffer2D.init(allocator, width, height);
     defer buffer.deinit(allocator);
 
+    // Paint subgraph boxes first (background layer)
+    if (config.show_subgraphs) {
+        paintSubgraphs(&buffer, layout_ir);
+    }
+
     // Paint edges first (so nodes overwrite them)
     // Skip reversed edges — they'll be drawn separately with side routing.
     for (layout_ir.getEdges()) |edge| {
@@ -448,6 +465,11 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         paintNode(&buffer, &node, config.show_dummy_nodes);
     }
 
+    // Paint subgraph labels last so they're not overwritten by edges/nodes
+    if (config.show_subgraphs) {
+        paintSubgraphLabels(&buffer, layout_ir);
+    }
+
     // Paint self-loop indicators (↺) after nodes, so they appear right after the node bracket
     for (reversed_groups.items) |grp| {
         if (grp.target_y >= grp.source_y) {
@@ -544,6 +566,70 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     }
 
     return output.toOwnedSlice(allocator);
+}
+
+/// Paint subgraph bounding boxes onto the buffer using double-line box characters.
+/// Renders parent subgraphs first (larger boxes in background), then children on top.
+/// Labels are painted separately via `paintSubgraphLabels` after edges and nodes.
+fn paintSubgraphs(buffer: *Buffer2D, layout_ir: *const LayoutIR) void {
+    const items = layout_ir.subgraphs.items;
+    if (items.len == 0) return;
+
+    // Render in reverse order: parents first (they appear last in the array
+    // since computeBoundingBoxes processes deepest-first).
+    var idx: usize = items.len;
+    while (idx > 0) {
+        idx -= 1;
+        const sg = items[idx];
+        paintSubgraphBox(buffer, sg.x, sg.y, sg.width, sg.height);
+    }
+}
+
+/// Paint subgraph labels after edges and nodes so they remain visible.
+fn paintSubgraphLabels(buffer: *Buffer2D, layout_ir: *const LayoutIR) void {
+    for (layout_ir.subgraphs.items) |sg| {
+        if (sg.label.len == 0) continue;
+        if (sg.width < 4 or sg.height < 3) continue;
+
+        const max_label_len = sg.width - 4; // leave room for borders + spacing
+        const display_len = @min(sg.label.len, max_label_len);
+        if (display_len == 0) continue;
+
+        // Place label starting at x+2 on the row just below the top border
+        const label_start = sg.x + 2;
+        const label_y = sg.y + 1;
+        for (sg.label[0..display_len], 0..) |ch, i| {
+            buffer.set(label_start + i, label_y, @as(u21, ch));
+        }
+    }
+}
+
+/// Draw a single subgraph box with double-line borders.
+fn paintSubgraphBox(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: usize) void {
+    if (w < 2 or h < 2) return;
+
+    const right = x + w - 1;
+    const bottom = y + h - 1;
+
+    // Corners
+    buffer.set(x, y, CP_SG_UR); // top-left
+    buffer.set(right, y, CP_SG_UL); // top-right
+    buffer.set(x, bottom, CP_SG_DR); // bottom-left
+    buffer.set(right, bottom, CP_SG_DL); // bottom-right
+
+    // Top and bottom horizontal lines
+    var col = x + 1;
+    while (col < right) : (col += 1) {
+        buffer.set(col, y, CP_SG_H);
+        buffer.set(col, bottom, CP_SG_H);
+    }
+
+    // Left and right vertical lines
+    var row = y + 1;
+    while (row < bottom) : (row += 1) {
+        buffer.set(x, row, CP_SG_V);
+        buffer.set(right, row, CP_SG_V);
+    }
 }
 
 /// Paint a node onto the buffer.
@@ -1276,4 +1362,60 @@ test "unicode render: empty graph" {
     defer allocator.free(output);
 
     try std.testing.expectEqual(@as(usize, 0), output.len);
+}
+
+test "unicode render: subgraph box" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1, .label = "A", .x = 3, .y = 2, .width = 3,
+        .center_x = 4, .level = 0, .level_position = 0,
+    });
+
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "SG",
+        .x = 1, .y = 0, .width = 8, .height = 5,
+    });
+
+    layout_ir.setDimensions(12, 6);
+
+    const output = try render(&layout_ir, allocator);
+    defer allocator.free(output);
+
+    // Should contain double-line box characters
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") != null); // ╔
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x97") != null); // ╗
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x9a") != null); // ╚
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x9d") != null); // ╝
+    // Should contain label
+    try std.testing.expect(std.mem.indexOf(u8, output, "SG") != null);
+    // Should contain node
+    try std.testing.expect(std.mem.indexOf(u8, output, "[A]") != null);
+}
+
+test "unicode render: subgraph disabled" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "hidden",
+        .x = 0, .y = 0, .width = 5, .height = 5,
+    });
+
+    layout_ir.setDimensions(8, 6);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{ .show_subgraphs = false });
+    defer allocator.free(output);
+
+    // Should NOT contain double-line box characters
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") == null); // ╔
 }

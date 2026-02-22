@@ -671,6 +671,11 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     };
     defer layer_assignment.deinit();
 
+    // Step 1b: Enforce contiguous level spans for subgraph members
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.enforceContiguousLevels(g, &layer_assignment, allocator);
+    }
+
     // Step 2: Build virtual levels (includes dummy nodes for skip-level edges)
     var virtual_levels = try layering.virtual.buildVirtualLevelsWithReversed(
         g,
@@ -1701,6 +1706,8 @@ test {
     _ = positioning.barycentric;
     _ = routing.direct;
     _ = unicode;
+    _ = svg;
+    _ = json;
     _ = subgraph_layout;
     _ = @import("fuzz_tests.zig");
 

@@ -358,6 +358,25 @@ pub fn build(b: *std.Build) void {
     const run_svg_step = b.step("run-svg", "Run SVG export example");
     run_svg_step.dependOn(&run_svg.step);
 
+    // Subgraph demo example
+    const subgraph_example = b.addModule("subgraph_example", .{
+        .root_source_file = b.path("examples/subgraph_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const subgraph_exe = b.addExecutable(.{
+        .name = "subgraph_demo",
+        .root_module = subgraph_example,
+    });
+    b.installArtifact(subgraph_exe);
+
+    const run_subgraph = b.addRunArtifact(subgraph_exe);
+    const run_subgraph_step = b.step("run-subgraph", "Run subgraph demo example");
+    run_subgraph_step.dependOn(&run_subgraph.step);
+
     // Dummy visibility example
     const dummy_visibility_example = b.addModule("dummy_visibility_example", .{
         .root_source_file = b.path("examples/dummy_visibility.zig"),

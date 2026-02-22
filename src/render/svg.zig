@@ -70,6 +70,20 @@ pub const SvgConfig = struct {
     /// When false (default), labels are placed at fixed positions near the edge.
     /// When true, labels follow the edge curve using SVG text-on-a-path.
     labels_on_path: bool = false,
+    /// Show subgraph bounding boxes (when subgraphs exist in the IR)
+    show_subgraphs: bool = true,
+    /// Subgraph box fill color (with transparency)
+    subgraph_fill: []const u8 = "#e8f4fd",
+    /// Subgraph box fill opacity
+    subgraph_fill_opacity: []const u8 = "0.4",
+    /// Subgraph box stroke color
+    subgraph_stroke: []const u8 = "#4a90d9",
+    /// Subgraph box corner radius
+    subgraph_radius: usize = 6,
+    /// Subgraph label font size in pixels
+    subgraph_font_size: usize = 11,
+    /// Subgraph label color
+    subgraph_label_color: []const u8 = "#4a90d9",
 
     /// Get the color for a specific edge index
     pub fn getEdgeColor(self: SvgConfig, edge_index: usize) []const u8 {
@@ -162,6 +176,23 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
         \\  <!-- Background -->
         \\  <rect width="100%" height="100%" fill="white"/>
         \\
+    );
+
+    // Render subgraph boxes (behind everything else)
+    if (config.show_subgraphs and layout.subgraphs.items.len > 0) {
+        try writer.writeAll(
+            \\  <!-- Subgraphs -->
+            \\  <g id="subgraphs">
+            \\
+        );
+        try renderSubgraphs(writer, layout, config);
+        try writer.writeAll(
+            \\  </g>
+            \\
+        );
+    }
+
+    try writer.writeAll(
         \\  <!-- Edges (rendered first, under nodes) -->
         \\  <g id="edges">
         \\
@@ -269,6 +300,54 @@ fn renderNode(writer: anytype, node: LayoutNode, config: SvgConfig) !void {
         config.node_stroke,
         node.label,
     });
+}
+
+/// Render subgraph bounding boxes as labeled rounded rectangles.
+/// Renders parent subgraphs first (lower z-order) so children draw on top.
+fn renderSubgraphs(writer: anytype, layout: *const LayoutIR, config: SvgConfig) !void {
+    // Render in IR order: parents before children (bottom-up computed, stored deepest first).
+    // Reverse iteration gives parents first → correct z-order.
+    const items = layout.subgraphs.items;
+    var i: usize = items.len;
+    while (i > 0) {
+        i -= 1;
+        const sg = items[i];
+
+        const x = sg.x * config.char_width + config.padding;
+        const y = sg.y * config.line_height + config.padding;
+        const w = sg.width * config.char_width;
+        const h = sg.height * config.line_height;
+
+        // Subgraph box
+        try writer.print(
+            \\    <rect x="{d}" y="{d}" width="{d}" height="{d}" 
+            \\          rx="{d}" ry="{d}" 
+            \\          fill="{s}" fill-opacity="{s}" 
+            \\          stroke="{s}" stroke-width="1" stroke-dasharray="4,2"/>
+            \\
+        , .{
+            x, y, w, h,
+            config.subgraph_radius, config.subgraph_radius,
+            config.subgraph_fill, config.subgraph_fill_opacity,
+            config.subgraph_stroke,
+        });
+
+        // Subgraph label (top-left, inside the box)
+        if (sg.label.len > 0) {
+            const label_x = x + config.subgraph_radius;
+            const label_y = y + config.subgraph_font_size + 2;
+            try writer.print(
+                \\    <text x="{d}" y="{d}" 
+                \\          font-family="{s}" font-size="{d}" 
+                \\          font-weight="bold" fill="{s}">{s}</text>
+                \\
+            , .{
+                label_x, label_y,
+                config.font_family, config.subgraph_font_size,
+                config.subgraph_label_color, sg.label,
+            });
+        }
+    }
 }
 
 fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
@@ -1243,4 +1322,63 @@ test "svg: colored edges" {
 
     // Should contain colored stroke from palette
     try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=") != null);
+}
+
+test "svg: subgraph rendering" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1, .label = "A", .x = 5, .y = 3, .width = 3,
+        .center_x = 6, .level = 0, .level_position = 0,
+    });
+    try layout.addNode(.{
+        .id = 2, .label = "B", .x = 5, .y = 7, .width = 3,
+        .center_x = 6, .level = 1, .level_position = 0,
+    });
+
+    // Add a subgraph bounding box
+    try layout.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "cluster",
+        .x = 3,
+        .y = 1,
+        .width = 10,
+        .height = 10,
+    });
+
+    layout.setDimensions(20, 15);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // Should contain subgraph group and rect
+    try std.testing.expect(std.mem.indexOf(u8, svg, "id=\"subgraphs\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke-dasharray") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "cluster") != null);
+}
+
+test "svg: subgraph rendering disabled" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "hidden",
+        .x = 0, .y = 0, .width = 5, .height = 5,
+    });
+
+    layout.setDimensions(10, 10);
+
+    const svg = try render(&layout, allocator, .{ .show_subgraphs = false });
+    defer allocator.free(svg);
+
+    // Should NOT contain subgraph elements
+    try std.testing.expect(std.mem.indexOf(u8, svg, "id=\"subgraphs\"") == null);
 }
