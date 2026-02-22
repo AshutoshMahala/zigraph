@@ -417,56 +417,241 @@ const dummy_id_base: usize = 0x80000000;
 const dummy_id_edge_stride: usize = 1000;
 const dummy_key_stride: usize = 10000;
 
+// ============================================================================
+// Sugiyama pipeline steps (extracted for composability)
+// ============================================================================
+
+/// Step 0: Validate the graph for Sugiyama layout.
+///
+/// Checks for empty graph and cycles. When cycle_breaking is disabled,
+/// cycles are rejected with diagnostics (human-readable detail + node IDs).
+fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) !void {
+    if (config.skip_validation) return;
+
+    var validation_result = try g.validate(allocator);
+    defer validation_result.deinit();
+
+    switch (validation_result) {
+        .empty => {
+            errors.captureError(error.EmptyGraph, @src());
+            return error.EmptyGraph;
+        },
+        .cycle => |cycle_info| {
+            if (config.cycle_breaking == .none) {
+                // Build human-readable detail (capped at 5 nodes)
+                var detail_buf: [256]u8 = undefined;
+                var fbs = std.io.fixedBufferStream(&detail_buf);
+                const w = fbs.writer();
+                const max_shown = 5;
+                const path = cycle_info.path;
+                const total = path.len;
+                const show = @min(total, max_shown);
+                for (path[0..show], 0..) |node_idx, i| {
+                    if (i > 0) w.writeAll(" -> ") catch {};
+                    if (g.nodeAt(node_idx)) |node| {
+                        w.writeAll(node.label) catch {};
+                    } else {
+                        w.print("{d}", .{node_idx}) catch {};
+                    }
+                }
+                if (total > max_shown) {
+                    w.print(" -> ... (+{d} more)", .{total - max_shown}) catch {};
+                }
+
+                // Build machine-readable node IDs (indices → IDs)
+                var id_buf: [64]usize = undefined;
+                const id_count = @min(total, 64);
+                for (path[0..id_count], 0..) |node_idx, i| {
+                    id_buf[i] = if (g.nodeAt(node_idx)) |node| node.id else node_idx;
+                }
+
+                errors.captureErrorFull(error.CycleDetected, @src(), fbs.getWritten(), id_buf[0..id_count]);
+                return error.CycleDetected;
+            }
+        },
+        .ok => {},
+    }
+}
+
+/// Step 3b: Compute effective level spacing based on fan-out and labels.
+///
+/// Returns enough vertical rows between levels to stagger outgoing edges,
+/// plus extra rows when edge labels are present.
+fn computeEffectiveLevelSpacing(g: *const Graph, config: LayoutConfig) usize {
+    const has_edge_labels = blk: {
+        for (g.edges.items) |edge| {
+            if (edge.label != null) break :blk true;
+        }
+        break :blk false;
+    };
+    const label_extra: usize = if (has_edge_labels) 2 else 0;
+
+    var max_fan: usize = 0;
+    for (0..g.nodeCount()) |node_idx| {
+        const children = g.getChildren(node_idx);
+        if (children.len > max_fan) max_fan = children.len;
+        const parents = g.getParents(node_idx);
+        if (parents.len > max_fan) max_fan = parents.len;
+    }
+    const needed = if (max_fan > 1) @min(max_fan + 1, 20) else 2;
+    return @max(config.level_spacing, needed) + label_extra;
+}
+
+/// Step 6b: Fix up reversed (back) edges in the IR.
+///
+/// The pipeline routed them downward (from→to flipped), so this step:
+///   1. Swaps from_id/to_id back to the original semantic direction
+///   2. Keeps coordinates as-is (they represent the visual downward path)
+///   3. Sets reversed=true so renderers draw dashed lines
+///   4. Moves 'directed' flag from last segment to first segment (arrow at top)
+fn fixupReversedEdges(result: *LayoutIR(usize), reversed_edges: ?[]const bool) void {
+    const re = reversed_edges orelse return;
+
+    for (result.edges.items) |*result_edge| {
+        if (result_edge.edge_index < re.len and re[result_edge.edge_index]) {
+            result_edge.reversed = true;
+            const tmp_id = result_edge.from_id;
+            result_edge.from_id = result_edge.to_id;
+            result_edge.to_id = tmp_id;
+        }
+    }
+
+    // For multi-segment reversed edges, move the arrowhead flag
+    // from the last segment (bottom) to the first segment (top).
+    for (0..re.len) |edge_idx| {
+        if (!re[edge_idx]) continue;
+
+        var first_seg: ?*ir.LayoutEdge(usize) = null;
+        var last_seg: ?*ir.LayoutEdge(usize) = null;
+        for (result.edges.items) |*seg| {
+            if (seg.edge_index != edge_idx) continue;
+            if (first_seg == null or seg.from_y < first_seg.?.from_y) {
+                first_seg = seg;
+            }
+            if (last_seg == null or seg.from_y > last_seg.?.from_y) {
+                last_seg = seg;
+            }
+        }
+
+        if (first_seg != null and last_seg != null and first_seg != last_seg) {
+            const was_directed = last_seg.?.directed;
+            last_seg.?.directed = false;
+            first_seg.?.directed = was_directed;
+        }
+    }
+}
+
+/// Step 7: Stagger horizontal_y for corner-path edges.
+///
+/// Groups corner edges by from_y and assigns sequential row slots
+/// so no two horizontal segments share the same row.
+fn staggerCornerEdges(result: *LayoutIR(usize)) void {
+    for (result.edges.items, 0..) |*edge, i| {
+        if (edge.path != .corner) continue;
+        var slot: usize = 0;
+        for (result.edges.items[0..i]) |prev| {
+            if (prev.path == .corner and prev.from_y == edge.from_y) {
+                slot += 1;
+            }
+        }
+        const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
+        edge.path.corner.horizontal_y = edge.from_y + 1 + (slot % available);
+    }
+}
+
+/// Step 8: Propagate edge labels from the input graph to the IR edges.
+///
+/// Labels come from the original Graph.Edge; looked up via edge_index.
+/// For split edges (through dummies), only the first segment gets the label.
+/// Label is positioned on a dedicated row below the horizontal routing area.
+fn propagateEdgeLabels(result: *LayoutIR(usize), g: *const Graph, allocator: std.mem.Allocator) !void {
+    var label_assigned = try allocator.alloc(bool, g.edges.items.len);
+    defer allocator.free(label_assigned);
+    @memset(label_assigned, false);
+
+    for (result.edges.items) |*edge| {
+        const orig_idx = edge.edge_index;
+        if (orig_idx >= g.edges.items.len) continue;
+
+        const orig_label = g.edges.items[orig_idx].label orelse continue;
+        if (label_assigned[orig_idx]) continue;
+        label_assigned[orig_idx] = true;
+
+        edge.label = orig_label;
+
+        var label_y: usize = undefined;
+        var edge_x_at_label: usize = undefined;
+
+        switch (edge.path) {
+            .direct => {
+                label_y = if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = edge.from_x;
+            },
+            .corner => |c| {
+                if (c.horizontal_y + 1 < edge.to_y) {
+                    label_y = c.horizontal_y + 1;
+                } else if (c.horizontal_y > edge.from_y + 1) {
+                    label_y = c.horizontal_y - 1;
+                } else {
+                    label_y = edge.from_y + 1;
+                }
+                edge_x_at_label = edge.to_x;
+            },
+            .side_channel => |sc| {
+                label_y = if (sc.start_y + 1 < sc.end_y)
+                    sc.start_y + 1
+                else if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = sc.channel_x;
+            },
+            .multi_segment => {
+                label_y = if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = edge.from_x;
+            },
+            .spline => {
+                label_y = if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = edge.from_x;
+            },
+        }
+
+        const label_width = orig_label.len + 2;
+        const label_x = if (edge_x_at_label >= label_width / 2)
+            edge_x_at_label - label_width / 2
+        else
+            0;
+
+        edge.label_x = label_x;
+        edge.label_y = label_y;
+    }
+}
+
+/// Step 9: Widen layout if edge labels extend beyond current width.
+fn widenForLabels(result: *LayoutIR(usize), total_width: usize, total_height: usize) void {
+    var needed_width = total_width;
+    for (result.edges.items) |edge| {
+        if (edge.label) |lbl| {
+            const right = edge.label_x + lbl.len + 2;
+            if (right > needed_width) needed_width = right;
+        }
+    }
+    result.setDimensions(needed_width, total_height);
+}
+
 /// Compute layout using the Sugiyama hierarchical algorithm.
 fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
     // Step 0: Validate graph (unless skipped)
-    if (!config.skip_validation) {
-        var validation_result = try g.validate(allocator);
-        defer validation_result.deinit();
-
-        switch (validation_result) {
-            .empty => {
-                errors.captureError(error.EmptyGraph, @src());
-                return error.EmptyGraph;
-            },
-            .cycle => |cycle_info| {
-                // If cycle breaking is enabled, we handle cycles below.
-                // If not, reject the graph with detail and node IDs.
-                if (config.cycle_breaking == .none) {
-                    // Build human-readable detail (capped at 5 nodes)
-                    var detail_buf: [256]u8 = undefined;
-                    var fbs = std.io.fixedBufferStream(&detail_buf);
-                    const w = fbs.writer();
-                    const max_shown = 5;
-                    const path = cycle_info.path;
-                    const total = path.len;
-                    const show = @min(total, max_shown);
-                    for (path[0..show], 0..) |node_idx, i| {
-                        if (i > 0) w.writeAll(" -> ") catch {};
-                        if (g.nodeAt(node_idx)) |node| {
-                            w.writeAll(node.label) catch {};
-                        } else {
-                            w.print("{d}", .{node_idx}) catch {};
-                        }
-                    }
-                    if (total > max_shown) {
-                        w.print(" -> ... (+{d} more)", .{total - max_shown}) catch {};
-                    }
-
-                    // Build machine-readable node IDs (indices → IDs)
-                    var id_buf: [64]usize = undefined;
-                    const id_count = @min(total, 64);
-                    for (path[0..id_count], 0..) |node_idx, i| {
-                        id_buf[i] = if (g.nodeAt(node_idx)) |node| node.id else node_idx;
-                    }
-
-                    errors.captureErrorFull(error.CycleDetected, @src(), fbs.getWritten(), id_buf[0..id_count]);
-                    return error.CycleDetected;
-                }
-            },
-            .ok => {},
-        }
-    }
+    try validateForSugiyama(g, allocator, config);
 
     // Step 0b: Cycle breaking — detect and virtually reverse back edges
     const reversed_edges: ?[]bool = switch (config.cycle_breaking) {
@@ -497,30 +682,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
 
     // Step 3b: Compute adaptive level spacing
-    // Need enough vertical rows between levels to stagger outgoing edges.
-    // Also add extra rows when edge labels are present (dedicated label row).
-    const has_edge_labels = blk: {
-        for (g.edges.items) |edge| {
-            if (edge.label != null) break :blk true;
-        }
-        break :blk false;
-    };
-    const label_extra: usize = if (has_edge_labels) 2 else 0;
-
-    const effective_level_spacing = blk: {
-        var max_fan: usize = 0;
-        for (0..g.nodeCount()) |node_idx| {
-            const children = g.getChildren(node_idx);
-            if (children.len > max_fan) max_fan = children.len;
-            const parents = g.getParents(node_idx);
-            if (parents.len > max_fan) max_fan = parents.len;
-        }
-        // Need enough rows to stagger all edges in the busiest level gap.
-        // Cap at 20 to avoid absurd vertical gaps for extreme fan-out/in;
-        // the router's slot modulo wraps gracefully when rows < edges.
-        const needed = if (max_fan > 1) @min(max_fan + 1, 20) else 2;
-        break :blk @max(config.level_spacing, needed) + label_extra;
-    };
+    const effective_level_spacing = computeEffectiveLevelSpacing(g, config);
 
     // Step 4: Position nodes
     // For .compact: use left-to-right packing on virtual levels (fast, no collisions)
@@ -753,164 +915,17 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         }
     }
 
-    // Step 6b: Mark reversed (back) edges in the IR.
-    // The pipeline routed them downward (from→to flipped), so now we:
-    //   1. Swap from_id/to_id back to the original semantic direction
-    //   2. Keep coordinates as-is (they represent the visual downward path)
-    //   3. Set reversed=true so renderers draw dashed lines
-    //   4. Move 'directed' flag from last segment to first segment (arrow at top)
-    if (reversed_edges) |re| {
-        for (result.edges.items) |*result_edge| {
-            if (result_edge.edge_index < re.len and re[result_edge.edge_index]) {
-                result_edge.reversed = true;
-                // Swap from/to IDs back to original direction
-                const tmp_id = result_edge.from_id;
-                result_edge.from_id = result_edge.to_id;
-                result_edge.to_id = tmp_id;
-            }
-        }
+    // Step 6b: Fix up reversed (back) edges
+    fixupReversedEdges(&result, reversed_edges);
 
-        // For multi-segment reversed edges, move the 'directed' (arrowhead) flag
-        // from the last segment (bottom, where routing put it) to the first
-        // segment (top, where the semantic target is for back edges).
-        for (0..re.len) |edge_idx| {
-            if (!re[edge_idx]) continue;
+    // Step 7: Stagger horizontal_y for corner edges
+    staggerCornerEdges(&result);
 
-            // Find first and last segments of this reversed edge (by from_y)
-            var first_seg: ?*ir.LayoutEdge(usize) = null;
-            var last_seg: ?*ir.LayoutEdge(usize) = null;
-            for (result.edges.items) |*seg| {
-                if (seg.edge_index != edge_idx) continue;
-                if (first_seg == null or seg.from_y < first_seg.?.from_y) {
-                    first_seg = seg;
-                }
-                if (last_seg == null or seg.from_y > last_seg.?.from_y) {
-                    last_seg = seg;
-                }
-            }
+    // Step 8: Propagate edge labels and compute label positions
+    try propagateEdgeLabels(&result, g, allocator);
 
-            // Swap: move arrow from last segment to first segment
-            if (first_seg != null and last_seg != null and first_seg != last_seg) {
-                const was_directed = last_seg.?.directed;
-                last_seg.?.directed = false;
-                first_seg.?.directed = was_directed;
-            }
-        }
-    }
-
-    // Step 7: Stagger horizontal_y for all corner edges.
-    // After splitting, edges from both the router and the splitter coexist in
-    // result.edges.  Group them by from_y (same source-level band) and assign
-    // sequential slots so no two horizontal segments share the same row.
-    for (result.edges.items, 0..) |*edge, i| {
-        if (edge.path != .corner) continue;
-        // Count how many earlier corner edges share this from_y
-        var slot: usize = 0;
-        for (result.edges.items[0..i]) |prev| {
-            if (prev.path == .corner and prev.from_y == edge.from_y) {
-                slot += 1;
-            }
-        }
-        const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
-        edge.path.corner.horizontal_y = edge.from_y + 1 + (slot % available);
-    }
-
-    // Step 8: Propagate edge labels and compute label positions.
-    // Labels come from the original Graph.Edge; we look them up via edge_index.
-    // For split edges (through dummies), only the first segment gets the label.
-    // Label is placed on a dedicated row below the horizontal routing area.
-    {
-        // Track which original edges have already had their label assigned
-        // (so split edges don't duplicate the label on every segment).
-        var label_assigned = try allocator.alloc(bool, g.edges.items.len);
-        defer allocator.free(label_assigned);
-        @memset(label_assigned, false);
-
-        for (result.edges.items) |*edge| {
-            const orig_idx = edge.edge_index;
-            if (orig_idx >= g.edges.items.len) continue;
-
-            const orig_label = g.edges.items[orig_idx].label orelse continue;
-            if (label_assigned[orig_idx]) continue;
-            label_assigned[orig_idx] = true;
-
-            edge.label = orig_label;
-
-            // Compute label position based on path type.
-            // For corner edges, place on the post-corner vertical (at to_x)
-            // where the edge has diverged from the shared source column.
-            // For other paths, place near the source.
-            var label_y: usize = undefined;
-            var edge_x_at_label: usize = undefined;
-
-            switch (edge.path) {
-                .direct => {
-                    label_y = if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = edge.from_x;
-                },
-                .corner => |c| {
-                    // Place on the post-corner vertical at to_x.
-                    // Y just below the horizontal turn, with room before destination.
-                    if (c.horizontal_y + 1 < edge.to_y) {
-                        label_y = c.horizontal_y + 1;
-                    } else if (c.horizontal_y > edge.from_y + 1) {
-                        label_y = c.horizontal_y - 1;
-                    } else {
-                        label_y = edge.from_y + 1;
-                    }
-                    edge_x_at_label = edge.to_x;
-                },
-                .side_channel => |sc| {
-                    label_y = if (sc.start_y + 1 < sc.end_y)
-                        sc.start_y + 1
-                    else if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = sc.channel_x;
-                },
-                .multi_segment => {
-                    label_y = if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = edge.from_x;
-                },
-                .spline => {
-                    label_y = if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = edge.from_x;
-                },
-            }
-
-            // Center the label text (rendered as "text", so width = len + 2 for quotes)
-            const label_width = orig_label.len + 2;
-            const label_x = if (edge_x_at_label >= label_width / 2)
-                edge_x_at_label - label_width / 2
-            else
-                0;
-
-            edge.label_x = label_x;
-            edge.label_y = label_y;
-        }
-    }
-
-    // Step 9: Widen layout if labels extend beyond current width.
-    {
-        var needed_width = real_positions.total_width;
-        for (result.edges.items) |edge| {
-            if (edge.label) |lbl| {
-                const right = edge.label_x + lbl.len + 2; // +2 for quotes
-                if (right > needed_width) needed_width = right;
-            }
-        }
-        result.setDimensions(needed_width, real_positions.total_height);
-    }
+    // Step 9: Widen layout if labels extend beyond current width
+    widenForLabels(&result, real_positions.total_width, real_positions.total_height);
 
     return result;
 }
