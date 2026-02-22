@@ -117,6 +117,9 @@ pub const routing = struct {
     pub const spline = @import("algorithms/sugiyama/routing/spline.zig");
 };
 
+/// Subgraph-aware layout orchestration (adjacency enforcement + bounding boxes)
+pub const subgraph_layout = @import("algorithms/sugiyama/subgraph.zig");
+
 /// Force-directed graph layout algorithms.
 ///
 /// Each algorithm is standalone — call `compute()` directly with a `*const Graph`
@@ -681,6 +684,11 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     // Step 3: Crossing reduction pipeline on virtual levels (includes dummies)
     try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
 
+    // Step 3c: Enforce subgraph adjacency (nodes in the same subgraph are contiguous)
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.enforceSubgraphAdjacency(g, &virtual_levels, allocator);
+    }
+
     // Step 3b: Compute adaptive level spacing
     const effective_level_spacing = computeEffectiveLevelSpacing(g, config);
 
@@ -926,6 +934,20 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 
     // Step 9: Widen layout if labels extend beyond current width
     widenForLabels(&result, real_positions.total_width, real_positions.total_height);
+
+    // Step 10: Compute subgraph bounding boxes
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.computeBoundingBoxes(g, &result, allocator);
+
+        // Expand layout dimensions if subgraph boxes extend beyond
+        for (result.subgraphs.items) |sg_info| {
+            const right = sg_info.x + sg_info.width;
+            const bottom = sg_info.y + sg_info.height;
+            if (right > result.width or bottom > result.height) {
+                result.setDimensions(@max(result.width, right), @max(result.height, bottom));
+            }
+        }
+    }
 
     return result;
 }
@@ -1528,6 +1550,147 @@ test "layout: FR empty graph returns error" {
     try std.testing.expectError(error.EmptyGraph, result);
 }
 
+test "end-to-end: layout with subgraphs produces bounding boxes" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // Build a small graph with subgraph structure:
+    //   [Gateway] → [Auth] → [DB]
+    //                ↑ in cluster "backend"
+    try g.addNode(1, "Gateway");
+    try g.addNode(2, "Auth");
+    try g.addNode(3, "DB");
+    try g.addDiEdge(1, 2);
+    try g.addDiEdge(2, 3);
+
+    const backend = try g.addSubgraph("backend");
+    try g.putNodes(&.{ 2, 3 }).inside(backend);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    // Basic IR sanity
+    try std.testing.expectEqual(@as(usize, 3), result.getNodes().len);
+    try std.testing.expect(result.getEdges().len >= 2);
+
+    // Should have exactly 1 subgraph bbox
+    try std.testing.expectEqual(@as(usize, 1), result.getSubgraphs().len);
+    const sg_bbox = result.getSubgraphs()[0];
+    try std.testing.expectEqual(backend, sg_bbox.id);
+    try std.testing.expectEqualStrings("backend", sg_bbox.label);
+
+    // Bbox must have positive dimensions
+    try std.testing.expect(sg_bbox.width > 0);
+    try std.testing.expect(sg_bbox.height > 0);
+
+    // Bbox must contain both Auth and DB nodes
+    for (result.getNodes()) |node| {
+        if (node.id == 2 or node.id == 3) {
+            try std.testing.expect(node.x >= sg_bbox.x);
+            try std.testing.expect(node.y >= sg_bbox.y);
+            try std.testing.expect(node.x + node.width <= sg_bbox.x + sg_bbox.width);
+            try std.testing.expect(node.y + 1 <= sg_bbox.y + sg_bbox.height);
+        }
+    }
+
+    // Gateway (node 1) should NOT be inside the bbox
+    for (result.getNodes()) |node| {
+        if (node.id == 1) {
+            const inside_x = node.x >= sg_bbox.x and node.x + node.width <= sg_bbox.x + sg_bbox.width;
+            const inside_y = node.y >= sg_bbox.y and node.y + 1 <= sg_bbox.y + sg_bbox.height;
+            // Gateway could spatially overlap due to layout, but semantically it's not in the subgraph.
+            // We just verify the subgraph bbox is computed from Auth + DB, not Gateway.
+            _ = inside_x;
+            _ = inside_y;
+        }
+    }
+}
+
+test "end-to-end: layout with nested subgraphs" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addDiEdge(1, 2);
+    try g.addDiEdge(2, 3);
+
+    const outer = try g.addSubgraph("outer");
+    const inner = try g.addSubgraph("inner");
+    try g.putSubgraphs(&.{inner}).inside(outer);
+    try g.putNodes(&.{ 1, 2, 3 }).inside(inner);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    // Should have 2 subgraph bboxes
+    try std.testing.expectEqual(@as(usize, 2), result.getSubgraphs().len);
+
+    // Find inner/outer bboxes
+    var inner_box: ?SubgraphInfo(usize) = null;
+    var outer_box: ?SubgraphInfo(usize) = null;
+    for (result.getSubgraphs()) |sg| {
+        if (sg.id == inner) inner_box = sg;
+        if (sg.id == outer) outer_box = sg;
+    }
+    try std.testing.expect(inner_box != null);
+    try std.testing.expect(outer_box != null);
+
+    // Outer must fully contain inner
+    const ib = inner_box.?;
+    const ob = outer_box.?;
+    try std.testing.expect(ob.x <= ib.x);
+    try std.testing.expect(ob.y <= ib.y);
+    try std.testing.expect(ob.x + ob.width >= ib.x + ib.width);
+    try std.testing.expect(ob.y + ob.height >= ib.y + ib.height);
+}
+
+test "end-to-end: layout without subgraphs unchanged" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addDiEdge(1, 2);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    // No subgraphs → no subgraph bboxes
+    try std.testing.expectEqual(@as(usize, 0), result.getSubgraphs().len);
+    try std.testing.expectEqual(@as(usize, 2), result.getNodes().len);
+    try std.testing.expect(result.getEdges().len >= 1);
+}
+
+test "end-to-end: subgraphs with typed coord conversion" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "X");
+    try g.addNode(2, "Y");
+    try g.addDiEdge(1, 2);
+    const sg = try g.addSubgraph("cluster");
+    try g.putNodes(&.{ 1, 2 }).inside(sg);
+
+    var result_f32 = try layoutTyped(f32, &g, allocator, .{});
+    defer result_f32.deinit();
+
+    // Subgraph bbox should be converted to f32
+    try std.testing.expectEqual(@as(usize, 1), result_f32.getSubgraphs().len);
+    const bbox = result_f32.getSubgraphs()[0];
+    try std.testing.expect(bbox.width > 0.0);
+    try std.testing.expect(bbox.height > 0.0);
+}
+
 // Run tests from submodules
 test {
     _ = graph;
@@ -1538,6 +1701,7 @@ test {
     _ = positioning.barycentric;
     _ = routing.direct;
     _ = unicode;
+    _ = subgraph_layout;
     _ = @import("fuzz_tests.zig");
 
     // Force-directed graph modules

@@ -446,6 +446,20 @@ pub fn LayoutIR(comptime Coord: type) type {
             result.width = coordCast(Target, Coord, self.width);
             result.height = coordCast(Target, Coord, self.height);
 
+            // Convert subgraph bounding boxes
+            try result.subgraphs.ensureTotalCapacity(target_allocator, self.subgraphs.items.len);
+            for (self.subgraphs.items) |sg| {
+                result.subgraphs.appendAssumeCapacity(.{
+                    .id = sg.id,
+                    .parent_id = sg.parent_id,
+                    .label = sg.label,
+                    .x = coordCast(Target, Coord, sg.x),
+                    .y = coordCast(Target, Coord, sg.y),
+                    .width = coordCast(Target, Coord, sg.width),
+                    .height = coordCast(Target, Coord, sg.height),
+                });
+            }
+
             return result;
         }
     };
