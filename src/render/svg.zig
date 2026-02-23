@@ -326,9 +326,8 @@ fn renderSubgraphs(writer: anytype, layout: *const LayoutIR, config: SvgConfig) 
             \\          stroke="{s}" stroke-width="1" stroke-dasharray="4,2"/>
             \\
         , .{
-            x, y, w, h,
-            config.subgraph_radius, config.subgraph_radius,
-            config.subgraph_fill, config.subgraph_fill_opacity,
+            x,                      y,                      w,                    h,
+            config.subgraph_radius, config.subgraph_radius, config.subgraph_fill, config.subgraph_fill_opacity,
             config.subgraph_stroke,
         });
 
@@ -342,8 +341,8 @@ fn renderSubgraphs(writer: anytype, layout: *const LayoutIR, config: SvgConfig) 
                 \\          font-weight="bold" fill="{s}">{s}</text>
                 \\
             , .{
-                label_x, label_y,
-                config.font_family, config.subgraph_font_size,
+                label_x,                     label_y,
+                config.font_family,          config.subgraph_font_size,
                 config.subgraph_label_color, sg.label,
             });
         }
@@ -422,22 +421,22 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                     marker,
                 });
             } else {
-            try writer.print(
-                \\    <path d="M {d} {d} L {d} {d} L {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
-                \\
-            , .{
-                from_x,
-                from_y,
-                from_x,
-                corner_y,
-                to_x,
-                to_y,
-                config.edge_stroke,
-                config.edge_width,
-                dash,
-                marker,
-            });
+                try writer.print(
+                    \\    <path d="M {d} {d} L {d} {d} L {d} {d}" 
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
+                    \\
+                , .{
+                    from_x,
+                    from_y,
+                    from_x,
+                    corner_y,
+                    to_x,
+                    to_y,
+                    config.edge_stroke,
+                    config.edge_width,
+                    dash,
+                    marker,
+                });
             }
         },
         .side_channel => |sc| {
@@ -483,13 +482,13 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 }
                 try writer.print(" L {d} {d}\"", .{ real_from_x, real_from_y });
             } else {
-            try writer.print("    <path d=\"M {d} {d}", .{ from_x, from_y });
-            for (ms.waypoints.items) |wp| {
-                const wx = wp.x * config.char_width + config.padding;
-                const wy = wp.y * config.line_height + config.padding;
-                try writer.print(" L {d} {d}", .{ wx, wy });
-            }
-            try writer.print(" L {d} {d}\"", .{ to_x, to_y });
+                try writer.print("    <path d=\"M {d} {d}", .{ from_x, from_y });
+                for (ms.waypoints.items) |wp| {
+                    const wx = wp.x * config.char_width + config.padding;
+                    const wy = wp.y * config.line_height + config.padding;
+                    try writer.print(" L {d} {d}", .{ wx, wy });
+                }
+                try writer.print(" L {d} {d}\"", .{ to_x, to_y });
             }
             try writer.print(
                 \\ fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
@@ -1201,17 +1200,34 @@ test "svg: corner edge rendering" {
     defer layout.deinit();
 
     try layout.addNode(.{
-        .id = 1, .label = "A", .x = 0, .y = 0, .width = 3,
-        .center_x = 1, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 2, .label = "B", .x = 5, .y = 4, .width = 3,
-        .center_x = 6, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 5,
+        .y = 4,
+        .width = 3,
+        .center_x = 6,
+        .level = 1,
+        .level_position = 0,
     });
 
     try layout.addEdge(.{
-        .from_id = 1, .to_id = 2, .from_x = 1, .from_y = 1,
-        .to_x = 6, .to_y = 4, .path = .{ .corner = .{ .horizontal_y = 2 } },
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 1,
+        .to_x = 6,
+        .to_y = 4,
+        .path = .{ .corner = .{ .horizontal_y = 2 } },
         .edge_index = 0,
     });
 
@@ -1234,20 +1250,44 @@ test "svg: multiple nodes and edges" {
 
     // Build a small diamond: A -> B, A -> C, B -> D, C -> D
     try layout.addNode(.{
-        .id = 1, .label = "A", .x = 5, .y = 0, .width = 3,
-        .center_x = 6, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 5,
+        .y = 0,
+        .width = 3,
+        .center_x = 6,
+        .level = 0,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 2, .label = "B", .x = 0, .y = 4, .width = 3,
-        .center_x = 1, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 4,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 3, .label = "C", .x = 10, .y = 4, .width = 3,
-        .center_x = 11, .level = 1, .level_position = 1,
+        .id = 3,
+        .label = "C",
+        .x = 10,
+        .y = 4,
+        .width = 3,
+        .center_x = 11,
+        .level = 1,
+        .level_position = 1,
     });
     try layout.addNode(.{
-        .id = 4, .label = "D", .x = 5, .y = 8, .width = 3,
-        .center_x = 6, .level = 2, .level_position = 0,
+        .id = 4,
+        .label = "D",
+        .x = 5,
+        .y = 8,
+        .width = 3,
+        .center_x = 6,
+        .level = 2,
+        .level_position = 0,
     });
 
     for ([_]struct { from: usize, to: usize, idx: usize }{
@@ -1257,10 +1297,14 @@ test "svg: multiple nodes and edges" {
         .{ .from = 3, .to = 4, .idx = 3 },
     }) |e| {
         try layout.addEdge(.{
-            .from_id = e.from, .to_id = e.to,
-            .from_x = 6, .from_y = 1,
-            .to_x = 6, .to_y = 4,
-            .path = .direct, .edge_index = e.idx,
+            .from_id = e.from,
+            .to_id = e.to,
+            .from_x = 6,
+            .from_y = 1,
+            .to_x = 6,
+            .to_y = 4,
+            .path = .direct,
+            .edge_index = e.idx,
         });
     }
 
@@ -1302,17 +1346,35 @@ test "svg: colored edges" {
     defer layout.deinit();
 
     try layout.addNode(.{
-        .id = 1, .label = "A", .x = 0, .y = 0, .width = 3,
-        .center_x = 1, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 2, .label = "B", .x = 0, .y = 4, .width = 3,
-        .center_x = 1, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 4,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
     });
 
     try layout.addEdge(.{
-        .from_id = 1, .to_id = 2, .from_x = 1, .from_y = 1,
-        .to_x = 1, .to_y = 4, .path = .direct, .edge_index = 0,
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 1,
+        .to_x = 1,
+        .to_y = 4,
+        .path = .direct,
+        .edge_index = 0,
     });
 
     layout.setDimensions(5, 5);
@@ -1331,12 +1393,24 @@ test "svg: subgraph rendering" {
     defer layout.deinit();
 
     try layout.addNode(.{
-        .id = 1, .label = "A", .x = 5, .y = 3, .width = 3,
-        .center_x = 6, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 5,
+        .y = 3,
+        .width = 3,
+        .center_x = 6,
+        .level = 0,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 2, .label = "B", .x = 5, .y = 7, .width = 3,
-        .center_x = 6, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 5,
+        .y = 7,
+        .width = 3,
+        .center_x = 6,
+        .level = 1,
+        .level_position = 0,
     });
 
     // Add a subgraph bounding box
@@ -1371,7 +1445,10 @@ test "svg: subgraph rendering disabled" {
         .id = 0,
         .parent_id = null,
         .label = "hidden",
-        .x = 0, .y = 0, .width = 5, .height = 5,
+        .x = 0,
+        .y = 0,
+        .width = 5,
+        .height = 5,
     });
 
     layout.setDimensions(10, 10);

@@ -354,12 +354,12 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                 // Draw vertical line at dummy position
                 const x = node.center_x;
                 const y = node.y;
-                
+
                 // Set the dummy position itself to vertical line
                 const current = buffer.get(x, y);
                 const merged = mergeJunction(current, true, true, false, false);
                 buffer.set(x, y, merged);
-                
+
                 // Also fix any arrows above/below to be vertical lines
                 // Check row above
                 if (y > 0) {
@@ -892,10 +892,18 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
 /// Check if a character is a double-line subgraph border or mixed crossing character.
 fn isSubgraphBorderChar(ch: u21) bool {
     return switch (ch) {
-        CP_SG_H, CP_SG_V, CP_SG_UR, CP_SG_UL, CP_SG_DR, CP_SG_DL,
-        CP_MIX_CROSS_DH, CP_MIX_CROSS_DV,
-        CP_MIX_T_DOWN_DH, CP_MIX_T_UP_DH,
-        CP_MIX_T_RIGHT_DV, CP_MIX_T_LEFT_DV,
+        CP_SG_H,
+        CP_SG_V,
+        CP_SG_UR,
+        CP_SG_UL,
+        CP_SG_DR,
+        CP_SG_DL,
+        CP_MIX_CROSS_DH,
+        CP_MIX_CROSS_DV,
+        CP_MIX_T_DOWN_DH,
+        CP_MIX_T_UP_DH,
+        CP_MIX_T_RIGHT_DV,
+        CP_MIX_T_LEFT_DV,
         => true,
         else => false,
     };
@@ -925,8 +933,12 @@ fn mergeWithDoubleLine(current: u21, from_above: bool, to_below: bool, to_right:
         CP_MIX_T_RIGHT_DV => if (to_left) CP_MIX_CROSS_DV else current,
         CP_MIX_T_LEFT_DV => if (to_right) CP_MIX_CROSS_DV else current,
         // Full crossings and corners: preserve as-is
-        CP_MIX_CROSS_DH, CP_MIX_CROSS_DV,
-        CP_SG_UR, CP_SG_UL, CP_SG_DR, CP_SG_DL,
+        CP_MIX_CROSS_DH,
+        CP_MIX_CROSS_DV,
+        CP_SG_UR,
+        CP_SG_UL,
+        CP_SG_DR,
+        CP_SG_DL,
         => current,
         else => current,
     };
@@ -1131,7 +1143,6 @@ fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color
             }
         }
     }
-
 }
 
 /// Paint an edge onto the buffer.
@@ -1508,15 +1519,24 @@ test "unicode render: subgraph box" {
     defer layout_ir.deinit();
 
     try layout_ir.addNode(.{
-        .id = 1, .label = "A", .x = 3, .y = 2, .width = 3,
-        .center_x = 4, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 3,
+        .y = 2,
+        .width = 3,
+        .center_x = 4,
+        .level = 0,
+        .level_position = 0,
     });
 
     try layout_ir.subgraphs.append(allocator, .{
         .id = 0,
         .parent_id = null,
         .label = "SG",
-        .x = 1, .y = 0, .width = 8, .height = 5,
+        .x = 1,
+        .y = 0,
+        .width = 8,
+        .height = 5,
     });
 
     layout_ir.setDimensions(12, 6);
@@ -1545,7 +1565,10 @@ test "unicode render: subgraph disabled" {
         .id = 0,
         .parent_id = null,
         .label = "hidden",
-        .x = 0, .y = 0, .width = 5, .height = 5,
+        .x = 0,
+        .y = 0,
+        .width = 5,
+        .height = 5,
     });
 
     layout_ir.setDimensions(8, 6);
@@ -1616,14 +1639,26 @@ test "unicode render: edge crosses subgraph border cleanly" {
 
     // Node above the subgraph
     try layout_ir.addNode(.{
-        .id = 1, .label = "A", .x = 3, .y = 0, .width = 3,
-        .center_x = 4, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 3,
+        .y = 0,
+        .width = 3,
+        .center_x = 4,
+        .level = 0,
+        .level_position = 0,
     });
 
     // Node inside the subgraph
     try layout_ir.addNode(.{
-        .id = 2, .label = "B", .x = 3, .y = 4, .width = 3,
-        .center_x = 4, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 3,
+        .y = 4,
+        .width = 3,
+        .center_x = 4,
+        .level = 1,
+        .level_position = 0,
     });
 
     // Subgraph box covering B
@@ -1631,7 +1666,10 @@ test "unicode render: edge crosses subgraph border cleanly" {
         .id = 0,
         .parent_id = null,
         .label = "SG",
-        .x = 1, .y = 2, .width = 8, .height = 5,
+        .x = 1,
+        .y = 2,
+        .width = 8,
+        .height = 5,
     });
 
     // Edge from A to B (crosses the top border at y=2, x=4)

@@ -206,7 +206,7 @@ pub fn deserializeGeneric(comptime Coord: type, json_bytes: []const u8, allocato
 }
 
 /// Deinit a LayoutIR returned by `deserialize`.
-/// 
+///
 /// **Important**: Always use this instead of `layout_ir.deinit()` for deserialized IRs.
 /// This function frees the heap-allocated label strings before releasing the IR.
 /// Calling `layout_ir.deinit()` directly will leak all label memory.
@@ -224,7 +224,7 @@ pub fn deinitDeserialized(layout_ir: *LayoutIR, allocator: Allocator) void {
 }
 
 /// Deinit a LayoutIR returned by `deserializeGeneric`.
-/// 
+///
 /// **Important**: Always use this instead of `layout_ir.deinit()` for deserialized IRs.
 /// This function frees the heap-allocated label strings before releasing the IR.
 /// Calling `layout_ir.deinit()` directly will leak all label memory.
@@ -688,15 +688,24 @@ test "json: subgraph serialization" {
     defer layout_ir.deinit();
 
     try layout_ir.addNode(.{
-        .id = 1, .label = "A", .x = 5, .y = 3, .width = 3,
-        .center_x = 6, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 5,
+        .y = 3,
+        .width = 3,
+        .center_x = 6,
+        .level = 0,
+        .level_position = 0,
     });
 
     try layout_ir.subgraphs.append(allocator, .{
         .id = 0,
         .parent_id = null,
         .label = "backend",
-        .x = 3, .y = 1, .width = 10, .height = 8,
+        .x = 3,
+        .y = 1,
+        .width = 10,
+        .height = 8,
     });
 
     layout_ir.setDimensions(20, 15);
@@ -718,21 +727,33 @@ test "json: subgraph roundtrip" {
     defer layout_ir.deinit();
 
     try layout_ir.addNode(.{
-        .id = 1, .label = "X", .x = 0, .y = 0, .width = 3,
-        .center_x = 1, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "X",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
     });
 
     try layout_ir.subgraphs.append(allocator, .{
         .id = 10,
         .parent_id = null,
         .label = "outer",
-        .x = 0, .y = 0, .width = 20, .height = 15,
+        .x = 0,
+        .y = 0,
+        .width = 20,
+        .height = 15,
     });
     try layout_ir.subgraphs.append(allocator, .{
         .id = 20,
         .parent_id = 10,
         .label = "inner",
-        .x = 2, .y = 2, .width = 10, .height = 8,
+        .x = 2,
+        .y = 2,
+        .width = 10,
+        .height = 8,
     });
 
     layout_ir.setDimensions(25, 20);
@@ -766,8 +787,14 @@ test "json: no subgraphs omits array" {
     defer layout_ir.deinit();
 
     try layout_ir.addNode(.{
-        .id = 1, .label = "A", .x = 0, .y = 0, .width = 3,
-        .center_x = 1, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
     });
     layout_ir.setDimensions(5, 3);
 

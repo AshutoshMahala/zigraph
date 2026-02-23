@@ -192,7 +192,13 @@ fn blockOrderLevel(
     // Phase 1: Compute individual medians and assign block keys
     for (level_vnodes.items, 0..) |vnode, i| {
         medians[i] = median_mod.vnodeMedian(
-            g, vnode, real_pos_map, dummy_pos_map, use_parents, positions_buf, i,
+            g,
+            vnode,
+            real_pos_map,
+            dummy_pos_map,
+            use_parents,
+            positions_buf,
+            i,
         );
         block_keys[i] = vnodeSubgraph(g, vnode) orelse SENTINEL;
     }
@@ -594,11 +600,17 @@ fn countBoundaryTransitions(
                 // Find index of a_id in chain A (chain is innermost-first)
                 var idx_a: usize = 0;
                 for (chain_buf_a[0..depth_a], 0..) |x, i| {
-                    if (x == a_id) { idx_a = i; break; }
+                    if (x == a_id) {
+                        idx_a = i;
+                        break;
+                    }
                 }
                 var idx_b: usize = 0;
                 for (chain_buf_b[0..depth_b], 0..) |x, i| {
-                    if (x == b_id) { idx_b = i; break; }
+                    if (x == b_id) {
+                        idx_b = i;
+                        break;
+                    }
                 }
                 // idx_a = number of subgraphs between node A and the LCA
                 // idx_b = number of subgraphs between node B and the LCA
@@ -670,7 +682,11 @@ pub fn applySubgraphPadding(
             const prev_sg = vnodeSubgraph(g, level.items[i - 1]);
             const curr_sg = vnodeSubgraph(g, level.items[i]);
             const transitions = countBoundaryTransitions(
-                g, prev_sg, curr_sg, &chain_a, &chain_b,
+                g,
+                prev_sg,
+                curr_sg,
+                &chain_a,
+                &chain_b,
             );
             // Each transition needs 'pad' space on each side of the border
             offsets[i] = offsets[i - 1] + transitions * pad;
@@ -1173,12 +1189,26 @@ test "computeBoundingBoxes: nested subgraphs" {
     defer result.deinit();
 
     try result.addNode(.{
-        .id = 1, .label = "A", .x = 10, .y = 5,
-        .width = 3, .center_x = 11, .level = 0, .level_position = 0, .kind = .explicit,
+        .id = 1,
+        .label = "A",
+        .x = 10,
+        .y = 5,
+        .width = 3,
+        .center_x = 11,
+        .level = 0,
+        .level_position = 0,
+        .kind = .explicit,
     });
     try result.addNode(.{
-        .id = 2, .label = "B", .x = 16, .y = 5,
-        .width = 3, .center_x = 17, .level = 0, .level_position = 1, .kind = .explicit,
+        .id = 2,
+        .label = "B",
+        .x = 16,
+        .y = 5,
+        .width = 3,
+        .center_x = 17,
+        .level = 0,
+        .level_position = 1,
+        .kind = .explicit,
     });
 
     try computeBoundingBoxes(&g, &result, allocator);
@@ -1222,8 +1252,15 @@ test "computeBoundingBoxes: empty subgraph produces no bbox" {
     defer result.deinit();
 
     try result.addNode(.{
-        .id = 1, .label = "A", .x = 0, .y = 0,
-        .width = 3, .center_x = 1, .level = 0, .level_position = 0, .kind = .explicit,
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+        .kind = .explicit,
     });
 
     try computeBoundingBoxes(&g, &result, allocator);
@@ -1247,18 +1284,39 @@ test "computeBoundingBoxes: skips dummy nodes" {
 
     // Real node in subgraph
     try result.addNode(.{
-        .id = 1, .label = "A", .x = 5, .y = 3,
-        .width = 3, .center_x = 6, .level = 0, .level_position = 0, .kind = .explicit,
+        .id = 1,
+        .label = "A",
+        .x = 5,
+        .y = 3,
+        .width = 3,
+        .center_x = 6,
+        .level = 0,
+        .level_position = 0,
+        .kind = .explicit,
     });
     // Dummy node at extreme position — should NOT affect bbox
     try result.addNode(.{
-        .id = 0x80000000, .label = "O", .x = 100, .y = 100,
-        .width = 1, .center_x = 100, .level = 1, .level_position = 0, .kind = .dummy,
+        .id = 0x80000000,
+        .label = "O",
+        .x = 100,
+        .y = 100,
+        .width = 1,
+        .center_x = 100,
+        .level = 1,
+        .level_position = 0,
+        .kind = .dummy,
     });
     // Real node NOT in subgraph
     try result.addNode(.{
-        .id = 2, .label = "B", .x = 50, .y = 50,
-        .width = 3, .center_x = 51, .level = 1, .level_position = 1, .kind = .explicit,
+        .id = 2,
+        .label = "B",
+        .x = 50,
+        .y = 50,
+        .width = 3,
+        .center_x = 51,
+        .level = 1,
+        .level_position = 1,
+        .kind = .explicit,
     });
 
     try computeBoundingBoxes(&g, &result, allocator);
