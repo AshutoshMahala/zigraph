@@ -143,8 +143,10 @@ pub fn main() !void {
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();
 
-        // Unicode to terminal
-        const unicode = try zigraph.unicode.renderGeneric(usize, &ir, allocator);
+        // Unicode to terminal (with colors!)
+        const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
+            .edge_palette = &zigraph.colors.ansi,
+        });
         defer allocator.free(unicode);
         std.debug.print("{s}\n", .{unicode});
 
@@ -171,6 +173,96 @@ pub fn main() !void {
             try file.writeAll(json_output);
         }
         std.debug.print("  → Wrote subgraph_demo.json ({d} bytes)\n", .{json_output.len});
+
+        std.debug.print("\nSubgraph bounding boxes:\n", .{});
+        for (ir.getSubgraphs()) |sg| {
+            std.debug.print("  [{s}] id={d} parent={?d} x={d} y={d} w={d} h={d}\n", .{
+                sg.label, sg.id, sg.parent_id, sg.x, sg.y, sg.width, sg.height,
+            });
+        }
+        std.debug.print("\n", .{});
+    }
+
+    // ═══════════════════════════════════════════
+    // Example 4: Complex multi-parent hierarchy
+    // ═══════════════════════════════════════════
+    {
+        std.debug.print("Example 4: Complex Multi-Parent Hierarchy (colored)\n", .{});
+        std.debug.print("═══════════════════════════════════════════════════\n\n", .{});
+        std.debug.print("Three parent subgraphs, each with 2 child subgraphs.\n\n", .{});
+
+        var g = zigraph.Graph.init(allocator);
+        defer g.deinit();
+
+        // ── Frontend (top) ──
+        try g.addNode(1, "WebApp");
+        try g.addNode(2, "Mobile");
+        try g.addNode(3, "Gateway");
+
+        // ── Backend (middle) ──
+        try g.addNode(4, "AuthSvc");
+        try g.addNode(5, "UserSvc");
+        try g.addNode(6, "Worker");
+
+        // ── Data (bottom) ──
+        try g.addNode(7, "Postgres");
+        try g.addNode(8, "Redis");
+
+        // Edges — strictly top→bottom flow
+        try g.addDiEdge(1, 3); // WebApp → Gateway
+        try g.addDiEdge(2, 3); // Mobile → Gateway
+        try g.addDiEdge(3, 4); // Gateway → AuthSvc
+        try g.addDiEdge(3, 5); // Gateway → UserSvc
+        try g.addDiEdge(4, 6); // AuthSvc → Worker
+        try g.addDiEdge(5, 6); // UserSvc → Worker
+        try g.addDiEdge(6, 7); // Worker → Postgres
+        try g.addDiEdge(6, 8); // Worker → Redis
+
+        // ── Subgraph hierarchy ──
+        const frontend = try g.addSubgraph("Frontend");
+        const ui = try g.addSubgraph("UI");
+        const routing = try g.addSubgraph("Routing");
+        try g.putSubgraphs(&.{ ui, routing }).inside(frontend);
+        try g.putNodes(&.{ 1, 2 }).inside(ui);
+        try g.putNodes(&.{3}).inside(routing);
+
+        const backend = try g.addSubgraph("Backend");
+        const services = try g.addSubgraph("Services");
+        const processing = try g.addSubgraph("Processing");
+        try g.putSubgraphs(&.{ services, processing }).inside(backend);
+        try g.putNodes(&.{ 4, 5 }).inside(services);
+        try g.putNodes(&.{6}).inside(processing);
+
+        const data = try g.addSubgraph("Data");
+        const databases = try g.addSubgraph("Databases");
+        const cache = try g.addSubgraph("Cache");
+        try g.putSubgraphs(&.{ databases, cache }).inside(data);
+        try g.putNodes(&.{7}).inside(databases);
+        try g.putNodes(&.{8}).inside(cache);
+
+        // Layout
+        var ir = try zigraph.layout(&g, allocator, .{});
+        defer ir.deinit();
+
+        // Unicode with colors
+        const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
+            .edge_palette = &zigraph.colors.ansi,
+        });
+        defer allocator.free(unicode);
+        std.debug.print("{s}\n", .{unicode});
+
+        // SVG
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{
+            .color_edges = true,
+        });
+        defer allocator.free(svg_output);
+
+        {
+            const file = try std.fs.cwd().createFile("subgraph_complex.svg", .{});
+            defer file.close();
+            try file.writeAll(svg_output);
+        }
+        std.debug.print("  → Wrote subgraph_complex.svg ({d} bytes)\n", .{svg_output.len});
 
         std.debug.print("\nSubgraph bounding boxes:\n", .{});
         for (ir.getSubgraphs()) |sg| {

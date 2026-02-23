@@ -26,7 +26,7 @@ const LayerAssignment = @import("layering/longest_path.zig").LayerAssignment;
 const median_mod = @import("crossing/median.zig");
 
 /// Default padding around subgraph bounding boxes (in layout cells).
-pub const default_padding: usize = 1;
+pub const default_padding: usize = 2;
 
 // ============================================================================
 // Subgraph membership
@@ -890,6 +890,17 @@ pub fn computeBoundingBoxes(
         max_x[sg_idx] += pad;
         max_y[sg_idx] += pad;
 
+        // Ensure minimum width accommodates the label text.
+        // The renderer needs width >= label.len + 4 (2 for borders + 2 for spacing).
+        if (sg.label.len > 0) {
+            const min_label_width = sg.label.len + 4;
+            const current_width = max_x[sg_idx] - min_x[sg_idx];
+            if (current_width < min_label_width) {
+                // Expand right side to fit the label
+                max_x[sg_idx] += min_label_width - current_width;
+            }
+        }
+
         // Expand parent's accumulator
         if (sg.parent_id) |pid| {
             if (g.subgraph_id_to_index.get(pid)) |parent_idx| {
@@ -1165,12 +1176,12 @@ test "computeBoundingBoxes: simple flat subgraph" {
     try std.testing.expectEqualStrings("cluster", bbox.label);
 
     // Node envelope: x=[5, 16), y=[3, 4)
-    // Padding: 1 cell each side, 1 extra top for label
-    // min_x = 5 - 1 = 4, min_y = 3 - 2 = 1, max_x = 16 + 1 = 17, max_y = 4 + 1 = 5
-    try std.testing.expectEqual(@as(usize, 4), bbox.x);
-    try std.testing.expectEqual(@as(usize, 1), bbox.y);
-    try std.testing.expectEqual(@as(usize, 13), bbox.width); // 17 - 4
-    try std.testing.expectEqual(@as(usize, 4), bbox.height); // 5 - 1
+    // Padding: 2 cells each side, 1 extra top for label
+    // min_x = 5 - 2 = 3, min_y = 3 - 3 = 0, max_x = 16 + 2 = 18, max_y = 4 + 2 = 6
+    try std.testing.expectEqual(@as(usize, 3), bbox.x);
+    try std.testing.expectEqual(@as(usize, 0), bbox.y);
+    try std.testing.expectEqual(@as(usize, 15), bbox.width); // 18 - 3
+    try std.testing.expectEqual(@as(usize, 6), bbox.height); // 6 - 0
 }
 
 test "computeBoundingBoxes: nested subgraphs" {
@@ -1227,10 +1238,10 @@ test "computeBoundingBoxes: nested subgraphs" {
     try std.testing.expect(inner_bbox != null);
     try std.testing.expect(outer_bbox != null);
 
-    // Inner envelope: x=[10, 19), y=[5, 6), padded: x=[9, 20), y=[3, 7)
+    // Inner envelope: x=[10, 19), y=[5, 6), padded: x=[8, 21), y=[2, 8)
     const ib = inner_bbox.?;
-    try std.testing.expectEqual(@as(usize, 9), ib.x);
-    try std.testing.expectEqual(@as(usize, 3), ib.y);
+    try std.testing.expectEqual(@as(usize, 8), ib.x);
+    try std.testing.expectEqual(@as(usize, 2), ib.y);
 
     // Outer must fully contain inner (with additional padding)
     const ob = outer_bbox.?;
@@ -1324,11 +1335,11 @@ test "computeBoundingBoxes: skips dummy nodes" {
     try std.testing.expectEqual(@as(usize, 1), result.subgraphs.items.len);
     const bbox = result.subgraphs.items[0];
     // Only node A (x=5, width=3) contributes: envelope x=[5,8), y=[3,4)
-    // Padded: x=[4,9), y=[1,5)  → width=5, height=4
-    try std.testing.expectEqual(@as(usize, 4), bbox.x);
-    try std.testing.expectEqual(@as(usize, 1), bbox.y);
-    try std.testing.expectEqual(@as(usize, 5), bbox.width);
-    try std.testing.expectEqual(@as(usize, 4), bbox.height);
+    // Padded: x=[3,10), y=[0,6)  → width=7, height=6
+    try std.testing.expectEqual(@as(usize, 3), bbox.x);
+    try std.testing.expectEqual(@as(usize, 0), bbox.y);
+    try std.testing.expectEqual(@as(usize, 7), bbox.width);
+    try std.testing.expectEqual(@as(usize, 6), bbox.height);
 }
 
 test "enforceContiguousLevels: compacts gaps" {
@@ -1822,9 +1833,9 @@ test "applySubgraphPadding: adds horizontal space" {
     try std.testing.expectEqual(@as(usize, 0), positions.x.items[0].items[0]);
 
     // B (sg, depth 1) has 1 boundary transition from root→sg
-    // Transition padding = 1 * default_padding = 1
-    // So B's offset = 0 + 1 = 1, B's x = 6 + 1 = 7
-    try std.testing.expectEqual(@as(usize, 7), positions.x.items[0].items[1]);
+    // Transition padding = 1 * default_padding = 2
+    // So B's offset = 0 + 2 = 2, B's x = 6 + 2 = 8
+    try std.testing.expectEqual(@as(usize, 8), positions.x.items[0].items[1]);
 }
 
 test "applySubgraphPadding: nested subgraph adds more padding" {
@@ -1866,8 +1877,8 @@ test "applySubgraphPadding: nested subgraph adds more padding" {
     try std.testing.expectEqual(@as(usize, 0), positions.x.items[0].items[0]);
 
     // B is in inner (depth 2), root→inner boundary means 2 transitions
-    // offset = 0 + 2 * 1 = 2, B's x = 6 + 2 = 8
-    try std.testing.expectEqual(@as(usize, 8), positions.x.items[0].items[1]);
+    // offset = 0 + 2 * 2 = 4, B's x = 6 + 4 = 10
+    try std.testing.expectEqual(@as(usize, 10), positions.x.items[0].items[1]);
 }
 
 test "computeLevelYOffsets: subgraph spanning all levels" {
@@ -1896,8 +1907,8 @@ test "computeLevelYOffsets: subgraph spanning all levels" {
     defer allocator.free(offsets);
 
     try std.testing.expectEqual(@as(usize, 2), offsets.len);
-    // Level 0: subgraph starts here → top border (pad=1 + label=1 = 2)
-    try std.testing.expectEqual(@as(usize, 2), offsets[0]);
+    // Level 0: subgraph starts here → top border (pad=2 + label=1 = 3)
+    try std.testing.expectEqual(@as(usize, 3), offsets[0]);
     // Level 1: subgraph continues (no new borders) → 0
     try std.testing.expectEqual(@as(usize, 0), offsets[1]);
 }
@@ -1932,8 +1943,8 @@ test "computeLevelYOffsets: subgraph starts mid-graph" {
     try std.testing.expectEqual(@as(usize, 3), offsets.len);
     // Level 0: no subgraphs → 0
     try std.testing.expectEqual(@as(usize, 0), offsets[0]);
-    // Level 1: subgraph starts → top border (2)
-    try std.testing.expectEqual(@as(usize, 2), offsets[1]);
+    // Level 1: subgraph starts → top border (3)
+    try std.testing.expectEqual(@as(usize, 3), offsets[1]);
     // Level 2: subgraph continues → 0
     try std.testing.expectEqual(@as(usize, 0), offsets[2]);
 }
