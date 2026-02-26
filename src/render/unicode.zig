@@ -174,135 +174,13 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         return result;
     }
 
-    // Collect reversed edge groups: group segments by edge_index,
-    // find the real source/target nodes and their right edges.
-    // Each reversed edge group needs a side channel column.
-
-    var reversed_groups: std.ArrayListUnmanaged(ReversedEdgeInfo) = .{};
-    defer reversed_groups.deinit(allocator);
-
-    // Track which edge_indices are reversed (to skip their segments in paintEdge)
-    var max_edge_idx: usize = 0;
-    for (layout_ir.getEdges()) |edge| {
-        if (edge.edge_index > max_edge_idx) max_edge_idx = edge.edge_index;
-    }
-
-    const reversed_flags = try allocator.alloc(bool, max_edge_idx + 1);
-    defer allocator.free(reversed_flags);
-    @memset(reversed_flags, false);
-
-    for (layout_ir.getEdges()) |edge| {
-        if (edge.reversed) {
-            reversed_flags[edge.edge_index] = true;
-        }
-    }
-
-    // Build reversed edge groups
-    for (0..reversed_flags.len) |edge_idx| {
-        if (!reversed_flags[edge_idx]) continue;
-
-        // Find first and last segments of this edge (by from_y)
-        var first_seg: ?*const LayoutEdge = null;
-        var last_seg: ?*const LayoutEdge = null;
-        var seg_label: ?[]const u8 = null;
-        var seg_label_y: usize = 0;
-        for (layout_ir.getEdges()) |*edge| {
-            if (edge.edge_index != edge_idx) continue;
-            if (first_seg == null or edge.from_y < first_seg.?.from_y) {
-                first_seg = edge;
-            }
-            if (last_seg == null or edge.from_y > last_seg.?.from_y) {
-                last_seg = edge;
-            }
-            if (edge.label != null) {
-                seg_label = edge.label;
-                seg_label_y = edge.label_y;
-            }
-        }
-
-        if (first_seg == null or last_seg == null) continue;
-
-        // For reversed edges: from_id was swapped back to semantic direction.
-        // Visually, first_seg is at the top (semantic target), last_seg is at the bottom (semantic source).
-        // We need the node positions for source (bottom) and target (top).
-        const source_node = layout_ir.nodeById(last_seg.?.from_id);
-        const target_node = layout_ir.nodeById(first_seg.?.to_id);
-
-        // If we can't find nodes (e.g., dummy IDs), fall back to edge coords
-        const src_right_x = if (source_node) |n| n.x + n.width else last_seg.?.to_x + 1;
-        const src_y = if (source_node) |n| n.y else last_seg.?.to_y;
-        const tgt_right_x = if (target_node) |n| n.x + n.width else first_seg.?.from_x + 1;
-        const tgt_y = if (target_node) |n| n.y else first_seg.?.from_y;
-
-        const edge_color: u8 = if (config.edge_palette) |palette|
-            colors.getAnsi(palette, edge_idx)
-        else
-            0;
-
-        try reversed_groups.append(allocator, .{
-            .edge_index = edge_idx,
-            .source_right_x = src_right_x,
-            .source_y = src_y,
-            .target_right_x = tgt_right_x,
-            .target_y = tgt_y,
-            .channel_x = 0, // assigned below
-            .color = edge_color,
-            .label = seg_label,
-            .label_y = seg_label_y,
-            .from_id = last_seg.?.from_id,
-            .to_id = first_seg.?.to_id,
-        });
-    }
-
-    // Assign side channel columns for reversed edges.
-    // Place channels to the right of the layout, spaced 2 apart.
-    // Skip self-loops (source_y == target_y) — they have no visual side route.
+    // Check if extra width is needed for self-loop indicators (↺ + label)
     var extra_width: usize = 0;
-    // Count only non-degenerate reversed edges for channel assignment
-    var channel_count: usize = 0;
-    for (reversed_groups.items) |*grp| {
-        if (grp.target_y >= grp.source_y) continue; // self-loop or degenerate
-        channel_count += 1;
-    }
-    if (channel_count > 0) {
-        // Find the rightmost extent of all involved nodes
-        var max_right: usize = base_width;
-        for (reversed_groups.items) |grp| {
-            if (grp.source_right_x + 1 > max_right) max_right = grp.source_right_x + 1;
-            if (grp.target_right_x + 1 > max_right) max_right = grp.target_right_x + 1;
-        }
-
-        // Assign channel columns (each non-degenerate reversed edge gets its own column)
-        var ch_idx: usize = 0;
-        for (reversed_groups.items) |*grp| {
-            if (grp.target_y >= grp.source_y) continue; // self-loop
-            grp.channel_x = max_right + 1 + ch_idx * 2;
-            ch_idx += 1;
-        }
-
-        var max_extent: usize = 0;
-        for (reversed_groups.items) |grp| {
-            if (grp.target_y >= grp.source_y) continue;
-            if (grp.channel_x + 2 > max_extent) max_extent = grp.channel_x + 2;
-        }
-        // Account for labels centered on the channel that extend to the right
-        for (reversed_groups.items) |grp| {
-            if (grp.target_y >= grp.source_y) continue; // self-loop
-            if (grp.label) |lbl| {
-                const label_width = lbl.len + 2; // +2 for quotes
-                const label_right = grp.channel_x + label_width / 2 + label_width % 2 + 1;
-                if (label_right > max_extent) max_extent = label_right;
-            }
-        }
-        extra_width = if (max_extent > base_width) max_extent - base_width else 0;
-    }
-
-    // Account for self-loop indicators (↺ + label) extending past base_width
-    for (reversed_groups.items) |grp| {
-        if (grp.target_y >= grp.source_y) {
-            if (layout_ir.nodeById(grp.from_id)) |node| {
+    for (layout_ir.getEdges()) |edge| {
+        if (edge.reversed and edge.from_id == edge.to_id) {
+            if (layout_ir.nodeById(edge.from_id)) |node| {
                 var needed = node.x + node.width + 1; // +1 for ↺
-                if (grp.label) |label| {
+                if (edge.label) |label| {
                     needed += label.len + 2; // +2 for quotes
                 }
                 if (needed > base_width + extra_width) {
@@ -323,11 +201,8 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         paintSubgraphs(&buffer, layout_ir);
     }
 
-    // Paint edges first (so nodes overwrite them)
-    // Skip reversed edges — they'll be drawn separately with side routing.
+    // Paint all edges (so nodes overwrite them)
     for (layout_ir.getEdges()) |edge| {
-        if (reversed_flags[edge.edge_index]) continue;
-
         // Get color for this edge if palette is set
         const edge_color: u8 = if (config.edge_palette) |palette|
             colors.getAnsi(palette, edge.edge_index)
@@ -336,21 +211,11 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         paintEdge(&buffer, &edge, edge_color);
     }
 
-    // Paint reversed edges with side routing
-    for (reversed_groups.items) |grp| {
-        paintReversedEdgeSide(&buffer, &grp, grp.color);
-    }
-
     // For invisible dummy nodes, paint a vertical line at their position
     // and clean up any arrows to make a continuous line.
-    // Skip dummy nodes belonging to reversed edges (those are side-routed).
     if (!config.show_dummy_nodes) {
         for (layout_ir.getNodes()) |node| {
             if (node.kind == .dummy) {
-                // Skip dummies belonging to reversed edges
-                if (node.edge_index) |ei| {
-                    if (ei < reversed_flags.len and reversed_flags[ei]) continue;
-                }
                 // Draw vertical line at dummy position
                 const x = node.center_x;
                 const y = node.y;
@@ -387,54 +252,11 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     var legend_edges: std.ArrayListUnmanaged(LegendEntry) = .{};
     defer legend_edges.deinit(allocator);
 
-    // Paint reversed edge labels — centered on the channel column, same logic as normal edges
-    for (reversed_groups.items) |grp| {
-        if (grp.label) |label| {
-            const top_y = grp.target_y;
-            const bot_y = grp.source_y;
-
-            // Self-loops (top_y >= bot_y) — handled after node painting with ↺ indicator
-            if (top_y >= bot_y) continue;
-
-            const label_width = label.len + 2; // +2 for quotes
-            const ch_x = grp.channel_x;
-            // Center the label on the channel column, like normal edges center on edge x
-            const label_x = if (ch_x >= label_width / 2) ch_x - label_width / 2 else 0;
-            // Preferred y: midpoint of vertical span
-            const mid_y = top_y + (bot_y - top_y) / 2;
-
-            if (canPlaceLabel(&buffer, label, label_x, mid_y)) {
-                paintLabel(&buffer, label, label_x, mid_y, grp.color);
-            } else {
-                // Slide vertically to find a clear row
-                var placed = false;
-                const min_y = top_y + 1;
-                const max_y = if (bot_y > 1) bot_y - 1 else bot_y;
-                var try_y = min_y;
-                while (try_y <= max_y) : (try_y += 1) {
-                    if (try_y == mid_y) continue;
-                    if (canPlaceLabel(&buffer, label, label_x, try_y)) {
-                        paintLabel(&buffer, label, label_x, try_y, grp.color);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (!placed) {
-                    try legend_edges.append(allocator, .{
-                        .from_id = grp.from_id,
-                        .to_id = grp.to_id,
-                        .label = label,
-                        .color = grp.color,
-                    });
-                }
-            }
-        }
-    }
-
     for (layout_ir.getEdges()) |edge| {
-        // Skip reversed edges — their labels are handled above
-        if (reversed_flags[edge.edge_index]) continue;
         if (edge.label) |label| {
+            // Skip self-loop labels — handled after node painting with ↺ indicator
+            if (edge.reversed and edge.from_id == edge.to_id) continue;
+
             const edge_color: u8 = if (config.edge_palette) |palette|
                 colors.getAnsi(palette, edge.edge_index)
             else
@@ -480,16 +302,20 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     }
 
     // Paint self-loop indicators (↺) after nodes, so they appear right after the node bracket
-    for (reversed_groups.items) |grp| {
-        if (grp.target_y >= grp.source_y) {
-            // This is a self-loop — find the node to place ↺ after its closing bracket
-            if (layout_ir.nodeById(grp.from_id)) |node| {
+    for (layout_ir.getEdges()) |edge| {
+        if (edge.reversed and edge.from_id == edge.to_id) {
+            const edge_color: u8 = if (config.edge_palette) |palette|
+                colors.getAnsi(palette, edge.edge_index)
+            else
+                0;
+
+            if (layout_ir.nodeById(edge.from_id)) |node| {
                 const loop_x = node.x + node.width; // right after ']'
                 const loop_y = node.y;
-                buffer.setWithColor(loop_x, loop_y, 0x21BA, grp.color); // ↺
+                buffer.setWithColor(loop_x, loop_y, 0x21BA, edge_color); // ↺
                 // Paint label right after ↺ if present
-                if (grp.label) |label| {
-                    paintLabel(&buffer, label, loop_x + 1, loop_y, grp.color);
+                if (edge.label) |label| {
+                    paintLabel(&buffer, label, loop_x + 1, loop_y, edge_color);
                 }
             }
         }
@@ -1071,91 +897,6 @@ fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: u
         px += 1;
     }
     buffer.setWithColor(px, y, '"', color);
-}
-
-/// Info for a reversed (back) edge to be drawn with side routing.
-const ReversedEdgeInfo = struct {
-    edge_index: usize,
-    source_right_x: usize,
-    source_y: usize,
-    target_right_x: usize,
-    target_y: usize,
-    channel_x: usize,
-    color: u8,
-    label: ?[]const u8,
-    label_y: usize,
-    from_id: usize,
-    to_id: usize,
-};
-
-/// Paint a reversed (back) edge using side routing.
-/// Routes the edge from the RIGHT side of the source node, through a dedicated
-/// side channel column, to the RIGHT side of the target node.
-///
-/// Visual result:
-///   [Target]┈┈┐     ← dashed horizontal from target right to channel
-///      │      ┊     ← dashed vertical in channel
-///      ↓      ┊
-///    [Source]┈┈┘     ← dashed horizontal from source right to channel
-///
-/// The ⇡ arrow is placed at the top of the channel (near the semantic target).
-fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color: u8) void {
-    const ch_x = info.channel_x;
-
-    // Determine top and bottom y (target is at top, source is at bottom)
-    const top_y = info.target_y;
-    const bot_y = info.source_y;
-
-    if (top_y >= bot_y) return; // degenerate
-
-    // 1. Horizontal dashed line from source node right to channel
-    {
-        const src_x = info.source_right_x;
-        var x = src_x;
-        while (x < ch_x) : (x += 1) {
-            const cur = buffer.get(x, bot_y);
-            if (isSubgraphBorderChar(cur)) {
-                buffer.setWithColor(x, bot_y, mergeWithDoubleLine(cur, false, false, true, true), color);
-            } else {
-                buffer.setWithColor(x, bot_y, CP_H_LINE_DASH, color);
-            }
-        }
-        // Corner at channel: connects from left and from above
-        buffer.setWithColor(ch_x, bot_y, mergeJunction(' ', true, false, false, true), color);
-    }
-
-    // 2. Vertical dashed line in channel from bottom to top
-    {
-        var y = top_y + 1;
-        while (y < bot_y) : (y += 1) {
-            const cur = buffer.get(ch_x, y);
-            if (isSubgraphBorderChar(cur)) {
-                buffer.setWithColor(ch_x, y, mergeWithDoubleLine(cur, true, true, false, false), color);
-            } else {
-                buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
-            }
-        }
-    }
-
-    // 3. Horizontal dashed line from target node right to channel, with ⇠ arrow
-    {
-        const tgt_x = info.target_right_x;
-        // Corner at channel: connects from below and from left
-        buffer.setWithColor(ch_x, top_y, mergeJunction(' ', false, true, false, true), color);
-        // Dashed horizontal from target right to channel
-        var x = tgt_x;
-        while (x < ch_x) : (x += 1) {
-            const cur = buffer.get(x, top_y);
-            if (x == tgt_x) {
-                // Arrow at the node side pointing left (toward the target)
-                buffer.setWithColor(x, top_y, CP_ARROW_LEFT_DASH, color);
-            } else if (isSubgraphBorderChar(cur)) {
-                buffer.setWithColor(x, top_y, mergeWithDoubleLine(cur, false, false, true, true), color);
-            } else {
-                buffer.setWithColor(x, top_y, CP_H_LINE_DASH, color);
-            }
-        }
-    }
 }
 
 /// Paint an edge onto the buffer.
