@@ -33,18 +33,23 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 │  ├──────────┤  ├──────────────┤  │ │  Fruchterman-Reingold simulation   │
 │  │Positioning│ │  Routing     │  │ │  300 iterations → grid coords      │
 │  │  bk / s  │  │ direct / sp  │  │ │                                    │
-│  └──────────┘  └──────────────┘  │ └────────────────────────────────────┘
+│  ├──────────┴──┴──────────────┤  │ │  Subgraph cohesion force           │
+│  │ Subgraph pipeline (opt.)   │  │ │  (pulls members to centroid)       │
+│  │ contiguous → block cross → │  │ │                                    │
+│  │ padding → y-offsets → bbox │  │ │                                    │
+│  └────────────────────────────┘  │ └────────────────────────────────────┘
 └──────────────────────────────────┘
                         ┌───────────┴───────────┐
                         ▼                       ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    ★ INTERMEDIATE REPRESENTATION ★                      │
 │                                                                         │
-│   LayoutIR { nodes: []LayoutNode, edges: []LayoutEdge, width, height }  │
+│   LayoutIR { nodes, edges, subgraphs, width, height }                   │
 │                                                                         │
 │   This is the STABLE CONTRACT between layout and rendering.             │
 │   Supports both real and dummy nodes for multi-level edge routing.      │
 │   Edges carry a `directed` flag for per-edge arrow control.             │
+│   Subgraphs carry bounding box annotations for cluster rendering.       │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -67,8 +72,8 @@ zigraph/
 │   ├── fuzz_tests.zig        # Property-based and security tests
 │   │
 │   ├── core/
-│   │   ├── graph.zig         # Graph, Node, Edge, Options (with resource limits)
-│   │   ├── ir.zig            # LayoutIR, LayoutNode, LayoutEdge, EdgePath
+│   │   ├── graph.zig         # Graph, Node, Edge, Subgraph, Options (with resource limits)
+│   │   ├── ir.zig            # LayoutIR, LayoutNode, LayoutEdge, EdgePath, SubgraphInfo
 │   │   ├── validation.zig    # Cycle detection, graph validation, Requirements
 │   │   └── errors.zig        # WDP Level 0 error codes, ValidationFailures
 │   │
@@ -76,6 +81,9 @@ zigraph/
 │   │   ├── interface.zig              # LayoutAlgorithm contract for BYOA
 │   │   │
 │   │   ├── sugiyama/                  # Hierarchical DAG layout
+│   │   │   ├── subgraph.zig           # Subgraph-aware pipeline (contiguous levels,
+│   │   │   │                          #   block crossing, padding, bounding boxes)
+│   │   │   ├── cycle_breaking.zig     # DFS back-edge detection
 │   │   │   ├── layering/
 │   │   │   │   ├── longest_path.zig      # O(V+E) layer assignment
 │   │   │   │   ├── network_simplex.zig   # Optimal layering (Gansner et al. 1993)
@@ -103,7 +111,8 @@ zigraph/
 │   │   │       ├── mod.zig            # Force re-exports
 │   │   │       ├── repulsion.zig      # Coulomb-like: k²/d
 │   │   │       ├── attraction.zig     # Spring-like: d/k
-│   │   │       └── gravity.zig        # Center pull (for FA2)
+│   │   │       ├── gravity.zig        # Center pull (for FA2)
+│   │   │       └── cohesion.zig       # Subgraph cohesion (pulls members to centroid)
 │   │   │
 │   │   └── fruchterman_reingold/      # FR force-directed layout
 │   │       └── mod.zig                # Standard O(N²) + Fast O(N log N)
@@ -226,9 +235,23 @@ pub const LayoutIR = struct {
     level_count: usize,
     levels: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)),
     id_to_index: std.AutoHashMapUnmanaged(usize, usize),
+    subgraphs: std.ArrayListUnmanaged(SubgraphInfo),  // Empty when no subgraphs
     
     pub fn deinit(self: *LayoutIR) void { ... }
 };
+
+/// Subgraph bounding box annotation (generic over coordinate type)
+pub fn SubgraphInfo(comptime Coord: type) type {
+    return struct {
+        id: usize,            // matches Graph.Subgraph.id
+        parent_id: ?usize,    // null = root-level
+        label: []const u8,
+        x: Coord,             // bounding box left (with padding)
+        y: Coord,             // bounding box top
+        width: Coord,         // bounding box width
+        height: Coord,        // bounding box height
+    };
+}
 ```
 
 ### 5. Crossing Reducer Pipelines
@@ -335,6 +358,22 @@ The library implements the Sugiyama layered graph layout for DAGs:
 - **Direct**: Manhattan routing with corner detection
 - **Spline**: Catmull-Rom/Bezier curves through waypoints
 
+### Phase 6: Subgraph Pipeline (when `graph.hasSubgraphs()`)
+
+When subgraphs are present, additional steps are interleaved into the pipeline:
+
+1. **Contiguous level enforcement** (`enforceContiguousLevels`): After layering, compacts levels so all nodes of a subgraph span contiguous layers. Processes bottom-up (deepest subgraphs first).
+
+2. **Block-based crossing reduction** (`blockBasedCrossingReduction`): Replaces standard crossing reduction. Partitions each level into blocks by subgraph membership, applies median sort within blocks, then orders blocks by their average position.
+
+3. **Subgraph adjacency** (`enforceSubgraphAdjacency`): After crossing reduction, stable-partitions each level so same-subgraph nodes are contiguous.
+
+4. **Horizontal padding** (`applySubgraphPadding`): Inserts x-offset gaps at subgraph boundary transitions (proportional to nesting depth changes).
+
+5. **Vertical y-offsets** (`computeLevelYOffsets`): Inserts rows for top borders (padding + label) and bottom borders between levels where subgraph boundaries change.
+
+6. **Bounding boxes** (`computeBoundingBoxes`): Bottom-up computation — leaf subgraphs get node envelope + padding; parent subgraphs get union of child bounding boxes + own members + padding.
+
 ---
 
 ## Fruchterman-Reingold (Force-Directed) Implementation
@@ -360,6 +399,14 @@ force-directed layout algorithm:
   in `LayoutConfig`
 - FDG positions are scaled to integer grid coordinates and routed through
   the same `LayoutIR` / renderer pipeline as Sugiyama
+
+### Subgraph Support
+- When `graph.hasSubgraphs()`, a **cohesion force** is applied each iteration
+- `SubgraphIndex.build()` pre-computes per-subgraph membership lists
+- `applyCohesion()` pulls each subgraph's members toward the group centroid
+- Configurable via `subgraph_cohesion` parameter (default 0.5 in Q16.16)
+- After layout, `computeBoundingBoxes()` (shared with Sugiyama) produces subgraph annotations in the IR
+- Edge labels placed at geometric midpoint of each edge
 
 ---
 
@@ -417,8 +464,9 @@ All limits return `error.OutOfMemory` when exceeded.
 - **Unit tests**: In each module (`test "..."` blocks)
 - **Property-based tests**: Layout invariants verified in `fuzz_tests.zig`
 - **Cycle detection tests**: Edge cases including disjoint components
+- **Subgraph tests**: 59 tests covering graph API, pipeline stages, rendering, roundtrip serialization
 - **Security tests**: Resource limit verification
-- **168 tests total** as of v0.2.1 (presets, validation, FDG, directed/undirected)
+- **285 tests total** (presets, validation, FDG, directed/undirected, subgraphs)
 
 ---
 

@@ -39,6 +39,7 @@
 
 - **Zero dependencies** — Pure Zig, no libc required
 - **Two layout engines** — Sugiyama (hierarchical DAGs) and Fruchterman-Reingold (force-directed)
+- **Subgraphs (clusters)** — Hierarchical grouping with visual boundaries, nested subgraphs
 - **Cycle breaking** — Automatic back-edge detection for cyclic graphs (DFS-based)
 - **Directed & undirected edges** — `addDiEdge` / `addUnDiEdge` with per-edge arrow control
 - **Three renderers** — Unicode (terminal), SVG (with splines), JSON (for tooling)
@@ -182,6 +183,67 @@ Back edges are **virtually reversed** — the original graph is not mutated. Rev
 - **Self-loops**: `↺` symbol in Unicode, arc above node in SVG
 
 Supported patterns: feedback loops, mutual dependencies (A ↔ B), self-loops (A → A), and complex multi-cycle graphs.
+
+## Subgraphs (Clusters)
+
+Group nodes into visual clusters with hierarchical nesting:
+
+```zig
+var graph = zigraph.Graph.init(allocator);
+defer graph.deinit();
+
+try graph.addNode(0, "Gateway");
+try graph.addNode(1, "Auth");
+try graph.addNode(2, "DB");
+try graph.addDiEdge(0, 1);
+try graph.addDiEdge(1, 2);
+
+// Create a subgraph and assign nodes
+const backend = try graph.addSubgraph("backend");
+try graph.putNodes(&.{ 1, 2 }).inside(backend);
+
+const output = try zigraph.render(&graph, allocator, zigraph.presets.sugiyama.standard());
+defer allocator.free(output);
+std.debug.print("{s}\n", .{output});
+```
+
+Output:
+```text
+[Gateway]
+    │
+ ╔══╧═╤════╗
+ ║ backend ║
+ ║    ↓    ║
+ ║ [Auth]  ║
+ ║    │    ║
+ ║    ↓    ║
+ ║  [DB]   ║
+ ║         ║
+ ╚═════════╝
+```
+
+### Nested Subgraphs
+
+```zig
+const services = try graph.addSubgraph("services");
+const auth = try graph.addSubgraph("auth");
+
+try graph.putNodes(&.{ api_id, auth_id, token_id, db_id }).inside(services);
+try graph.putNodes(&.{ auth_id, token_id }).inside(auth);
+try graph.putSubgraphs(&.{auth}).inside(services); // nest auth inside services
+```
+
+### Renderer Support
+
+| Renderer | Subgraph Style |
+|----------|---------------|
+| **Unicode** | Double-line box (`╔═╗║╚╝`) with label; edges cross borders using mixed junction chars (`╫╪╤╧`) |
+| **SVG** | Dashed rounded rectangle with configurable fill/stroke/opacity |
+| **JSON** | `subgraphs` array with `id`, `label`, `parent_id`, bounding box (`x`, `y`, `width`, `height`) |
+
+Both Sugiyama and FDG layouts are subgraph-aware:
+- **Sugiyama**: Contiguous level enforcement, block-based crossing reduction, subgraph padding, bounding box computation
+- **FDG**: Cohesion force pulls subgraph members toward group centroid
 
 ## Directed & Undirected Edges
 
@@ -391,9 +453,11 @@ zigraph implements two layout engines:
 
 1. **Sugiyama** (hierarchical layout for DAGs):
    Layering → Crossing reduction → Positioning → Routing
+   With optional subgraph-aware pipeline: contiguous levels, block-based crossing, padding, bounding boxes
 
 2. **Fruchterman-Reingold** (force-directed for general graphs):
    FR Standard (O(V²)) or FR-Fast with Barnes-Hut quadtree (O(V log V))
+   With optional subgraph cohesion force for cluster grouping
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
@@ -443,6 +507,7 @@ zig build run-positioning  # Positioning algorithms comparison
 zig build run-svg          # SVG with splines
 zig build run-labels       # Edge labels demo (exports SVG)
 zig build run-cycle        # Cycle breaking demo (feedback loops, self-loops)
+zig build run-subgraph     # Subgraph demo (clusters, nesting, SVG/JSON export)
 zig build run-ns-compare   # Compare layering algorithms
 zig build run-json         # JSON export
 zig build run-fdg          # Force-directed layout (terminal + SVG)

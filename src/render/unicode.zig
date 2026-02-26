@@ -1113,7 +1113,12 @@ fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color
         const src_x = info.source_right_x;
         var x = src_x;
         while (x < ch_x) : (x += 1) {
-            buffer.setWithColor(x, bot_y, CP_H_LINE_DASH, color);
+            const cur = buffer.get(x, bot_y);
+            if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(x, bot_y, mergeWithDoubleLine(cur, false, false, true, true), color);
+            } else {
+                buffer.setWithColor(x, bot_y, CP_H_LINE_DASH, color);
+            }
         }
         // Corner at channel: connects from left and from above
         buffer.setWithColor(ch_x, bot_y, mergeJunction(' ', true, false, false, true), color);
@@ -1123,11 +1128,16 @@ fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color
     {
         var y = top_y + 1;
         while (y < bot_y) : (y += 1) {
-            buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+            const cur = buffer.get(ch_x, y);
+            if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(ch_x, y, mergeWithDoubleLine(cur, true, true, false, false), color);
+            } else {
+                buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+            }
         }
     }
 
-    // 3. Horizontal dashed line from target node right to channel, with ⇡ arrow
+    // 3. Horizontal dashed line from target node right to channel, with ⇠ arrow
     {
         const tgt_x = info.target_right_x;
         // Corner at channel: connects from below and from left
@@ -1135,9 +1145,12 @@ fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color
         // Dashed horizontal from target right to channel
         var x = tgt_x;
         while (x < ch_x) : (x += 1) {
+            const cur = buffer.get(x, top_y);
             if (x == tgt_x) {
                 // Arrow at the node side pointing left (toward the target)
                 buffer.setWithColor(x, top_y, CP_ARROW_LEFT_DASH, color);
+            } else if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(x, top_y, mergeWithDoubleLine(cur, false, false, true, true), color);
             } else {
                 buffer.setWithColor(x, top_y, CP_H_LINE_DASH, color);
             }

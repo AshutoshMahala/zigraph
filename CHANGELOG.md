@@ -4,6 +4,28 @@ All notable changes to zigraph will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Subgraphs (Clusters)** — Hierarchical node grouping with visual boundaries
+  - `graph.addSubgraph("label")` creates named clusters
+  - `graph.putNodes(&.{id1, id2}).inside(sg_id)` — fluent API for node membership
+  - `graph.putSubgraphs(&.{child}).inside(parent)` — nested subgraph hierarchies with cycle detection
+  - Subgraph-aware Sugiyama pipeline: contiguous levels, block-based crossing reduction, padding, bounding boxes
+  - FDG cohesion force pulls subgraph members toward group centroid
+  - **Unicode**: double-line boxes (`╔═╗║╚╝`) with labels; edges cross borders cleanly (`╫╪╤╧`)
+  - **SVG**: dashed rounded rectangles with configurable fill/stroke/opacity
+  - **JSON schema v1.2**: optional `subgraphs` array with bounding box data (backward compatible)
+
+- **FDG edge label placement** — Labels positioned at geometric midpoint of each edge
+
+### Changed
+
+- **Vertical spacing** — Sub-linear formula `2 + sqrt(max_fan)` (cap 8) produces more compact layouts
+- **SVG horizontal edges** — Dome-shaped cubic Bézier curves for near-horizontal edges
+- **FDG horizontal edge routing** — Edges routed from box edges instead of node centers
+
 ## [0.2.1] — 2026-02-21
 
 ### Fixed
@@ -89,14 +111,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Memory leak: `errdefer` for edge label allocation moved outside conditional block
 - Dummy-node collisions in `.barycentric` and `.brandes_kopf` positioning (per-level compaction)
 - Symmetric bidirectional compaction eliminates left-bias in positioned layouts
-
-### Internal
-
-- 179 tests (up from 88 in v0.1.0)
-- `computeVirtualPositionsWithHints()` for positioning algorithm integration
-- `examples/presets_demo.zig` — All presets side-by-side comparison
-- `examples/cycle_breaking.zig` — Cycle breaking demo with SVG export
-- `run-presets`, `run-cycle` build steps
 
 ## [0.1.0] — 2026-01-25
 
