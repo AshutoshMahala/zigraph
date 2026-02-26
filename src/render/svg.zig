@@ -70,6 +70,20 @@ pub const SvgConfig = struct {
     /// When false (default), labels are placed at fixed positions near the edge.
     /// When true, labels follow the edge curve using SVG text-on-a-path.
     labels_on_path: bool = false,
+    /// Show subgraph bounding boxes (when subgraphs exist in the IR)
+    show_subgraphs: bool = true,
+    /// Subgraph box fill color (with transparency)
+    subgraph_fill: []const u8 = "#e8f4fd",
+    /// Subgraph box fill opacity
+    subgraph_fill_opacity: []const u8 = "0.4",
+    /// Subgraph box stroke color
+    subgraph_stroke: []const u8 = "#4a90d9",
+    /// Subgraph box corner radius
+    subgraph_radius: usize = 6,
+    /// Subgraph label font size in pixels
+    subgraph_font_size: usize = 11,
+    /// Subgraph label color
+    subgraph_label_color: []const u8 = "#4a90d9",
 
     /// Get the color for a specific edge index
     pub fn getEdgeColor(self: SvgConfig, edge_index: usize) []const u8 {
@@ -162,6 +176,23 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
         \\  <!-- Background -->
         \\  <rect width="100%" height="100%" fill="white"/>
         \\
+    );
+
+    // Render subgraph boxes (behind everything else)
+    if (config.show_subgraphs and layout.subgraphs.items.len > 0) {
+        try writer.writeAll(
+            \\  <!-- Subgraphs -->
+            \\  <g id="subgraphs">
+            \\
+        );
+        try renderSubgraphs(writer, layout, config);
+        try writer.writeAll(
+            \\  </g>
+            \\
+        );
+    }
+
+    try writer.writeAll(
         \\  <!-- Edges (rendered first, under nodes) -->
         \\  <g id="edges">
         \\
@@ -271,6 +302,53 @@ fn renderNode(writer: anytype, node: LayoutNode, config: SvgConfig) !void {
     });
 }
 
+/// Render subgraph bounding boxes as labeled rounded rectangles.
+/// Renders parent subgraphs first (lower z-order) so children draw on top.
+fn renderSubgraphs(writer: anytype, layout: *const LayoutIR, config: SvgConfig) !void {
+    // Render in IR order: parents before children (bottom-up computed, stored deepest first).
+    // Reverse iteration gives parents first → correct z-order.
+    const items = layout.subgraphs.items;
+    var i: usize = items.len;
+    while (i > 0) {
+        i -= 1;
+        const sg = items[i];
+
+        const x = sg.x * config.char_width + config.padding;
+        const y = sg.y * config.line_height + config.padding;
+        const w = sg.width * config.char_width;
+        const h = sg.height * config.line_height;
+
+        // Subgraph box
+        try writer.print(
+            \\    <rect x="{d}" y="{d}" width="{d}" height="{d}" 
+            \\          rx="{d}" ry="{d}" 
+            \\          fill="{s}" fill-opacity="{s}" 
+            \\          stroke="{s}" stroke-width="1" stroke-dasharray="4,2"/>
+            \\
+        , .{
+            x,                      y,                      w,                    h,
+            config.subgraph_radius, config.subgraph_radius, config.subgraph_fill, config.subgraph_fill_opacity,
+            config.subgraph_stroke,
+        });
+
+        // Subgraph label (top-left, inside the box)
+        if (sg.label.len > 0) {
+            const label_x = x + config.subgraph_radius;
+            const label_y = y + config.subgraph_font_size + 2;
+            try writer.print(
+                \\    <text x="{d}" y="{d}" 
+                \\          font-family="{s}" font-size="{d}" 
+                \\          font-weight="bold" fill="{s}">{s}</text>
+                \\
+            , .{
+                label_x,                     label_y,
+                config.font_family,          config.subgraph_font_size,
+                config.subgraph_label_color, sg.label,
+            });
+        }
+    }
+}
+
 fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
     // For reversed (back) edges, swap from/to coordinates so the SVG path
     // goes bottom→top. This makes marker-end point upward (correct semantic
@@ -343,22 +421,22 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                     marker,
                 });
             } else {
-            try writer.print(
-                \\    <path d="M {d} {d} L {d} {d} L {d} {d}" 
-                \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
-                \\
-            , .{
-                from_x,
-                from_y,
-                from_x,
-                corner_y,
-                to_x,
-                to_y,
-                config.edge_stroke,
-                config.edge_width,
-                dash,
-                marker,
-            });
+                try writer.print(
+                    \\    <path d="M {d} {d} L {d} {d} L {d} {d}" 
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
+                    \\
+                , .{
+                    from_x,
+                    from_y,
+                    from_x,
+                    corner_y,
+                    to_x,
+                    to_y,
+                    config.edge_stroke,
+                    config.edge_width,
+                    dash,
+                    marker,
+                });
             }
         },
         .side_channel => |sc| {
@@ -404,13 +482,13 @@ fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig) !void {
                 }
                 try writer.print(" L {d} {d}\"", .{ real_from_x, real_from_y });
             } else {
-            try writer.print("    <path d=\"M {d} {d}", .{ from_x, from_y });
-            for (ms.waypoints.items) |wp| {
-                const wx = wp.x * config.char_width + config.padding;
-                const wy = wp.y * config.line_height + config.padding;
-                try writer.print(" L {d} {d}", .{ wx, wy });
-            }
-            try writer.print(" L {d} {d}\"", .{ to_x, to_y });
+                try writer.print("    <path d=\"M {d} {d}", .{ from_x, from_y });
+                for (ms.waypoints.items) |wp| {
+                    const wx = wp.x * config.char_width + config.padding;
+                    const wy = wp.y * config.line_height + config.padding;
+                    try writer.print(" L {d} {d}", .{ wx, wy });
+                }
+                try writer.print(" L {d} {d}\"", .{ to_x, to_y });
             }
             try writer.print(
                 \\ fill="none" stroke="{s}" stroke-width="{d}"{s}{s}/>
@@ -797,20 +875,53 @@ fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, co
             , .{ fx, fy, fx + bulge, fy, tx + bulge, ty, tx, ty, color, config.edge_width, dash });
         }
     } else {
-        // Normal edge: straight line
-        if (directed) {
-            try writer.print(
-                \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-                \\          stroke="{s}" stroke-width="{d}"{s} 
-                \\          marker-end="url(#arrow{d})"/>
-                \\
-            , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash, arrow_id });
+        // Check if the edge is nearly horizontal (same Y or very close).
+        // Horizontal straight lines overlap node borders and are hard to see,
+        // so render them as a dome-shaped curve instead.
+        const fx: f64 = @floatFromInt(from_x);
+        const fy: f64 = @floatFromInt(from_y);
+        const tx: f64 = @floatFromInt(to_x);
+        const ty: f64 = @floatFromInt(to_y);
+        const dy = @abs(ty - fy);
+        const dx = @abs(tx - fx);
+        const is_horizontal = dy < 2.0 or (dx > 0 and dy / dx < 0.15);
+
+        if (is_horizontal and dx > 10.0) {
+            // Dome curve: arc above the nodes so the edge is clearly visible.
+            // Control points are offset upward by a fraction of the horizontal span.
+            const bulge = @max(dx * 0.35, 20.0);
+            // Control points: both above the line, creating a smooth dome
+            const cp_y = @min(fy, ty) - bulge;
+            if (directed) {
+                try writer.print(
+                    \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}
+                    \\          marker-end="url(#arrow{d})"/>
+                    \\
+                , .{ fx, fy, fx, cp_y, tx, cp_y, tx, ty, color, config.edge_width, dash, arrow_id });
+            } else {
+                try writer.print(
+                    \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
+                    \\
+                , .{ fx, fy, fx, cp_y, tx, cp_y, tx, ty, color, config.edge_width, dash });
+            }
         } else {
-            try writer.print(
-                \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-                \\          stroke="{s}" stroke-width="{d}"{s}/>
-                \\
-            , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash });
+            // Normal edge: straight line
+            if (directed) {
+                try writer.print(
+                    \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+                    \\          stroke="{s}" stroke-width="{d}"{s} 
+                    \\          marker-end="url(#arrow{d})"/>
+                    \\
+                , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash, arrow_id });
+            } else {
+                try writer.print(
+                    \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+                    \\          stroke="{s}" stroke-width="{d}"{s}/>
+                    \\
+                , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash });
+            }
         }
     }
 
@@ -1122,17 +1233,34 @@ test "svg: corner edge rendering" {
     defer layout.deinit();
 
     try layout.addNode(.{
-        .id = 1, .label = "A", .x = 0, .y = 0, .width = 3,
-        .center_x = 1, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 2, .label = "B", .x = 5, .y = 4, .width = 3,
-        .center_x = 6, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 5,
+        .y = 4,
+        .width = 3,
+        .center_x = 6,
+        .level = 1,
+        .level_position = 0,
     });
 
     try layout.addEdge(.{
-        .from_id = 1, .to_id = 2, .from_x = 1, .from_y = 1,
-        .to_x = 6, .to_y = 4, .path = .{ .corner = .{ .horizontal_y = 2 } },
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 1,
+        .to_x = 6,
+        .to_y = 4,
+        .path = .{ .corner = .{ .horizontal_y = 2 } },
         .edge_index = 0,
     });
 
@@ -1155,20 +1283,44 @@ test "svg: multiple nodes and edges" {
 
     // Build a small diamond: A -> B, A -> C, B -> D, C -> D
     try layout.addNode(.{
-        .id = 1, .label = "A", .x = 5, .y = 0, .width = 3,
-        .center_x = 6, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 5,
+        .y = 0,
+        .width = 3,
+        .center_x = 6,
+        .level = 0,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 2, .label = "B", .x = 0, .y = 4, .width = 3,
-        .center_x = 1, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 4,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 3, .label = "C", .x = 10, .y = 4, .width = 3,
-        .center_x = 11, .level = 1, .level_position = 1,
+        .id = 3,
+        .label = "C",
+        .x = 10,
+        .y = 4,
+        .width = 3,
+        .center_x = 11,
+        .level = 1,
+        .level_position = 1,
     });
     try layout.addNode(.{
-        .id = 4, .label = "D", .x = 5, .y = 8, .width = 3,
-        .center_x = 6, .level = 2, .level_position = 0,
+        .id = 4,
+        .label = "D",
+        .x = 5,
+        .y = 8,
+        .width = 3,
+        .center_x = 6,
+        .level = 2,
+        .level_position = 0,
     });
 
     for ([_]struct { from: usize, to: usize, idx: usize }{
@@ -1178,10 +1330,14 @@ test "svg: multiple nodes and edges" {
         .{ .from = 3, .to = 4, .idx = 3 },
     }) |e| {
         try layout.addEdge(.{
-            .from_id = e.from, .to_id = e.to,
-            .from_x = 6, .from_y = 1,
-            .to_x = 6, .to_y = 4,
-            .path = .direct, .edge_index = e.idx,
+            .from_id = e.from,
+            .to_id = e.to,
+            .from_x = 6,
+            .from_y = 1,
+            .to_x = 6,
+            .to_y = 4,
+            .path = .direct,
+            .edge_index = e.idx,
         });
     }
 
@@ -1223,17 +1379,35 @@ test "svg: colored edges" {
     defer layout.deinit();
 
     try layout.addNode(.{
-        .id = 1, .label = "A", .x = 0, .y = 0, .width = 3,
-        .center_x = 1, .level = 0, .level_position = 0,
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
     });
     try layout.addNode(.{
-        .id = 2, .label = "B", .x = 0, .y = 4, .width = 3,
-        .center_x = 1, .level = 1, .level_position = 0,
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 4,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
     });
 
     try layout.addEdge(.{
-        .from_id = 1, .to_id = 2, .from_x = 1, .from_y = 1,
-        .to_x = 1, .to_y = 4, .path = .direct, .edge_index = 0,
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 1,
+        .to_x = 1,
+        .to_y = 4,
+        .path = .direct,
+        .edge_index = 0,
     });
 
     layout.setDimensions(5, 5);
@@ -1243,4 +1417,78 @@ test "svg: colored edges" {
 
     // Should contain colored stroke from palette
     try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=") != null);
+}
+
+test "svg: subgraph rendering" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 5,
+        .y = 3,
+        .width = 3,
+        .center_x = 6,
+        .level = 0,
+        .level_position = 0,
+    });
+    try layout.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 5,
+        .y = 7,
+        .width = 3,
+        .center_x = 6,
+        .level = 1,
+        .level_position = 0,
+    });
+
+    // Add a subgraph bounding box
+    try layout.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "cluster",
+        .x = 3,
+        .y = 1,
+        .width = 10,
+        .height = 10,
+    });
+
+    layout.setDimensions(20, 15);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // Should contain subgraph group and rect
+    try std.testing.expect(std.mem.indexOf(u8, svg, "id=\"subgraphs\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke-dasharray") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "cluster") != null);
+}
+
+test "svg: subgraph rendering disabled" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "hidden",
+        .x = 0,
+        .y = 0,
+        .width = 5,
+        .height = 5,
+    });
+
+    layout.setDimensions(10, 10);
+
+    const svg = try render(&layout, allocator, .{ .show_subgraphs = false });
+    defer allocator.free(svg);
+
+    // Should NOT contain subgraph elements
+    try std.testing.expect(std.mem.indexOf(u8, svg, "id=\"subgraphs\"") == null);
 }

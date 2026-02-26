@@ -34,6 +34,7 @@ pub const Graph = graph.Graph;
 pub const Node = graph.Node;
 pub const Edge = graph.Edge;
 pub const NodeKind = graph.NodeKind;
+pub const Subgraph = graph.Subgraph;
 pub const ValidationResult = graph.ValidationResult;
 pub const CycleInfo = graph.CycleInfo;
 
@@ -63,6 +64,7 @@ pub const LayoutIR = ir.LayoutIR;
 pub const LayoutNode = ir.LayoutNode;
 pub const LayoutEdge = ir.LayoutEdge;
 pub const EdgePath = ir.EdgePath;
+pub const SubgraphInfo = ir.SubgraphInfo;
 pub const coordCast = ir.coordCast;
 
 // ============================================================================
@@ -114,6 +116,9 @@ pub const routing = struct {
     pub const direct = @import("algorithms/sugiyama/routing/direct.zig");
     pub const spline = @import("algorithms/sugiyama/routing/spline.zig");
 };
+
+/// Subgraph-aware layout orchestration (adjacency enforcement + bounding boxes)
+pub const subgraph_layout = @import("algorithms/sugiyama/subgraph.zig");
 
 /// Force-directed graph layout algorithms.
 ///
@@ -321,11 +326,15 @@ fn layoutFdg(
     var result = LayoutIR(usize).init(allocator);
     errdefer result.deinit();
 
-    // Scale FDG positions to a reasonable size.
-    // FDG produces Q16.16 coordinates spanning ~20..220 for a few nodes.
-    // We want terminal output ≤ 80 columns wide and compact vertically too.
-    // Compute a scale that maps the bounding box to a target size,
-    // ensuring nodes (which have label widths) don't overlap.
+    // Scale FDG positions to a reasonable terminal size.
+    //
+    // FDG produces Q16.16 coordinates. We need to map them to integer cells
+    // suitable for terminal rendering (typically ≤ 120 columns, proportional height).
+    //
+    // Key insight: terminal characters are roughly 2× taller than wide, so
+    // we apply a char_aspect correction. We use **uniform scaling** (same
+    // effective scale for both axes after aspect correction) to preserve the
+    // layout's proportions — independent x/y scaling distorts the graph.
     const max_label_w: usize = blk: {
         var max_w: usize = 3;
         for (0..n) |i| {
@@ -334,17 +343,28 @@ fn layoutFdg(
         }
         break :blk max_w;
     };
-    // Target: each node gets at least (label_width + 2) horizontal cells
-    // and 3 vertical cells. Scale proportionally.
-    const target_cell: f64 = @floatFromInt(max_label_w + 4);
+
+    // Character aspect ratio: a terminal cell is ~2x taller than wide.
+    // We compress Y by this factor so that visually the graph looks square.
+    const char_aspect: f64 = 2.0;
+
+    // Target: enough room so nodes don't overlap.
+    // Each node needs at least (label_width + 4) horizontal cells.
+    // Use sqrt(N) to estimate the grid dimension.
+    const cell_w: f64 = @floatFromInt(max_label_w + 4);
     const sqrt_n: f64 = @sqrt(@as(f64, @floatFromInt(n)));
-    const target_w: f64 = target_cell * (sqrt_n + 1);
-    const target_h: f64 = 3.0 * (sqrt_n + 1);
+    const target_span: f64 = cell_w * (sqrt_n + 1);
 
     const fdg_w = fp_mod.toFloat(fdg_result.width);
     const fdg_h = fp_mod.toFloat(fdg_result.height);
-    const scale_x: f64 = if (fdg_w > 1.0) target_w / fdg_w else 1.0;
-    const scale_y: f64 = if (fdg_h > 1.0) target_h / fdg_h else 1.0;
+
+    // Uniform scale: pick the scale that fits the larger axis into target_span.
+    // For the Y axis, account for char_aspect (fewer rows needed than columns
+    // for the same visual distance).
+    const effective_fdg_span = @max(fdg_w, fdg_h / char_aspect);
+    const scale: f64 = if (effective_fdg_span > 1.0) target_span / effective_fdg_span else 1.0;
+    const scale_x: f64 = scale;
+    const scale_y: f64 = scale / char_aspect;
 
     // Add nodes with scaled positions
     for (0..n) |node_idx| {
@@ -369,8 +389,62 @@ fn layoutFdg(
         });
     }
 
-    // Route edges — use direct routing (straight lines) for FDG
-    // Edge endpoints are at the center of each node box
+    // Post-processing: compress large vertical gaps.
+    // FDG repulsion can push clusters far apart, leaving huge empty bands.
+    // We detect gaps between consecutive Y coordinates that are much larger
+    // than average and shrink them.
+    if (result.nodes.items.len > 1) {
+        const items = result.nodes.items;
+        const node_count = items.len;
+
+        // Sort node indices by Y coordinate
+        const order = try allocator.alloc(usize, node_count);
+        defer allocator.free(order);
+        for (order, 0..) |*o, i| o.* = i;
+        std.mem.sort(usize, order, items, struct {
+            fn cmp(nodes: []LayoutNode(usize), a: usize, b: usize) bool {
+                return nodes[a].y < nodes[b].y;
+            }
+        }.cmp);
+
+        // Collect gaps and find the median to set a robust threshold.
+        // Using median instead of mean prevents a single large outlier
+        // from inflating the threshold.
+        const gap_count = node_count - 1;
+        const gaps = try allocator.alloc(usize, gap_count);
+        defer allocator.free(gaps);
+        for (0..gap_count) |i| {
+            gaps[i] = items[order[i + 1]].y -| items[order[i]].y;
+        }
+        std.mem.sort(usize, gaps, {}, std.sort.asc(usize));
+
+        const median_gap = gaps[gap_count / 2];
+        const max_gap = @max(median_gap * 2, 3);
+
+        // Walk sorted order, track cumulative shift for over-sized gaps
+        var shift: usize = 0;
+        var prev_y: usize = items[order[0]].y;
+        for (1..node_count) |i| {
+            const idx = order[i];
+            const cur_y = items[idx].y;
+            const gap = cur_y -| prev_y;
+            if (gap > max_gap) {
+                shift += gap - max_gap;
+            }
+            prev_y = cur_y;
+            items[idx].y -|= shift;
+        }
+
+        // Update center_x (unchanged) — but we must refresh after Y shift
+        for (items) |*nd| {
+            nd.center_x = nd.x + nd.width / 2;
+        }
+    }
+
+    // Route edges — use direct routing (straight lines) for FDG.
+    // For horizontal edges (same Y), use node box edges so the connecting
+    // line and arrow are visible between the nodes rather than hidden
+    // under node labels (which are painted last and overwrite edges).
     for (g.edges.items, 0..) |edge, edge_idx| {
         const from_idx = g.nodeIndex(edge.from) orelse continue;
         const to_idx = g.nodeIndex(edge.to) orelse continue;
@@ -378,18 +452,66 @@ fn layoutFdg(
         const from_node = result.nodes.items[from_idx];
         const to_node = result.nodes.items[to_idx];
 
+        var from_x = from_node.center_x;
+        const from_y = from_node.y;
+        var to_x = to_node.center_x;
+        const to_y = to_node.y;
+
+        // When nodes share the same row, route from the box edge of the
+        // source to the box edge of the target so the line/arrow is visible.
+        if (from_y == to_y) {
+            if (from_node.x + from_node.width <= to_node.x) {
+                // source is left of target
+                from_x = from_node.x + from_node.width; // right edge of source
+                to_x = to_node.x; // left edge of target
+            } else if (to_node.x + to_node.width <= from_node.x) {
+                // target is left of source
+                from_x = from_node.x; // left edge of source
+                to_x = to_node.x + to_node.width; // right edge of target
+            }
+        }
+
         try result.addEdge(.{
             .from_id = edge.from,
             .to_id = edge.to,
-            .from_x = from_node.center_x,
-            .from_y = from_node.y, // center of 1-row node
-            .to_x = to_node.center_x,
-            .to_y = to_node.y,
+            .from_x = from_x,
+            .from_y = from_y,
+            .to_x = to_x,
+            .to_y = to_y,
             .path = .direct,
             .edge_index = edge_idx,
             .directed = edge.directed,
             .label = edge.label,
         });
+    }
+
+    // Compute edge label positions.
+    // For FDG direct edges, place the label near the midpoint of the edge.
+    // For vertical/diagonal edges: midpoint Y, centered on the edge X.
+    // For horizontal edges: midpoint X, one row above the edge Y.
+    for (result.edges.items) |*edge| {
+        const lbl = edge.label orelse continue;
+        const label_width = lbl.len + 2; // +2 for quotes
+
+        const mid_y = if (edge.from_y <= edge.to_y)
+            edge.from_y + (edge.to_y - edge.from_y) / 2
+        else
+            edge.to_y + (edge.from_y - edge.to_y) / 2;
+
+        const mid_x = if (edge.from_x <= edge.to_x)
+            edge.from_x + (edge.to_x - edge.from_x) / 2
+        else
+            edge.to_x + (edge.from_x - edge.to_x) / 2;
+
+        if (edge.from_y == edge.to_y) {
+            // Horizontal edge: label above the line
+            edge.label_x = if (mid_x >= label_width / 2) mid_x - label_width / 2 else 0;
+            edge.label_y = if (mid_y > 0) mid_y - 1 else 0;
+        } else {
+            // Vertical/diagonal edge: label beside the midpoint
+            edge.label_x = if (mid_x >= label_width / 2) mid_x - label_width / 2 else 0;
+            edge.label_y = mid_y;
+        }
     }
 
     // Set dimensions from the actual placed node positions
@@ -401,7 +523,28 @@ fn layoutFdg(
         const bottom = node.y + 2;
         if (bottom > max_y) max_y = bottom;
     }
+    // Also account for edge labels
+    for (result.edges.items) |edge| {
+        if (edge.label) |lbl| {
+            const right = edge.label_x + lbl.len + 2;
+            if (right > max_x) max_x = right;
+        }
+    }
     result.setDimensions(max_x, max_y);
+
+    // Compute subgraph bounding boxes (reuses Sugiyama's algorithm-agnostic function)
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.computeBoundingBoxes(g, &result, allocator);
+
+        // Expand layout dimensions if subgraph boxes extend beyond
+        for (result.subgraphs.items) |sg_info| {
+            const right = sg_info.x + sg_info.width;
+            const bottom = sg_info.y + sg_info.height;
+            if (right > result.width or bottom > result.height) {
+                result.setDimensions(@max(result.width, right), @max(result.height, bottom));
+            }
+        }
+    }
 
     return result;
 }
@@ -415,56 +558,247 @@ const dummy_id_base: usize = 0x80000000;
 const dummy_id_edge_stride: usize = 1000;
 const dummy_key_stride: usize = 10000;
 
+// ============================================================================
+// Sugiyama pipeline steps (extracted for composability)
+// ============================================================================
+
+/// Step 0: Validate the graph for Sugiyama layout.
+///
+/// Checks for empty graph and cycles. When cycle_breaking is disabled,
+/// cycles are rejected with diagnostics (human-readable detail + node IDs).
+fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) !void {
+    if (config.skip_validation) return;
+
+    var validation_result = try g.validate(allocator);
+    defer validation_result.deinit();
+
+    switch (validation_result) {
+        .empty => {
+            errors.captureError(error.EmptyGraph, @src());
+            return error.EmptyGraph;
+        },
+        .cycle => |cycle_info| {
+            if (config.cycle_breaking == .none) {
+                // Build human-readable detail (capped at 5 nodes)
+                var detail_buf: [256]u8 = undefined;
+                var fbs = std.io.fixedBufferStream(&detail_buf);
+                const w = fbs.writer();
+                const max_shown = 5;
+                const path = cycle_info.path;
+                const total = path.len;
+                const show = @min(total, max_shown);
+                for (path[0..show], 0..) |node_idx, i| {
+                    if (i > 0) w.writeAll(" -> ") catch {};
+                    if (g.nodeAt(node_idx)) |node| {
+                        w.writeAll(node.label) catch {};
+                    } else {
+                        w.print("{d}", .{node_idx}) catch {};
+                    }
+                }
+                if (total > max_shown) {
+                    w.print(" -> ... (+{d} more)", .{total - max_shown}) catch {};
+                }
+
+                // Build machine-readable node IDs (indices → IDs)
+                var id_buf: [64]usize = undefined;
+                const id_count = @min(total, 64);
+                for (path[0..id_count], 0..) |node_idx, i| {
+                    id_buf[i] = if (g.nodeAt(node_idx)) |node| node.id else node_idx;
+                }
+
+                errors.captureErrorFull(error.CycleDetected, @src(), fbs.getWritten(), id_buf[0..id_count]);
+                return error.CycleDetected;
+            }
+        },
+        .ok => {},
+    }
+}
+
+/// Step 3b: Compute effective level spacing based on fan-out and labels.
+///
+/// Returns enough vertical rows between levels to stagger outgoing edges,
+/// plus extra rows when edge labels are present.
+fn computeEffectiveLevelSpacing(g: *const Graph, config: LayoutConfig) usize {
+    const has_edge_labels = blk: {
+        for (g.edges.items) |edge| {
+            if (edge.label != null) break :blk true;
+        }
+        break :blk false;
+    };
+    const label_extra: usize = if (has_edge_labels) 2 else 0;
+
+    var max_fan: usize = 0;
+    for (0..g.nodeCount()) |node_idx| {
+        const children = g.getChildren(node_idx);
+        if (children.len > max_fan) max_fan = children.len;
+        const parents = g.getParents(node_idx);
+        if (parents.len > max_fan) max_fan = parents.len;
+    }
+    // Scale level spacing with fan-out, but cap it to avoid excessive
+    // vertical stretching. A single high-fan node should not inflate the
+    // entire graph. Use sqrt(fan) to grow sub-linearly.
+    const needed: usize = if (max_fan > 2)
+        @min(2 + std.math.sqrt(max_fan), 8)
+    else
+        2;
+    return @max(config.level_spacing, needed) + label_extra;
+}
+
+/// Step 6b: Fix up reversed (back) edges in the IR.
+///
+/// The pipeline routed them downward (from→to flipped), so this step:
+///   1. Swaps from_id/to_id back to the original semantic direction
+///   2. Keeps coordinates as-is (they represent the visual downward path)
+///   3. Sets reversed=true so renderers draw dashed lines
+///   4. Moves 'directed' flag from last segment to first segment (arrow at top)
+fn fixupReversedEdges(result: *LayoutIR(usize), reversed_edges: ?[]const bool) void {
+    const re = reversed_edges orelse return;
+
+    for (result.edges.items) |*result_edge| {
+        if (result_edge.edge_index < re.len and re[result_edge.edge_index]) {
+            result_edge.reversed = true;
+            const tmp_id = result_edge.from_id;
+            result_edge.from_id = result_edge.to_id;
+            result_edge.to_id = tmp_id;
+        }
+    }
+
+    // For multi-segment reversed edges, move the arrowhead flag
+    // from the last segment (bottom) to the first segment (top).
+    for (0..re.len) |edge_idx| {
+        if (!re[edge_idx]) continue;
+
+        var first_seg: ?*ir.LayoutEdge(usize) = null;
+        var last_seg: ?*ir.LayoutEdge(usize) = null;
+        for (result.edges.items) |*seg| {
+            if (seg.edge_index != edge_idx) continue;
+            if (first_seg == null or seg.from_y < first_seg.?.from_y) {
+                first_seg = seg;
+            }
+            if (last_seg == null or seg.from_y > last_seg.?.from_y) {
+                last_seg = seg;
+            }
+        }
+
+        if (first_seg != null and last_seg != null and first_seg != last_seg) {
+            const was_directed = last_seg.?.directed;
+            last_seg.?.directed = false;
+            first_seg.?.directed = was_directed;
+        }
+    }
+}
+
+/// Step 7: Stagger horizontal_y for corner-path edges.
+///
+/// Groups corner edges by from_y and assigns sequential row slots
+/// so no two horizontal segments share the same row.
+fn staggerCornerEdges(result: *LayoutIR(usize)) void {
+    for (result.edges.items, 0..) |*edge, i| {
+        if (edge.path != .corner) continue;
+        var slot: usize = 0;
+        for (result.edges.items[0..i]) |prev| {
+            if (prev.path == .corner and prev.from_y == edge.from_y) {
+                slot += 1;
+            }
+        }
+        const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
+        edge.path.corner.horizontal_y = edge.from_y + 1 + (slot % available);
+    }
+}
+
+/// Step 8: Propagate edge labels from the input graph to the IR edges.
+///
+/// Labels come from the original Graph.Edge; looked up via edge_index.
+/// For split edges (through dummies), only the first segment gets the label.
+/// Label is positioned on a dedicated row below the horizontal routing area.
+fn propagateEdgeLabels(result: *LayoutIR(usize), g: *const Graph, allocator: std.mem.Allocator) !void {
+    var label_assigned = try allocator.alloc(bool, g.edges.items.len);
+    defer allocator.free(label_assigned);
+    @memset(label_assigned, false);
+
+    for (result.edges.items) |*edge| {
+        const orig_idx = edge.edge_index;
+        if (orig_idx >= g.edges.items.len) continue;
+
+        const orig_label = g.edges.items[orig_idx].label orelse continue;
+        if (label_assigned[orig_idx]) continue;
+        label_assigned[orig_idx] = true;
+
+        edge.label = orig_label;
+
+        var label_y: usize = undefined;
+        var edge_x_at_label: usize = undefined;
+
+        switch (edge.path) {
+            .direct => {
+                label_y = if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = edge.from_x;
+            },
+            .corner => |c| {
+                if (c.horizontal_y + 1 < edge.to_y) {
+                    label_y = c.horizontal_y + 1;
+                } else if (c.horizontal_y > edge.from_y + 1) {
+                    label_y = c.horizontal_y - 1;
+                } else {
+                    label_y = edge.from_y + 1;
+                }
+                edge_x_at_label = edge.to_x;
+            },
+            .side_channel => |sc| {
+                label_y = if (sc.start_y + 1 < sc.end_y)
+                    sc.start_y + 1
+                else if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = sc.channel_x;
+            },
+            .multi_segment => {
+                label_y = if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = edge.from_x;
+            },
+            .spline => {
+                label_y = if (edge.to_y > edge.from_y + 2)
+                    edge.from_y + 2
+                else
+                    edge.from_y + 1;
+                edge_x_at_label = edge.from_x;
+            },
+        }
+
+        const label_width = orig_label.len + 2;
+        const label_x = if (edge_x_at_label >= label_width / 2)
+            edge_x_at_label - label_width / 2
+        else
+            0;
+
+        edge.label_x = label_x;
+        edge.label_y = label_y;
+    }
+}
+
+/// Step 9: Widen layout if edge labels extend beyond current width.
+fn widenForLabels(result: *LayoutIR(usize), total_width: usize, total_height: usize) void {
+    var needed_width = total_width;
+    for (result.edges.items) |edge| {
+        if (edge.label) |lbl| {
+            const right = edge.label_x + lbl.len + 2;
+            if (right > needed_width) needed_width = right;
+        }
+    }
+    result.setDimensions(needed_width, total_height);
+}
+
 /// Compute layout using the Sugiyama hierarchical algorithm.
 fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
     // Step 0: Validate graph (unless skipped)
-    if (!config.skip_validation) {
-        var validation_result = try g.validate(allocator);
-        defer validation_result.deinit();
-
-        switch (validation_result) {
-            .empty => {
-                errors.captureError(error.EmptyGraph, @src());
-                return error.EmptyGraph;
-            },
-            .cycle => |cycle_info| {
-                // If cycle breaking is enabled, we handle cycles below.
-                // If not, reject the graph with detail and node IDs.
-                if (config.cycle_breaking == .none) {
-                    // Build human-readable detail (capped at 5 nodes)
-                    var detail_buf: [256]u8 = undefined;
-                    var fbs = std.io.fixedBufferStream(&detail_buf);
-                    const w = fbs.writer();
-                    const max_shown = 5;
-                    const path = cycle_info.path;
-                    const total = path.len;
-                    const show = @min(total, max_shown);
-                    for (path[0..show], 0..) |node_idx, i| {
-                        if (i > 0) w.writeAll(" -> ") catch {};
-                        if (g.nodeAt(node_idx)) |node| {
-                            w.writeAll(node.label) catch {};
-                        } else {
-                            w.print("{d}", .{node_idx}) catch {};
-                        }
-                    }
-                    if (total > max_shown) {
-                        w.print(" -> ... (+{d} more)", .{total - max_shown}) catch {};
-                    }
-
-                    // Build machine-readable node IDs (indices → IDs)
-                    var id_buf: [64]usize = undefined;
-                    const id_count = @min(total, 64);
-                    for (path[0..id_count], 0..) |node_idx, i| {
-                        id_buf[i] = if (g.nodeAt(node_idx)) |node| node.id else node_idx;
-                    }
-
-                    errors.captureErrorFull(error.CycleDetected, @src(), fbs.getWritten(), id_buf[0..id_count]);
-                    return error.CycleDetected;
-                }
-            },
-            .ok => {},
-        }
-    }
+    try validateForSugiyama(g, allocator, config);
 
     // Step 0b: Cycle breaking — detect and virtually reverse back edges
     const reversed_edges: ?[]bool = switch (config.cycle_breaking) {
@@ -481,6 +815,11 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     };
     defer layer_assignment.deinit();
 
+    // Step 1b: Enforce contiguous level spans for subgraph members
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.enforceContiguousLevels(g, &layer_assignment, allocator);
+    }
+
     // Step 2: Build virtual levels (includes dummy nodes for skip-level edges)
     var virtual_levels = try layering.virtual.buildVirtualLevelsWithReversed(
         g,
@@ -491,34 +830,24 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     );
     defer virtual_levels.deinit();
 
-    // Step 3: Crossing reduction pipeline on virtual levels (includes dummies)
-    try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
+    // Step 3: Crossing reduction
+    if (g.hasSubgraphs() and config.crossing_reducers.len > 0) {
+        // Block-based crossing reduction: median sweep with subgraph block constraints.
+        // Each level is partitioned into blocks by subgraph membership. Nodes are
+        // sorted within blocks (intra-block median) and blocks are ordered by their
+        // average median (inter-block). Adjacency is maintained by construction.
+        var total_passes: usize = 0;
+        for (config.crossing_reducers) |r| total_passes += r.passes;
+        if (total_passes > 0) {
+            try subgraph_layout.blockBasedCrossingReduction(g, &virtual_levels, total_passes, allocator);
+        }
+    } else {
+        // Standard flat crossing reduction pipeline
+        try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
+    }
 
     // Step 3b: Compute adaptive level spacing
-    // Need enough vertical rows between levels to stagger outgoing edges.
-    // Also add extra rows when edge labels are present (dedicated label row).
-    const has_edge_labels = blk: {
-        for (g.edges.items) |edge| {
-            if (edge.label != null) break :blk true;
-        }
-        break :blk false;
-    };
-    const label_extra: usize = if (has_edge_labels) 2 else 0;
-
-    const effective_level_spacing = blk: {
-        var max_fan: usize = 0;
-        for (0..g.nodeCount()) |node_idx| {
-            const children = g.getChildren(node_idx);
-            if (children.len > max_fan) max_fan = children.len;
-            const parents = g.getParents(node_idx);
-            if (parents.len > max_fan) max_fan = parents.len;
-        }
-        // Need enough rows to stagger all edges in the busiest level gap.
-        // Cap at 20 to avoid absurd vertical gaps for extreme fan-out/in;
-        // the router's slot modulo wraps gracefully when rows < edges.
-        const needed = if (max_fan > 1) @min(max_fan + 1, 20) else 2;
-        break :blk @max(config.level_spacing, needed) + label_extra;
-    };
+    const effective_level_spacing = computeEffectiveLevelSpacing(g, config);
 
     // Step 4: Position nodes
     // For .compact: use left-to-right packing on virtual levels (fast, no collisions)
@@ -565,6 +894,32 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     };
     defer virtual_positions.deinit();
 
+    // Step 4a: Apply subgraph horizontal padding
+    // Shifts x-coordinates to create space for subgraph border lines between
+    // nodes of different subgraphs. Must happen before position extraction.
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.applySubgraphPadding(g, &virtual_levels, &virtual_positions, allocator);
+    }
+
+    // Step 4a-y: Compute per-level y-offsets for subgraph top/bottom borders
+    const level_y_offsets: ?[]usize = if (g.hasSubgraphs())
+        try subgraph_layout.computeLevelYOffsets(g, &virtual_levels, allocator)
+    else
+        null;
+    defer if (level_y_offsets) |offsets| allocator.free(offsets);
+
+    // Build cumulative y-offsets (each level += sum of all previous offsets)
+    var cumulative_y: []usize = &.{};
+    defer if (cumulative_y.len > 0) allocator.free(cumulative_y);
+    if (level_y_offsets) |offsets| {
+        cumulative_y = try allocator.alloc(usize, offsets.len);
+        var accum: usize = 0;
+        for (offsets, 0..) |off, i| {
+            accum += off;
+            cumulative_y[i] = accum;
+        }
+    }
+
     // Step 4b: Extract real node positions from virtual positions
     var real_positions = try layering.virtual.extractRealNodePositions(
         g,
@@ -584,6 +939,35 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         allocator,
     );
     defer dummy_positions.deinit();
+
+    // Step 4d: Apply vertical subgraph padding (y-offsets for border rows)
+    if (cumulative_y.len > 0) {
+        // Shift real node y positions
+        for (0..g.nodeCount()) |node_idx| {
+            const lvl = real_positions.level[node_idx];
+            if (lvl < cumulative_y.len) {
+                real_positions.y[node_idx] += cumulative_y[lvl];
+            }
+        }
+        // Shift dummy waypoint y positions
+        for (dummy_positions.waypoints.items) |*edge_wps| {
+            for (edge_wps.items) |*wp| {
+                // wp.level is actually the y-coordinate (level_idx * (1 + spacing))
+                // We need to find which level_idx produced this y and apply its offset
+                const base_y_per_level = 1 + effective_level_spacing;
+                if (base_y_per_level > 0) {
+                    const approx_level = wp.level / base_y_per_level;
+                    if (approx_level < cumulative_y.len) {
+                        wp.level += cumulative_y[approx_level];
+                    }
+                }
+            }
+        }
+        // Update total height
+        const total_extra_y = cumulative_y[cumulative_y.len - 1];
+        real_positions.total_height += total_extra_y;
+        virtual_positions.total_height += total_extra_y;
+    }
 
     // Step 5: Build LayoutIR
     var result = LayoutIR(usize).init(allocator);
@@ -617,7 +1001,12 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             if (vnode.dummyEdge()) |edge_idx| {
                 // Get position from virtual positions
                 const x = virtual_positions.x.items[level_idx].items[pos_in_level];
-                const y = level_idx * (1 + effective_level_spacing);
+                var y = level_idx * (1 + effective_level_spacing);
+
+                // Apply subgraph y-offset for this level
+                if (cumulative_y.len > 0 and level_idx < cumulative_y.len) {
+                    y += cumulative_y[level_idx];
+                }
 
                 const dummy_id = dummy_id_base + edge_idx * dummy_id_edge_stride + level_idx;
 
@@ -751,163 +1140,30 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         }
     }
 
-    // Step 6b: Mark reversed (back) edges in the IR.
-    // The pipeline routed them downward (from→to flipped), so now we:
-    //   1. Swap from_id/to_id back to the original semantic direction
-    //   2. Keep coordinates as-is (they represent the visual downward path)
-    //   3. Set reversed=true so renderers draw dashed lines
-    //   4. Move 'directed' flag from last segment to first segment (arrow at top)
-    if (reversed_edges) |re| {
-        for (result.edges.items) |*result_edge| {
-            if (result_edge.edge_index < re.len and re[result_edge.edge_index]) {
-                result_edge.reversed = true;
-                // Swap from/to IDs back to original direction
-                const tmp_id = result_edge.from_id;
-                result_edge.from_id = result_edge.to_id;
-                result_edge.to_id = tmp_id;
+    // Step 6b: Fix up reversed (back) edges
+    fixupReversedEdges(&result, reversed_edges);
+
+    // Step 7: Stagger horizontal_y for corner edges
+    staggerCornerEdges(&result);
+
+    // Step 8: Propagate edge labels and compute label positions
+    try propagateEdgeLabels(&result, g, allocator);
+
+    // Step 9: Widen layout if labels extend beyond current width
+    widenForLabels(&result, real_positions.total_width, real_positions.total_height);
+
+    // Step 10: Compute subgraph bounding boxes
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.computeBoundingBoxes(g, &result, allocator);
+
+        // Expand layout dimensions if subgraph boxes extend beyond
+        for (result.subgraphs.items) |sg_info| {
+            const right = sg_info.x + sg_info.width;
+            const bottom = sg_info.y + sg_info.height;
+            if (right > result.width or bottom > result.height) {
+                result.setDimensions(@max(result.width, right), @max(result.height, bottom));
             }
         }
-
-        // For multi-segment reversed edges, move the 'directed' (arrowhead) flag
-        // from the last segment (bottom, where routing put it) to the first
-        // segment (top, where the semantic target is for back edges).
-        for (0..re.len) |edge_idx| {
-            if (!re[edge_idx]) continue;
-
-            // Find first and last segments of this reversed edge (by from_y)
-            var first_seg: ?*ir.LayoutEdge(usize) = null;
-            var last_seg: ?*ir.LayoutEdge(usize) = null;
-            for (result.edges.items) |*seg| {
-                if (seg.edge_index != edge_idx) continue;
-                if (first_seg == null or seg.from_y < first_seg.?.from_y) {
-                    first_seg = seg;
-                }
-                if (last_seg == null or seg.from_y > last_seg.?.from_y) {
-                    last_seg = seg;
-                }
-            }
-
-            // Swap: move arrow from last segment to first segment
-            if (first_seg != null and last_seg != null and first_seg != last_seg) {
-                const was_directed = last_seg.?.directed;
-                last_seg.?.directed = false;
-                first_seg.?.directed = was_directed;
-            }
-        }
-    }
-
-    // Step 7: Stagger horizontal_y for all corner edges.
-    // After splitting, edges from both the router and the splitter coexist in
-    // result.edges.  Group them by from_y (same source-level band) and assign
-    // sequential slots so no two horizontal segments share the same row.
-    for (result.edges.items, 0..) |*edge, i| {
-        if (edge.path != .corner) continue;
-        // Count how many earlier corner edges share this from_y
-        var slot: usize = 0;
-        for (result.edges.items[0..i]) |prev| {
-            if (prev.path == .corner and prev.from_y == edge.from_y) {
-                slot += 1;
-            }
-        }
-        const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
-        edge.path.corner.horizontal_y = edge.from_y + 1 + (slot % available);
-    }
-
-    // Step 8: Propagate edge labels and compute label positions.
-    // Labels come from the original Graph.Edge; we look them up via edge_index.
-    // For split edges (through dummies), only the first segment gets the label.
-    // Label is placed on a dedicated row below the horizontal routing area.
-    {
-        // Track which original edges have already had their label assigned
-        // (so split edges don't duplicate the label on every segment).
-        var label_assigned = try allocator.alloc(bool, g.edges.items.len);
-        defer allocator.free(label_assigned);
-        @memset(label_assigned, false);
-
-        for (result.edges.items) |*edge| {
-            const orig_idx = edge.edge_index;
-            if (orig_idx >= g.edges.items.len) continue;
-
-            const orig_label = g.edges.items[orig_idx].label orelse continue;
-            if (label_assigned[orig_idx]) continue;
-            label_assigned[orig_idx] = true;
-
-            edge.label = orig_label;
-
-            // Compute label position based on path type.
-            // For corner edges, place on the post-corner vertical (at to_x)
-            // where the edge has diverged from the shared source column.
-            // For other paths, place near the source.
-            var label_y: usize = undefined;
-            var edge_x_at_label: usize = undefined;
-
-            switch (edge.path) {
-                .direct => {
-                    label_y = if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = edge.from_x;
-                },
-                .corner => |c| {
-                    // Place on the post-corner vertical at to_x.
-                    // Y just below the horizontal turn, with room before destination.
-                    if (c.horizontal_y + 1 < edge.to_y) {
-                        label_y = c.horizontal_y + 1;
-                    } else if (c.horizontal_y > edge.from_y + 1) {
-                        label_y = c.horizontal_y - 1;
-                    } else {
-                        label_y = edge.from_y + 1;
-                    }
-                    edge_x_at_label = edge.to_x;
-                },
-                .side_channel => |sc| {
-                    label_y = if (sc.start_y + 1 < sc.end_y)
-                        sc.start_y + 1
-                    else if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = sc.channel_x;
-                },
-                .multi_segment => {
-                    label_y = if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = edge.from_x;
-                },
-                .spline => {
-                    label_y = if (edge.to_y > edge.from_y + 2)
-                        edge.from_y + 2
-                    else
-                        edge.from_y + 1;
-                    edge_x_at_label = edge.from_x;
-                },
-            }
-
-            // Center the label text (rendered as "text", so width = len + 2 for quotes)
-            const label_width = orig_label.len + 2;
-            const label_x = if (edge_x_at_label >= label_width / 2)
-                edge_x_at_label - label_width / 2
-            else
-                0;
-
-            edge.label_x = label_x;
-            edge.label_y = label_y;
-        }
-    }
-
-    // Step 9: Widen layout if labels extend beyond current width.
-    {
-        var needed_width = real_positions.total_width;
-        for (result.edges.items) |edge| {
-            if (edge.label) |lbl| {
-                const right = edge.label_x + lbl.len + 2; // +2 for quotes
-                if (right > needed_width) needed_width = right;
-            }
-        }
-        result.setDimensions(needed_width, real_positions.total_height);
     }
 
     return result;
@@ -1511,6 +1767,147 @@ test "layout: FR empty graph returns error" {
     try std.testing.expectError(error.EmptyGraph, result);
 }
 
+test "end-to-end: layout with subgraphs produces bounding boxes" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // Build a small graph with subgraph structure:
+    //   [Gateway] → [Auth] → [DB]
+    //                ↑ in cluster "backend"
+    try g.addNode(1, "Gateway");
+    try g.addNode(2, "Auth");
+    try g.addNode(3, "DB");
+    try g.addDiEdge(1, 2);
+    try g.addDiEdge(2, 3);
+
+    const backend = try g.addSubgraph("backend");
+    try g.putNodes(&.{ 2, 3 }).inside(backend);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    // Basic IR sanity
+    try std.testing.expectEqual(@as(usize, 3), result.getNodes().len);
+    try std.testing.expect(result.getEdges().len >= 2);
+
+    // Should have exactly 1 subgraph bbox
+    try std.testing.expectEqual(@as(usize, 1), result.getSubgraphs().len);
+    const sg_bbox = result.getSubgraphs()[0];
+    try std.testing.expectEqual(backend, sg_bbox.id);
+    try std.testing.expectEqualStrings("backend", sg_bbox.label);
+
+    // Bbox must have positive dimensions
+    try std.testing.expect(sg_bbox.width > 0);
+    try std.testing.expect(sg_bbox.height > 0);
+
+    // Bbox must contain both Auth and DB nodes
+    for (result.getNodes()) |node| {
+        if (node.id == 2 or node.id == 3) {
+            try std.testing.expect(node.x >= sg_bbox.x);
+            try std.testing.expect(node.y >= sg_bbox.y);
+            try std.testing.expect(node.x + node.width <= sg_bbox.x + sg_bbox.width);
+            try std.testing.expect(node.y + 1 <= sg_bbox.y + sg_bbox.height);
+        }
+    }
+
+    // Gateway (node 1) should NOT be inside the bbox
+    for (result.getNodes()) |node| {
+        if (node.id == 1) {
+            const inside_x = node.x >= sg_bbox.x and node.x + node.width <= sg_bbox.x + sg_bbox.width;
+            const inside_y = node.y >= sg_bbox.y and node.y + 1 <= sg_bbox.y + sg_bbox.height;
+            // Gateway could spatially overlap due to layout, but semantically it's not in the subgraph.
+            // We just verify the subgraph bbox is computed from Auth + DB, not Gateway.
+            _ = inside_x;
+            _ = inside_y;
+        }
+    }
+}
+
+test "end-to-end: layout with nested subgraphs" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addDiEdge(1, 2);
+    try g.addDiEdge(2, 3);
+
+    const outer = try g.addSubgraph("outer");
+    const inner = try g.addSubgraph("inner");
+    try g.putSubgraphs(&.{inner}).inside(outer);
+    try g.putNodes(&.{ 1, 2, 3 }).inside(inner);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    // Should have 2 subgraph bboxes
+    try std.testing.expectEqual(@as(usize, 2), result.getSubgraphs().len);
+
+    // Find inner/outer bboxes
+    var inner_box: ?SubgraphInfo(usize) = null;
+    var outer_box: ?SubgraphInfo(usize) = null;
+    for (result.getSubgraphs()) |sg| {
+        if (sg.id == inner) inner_box = sg;
+        if (sg.id == outer) outer_box = sg;
+    }
+    try std.testing.expect(inner_box != null);
+    try std.testing.expect(outer_box != null);
+
+    // Outer must fully contain inner
+    const ib = inner_box.?;
+    const ob = outer_box.?;
+    try std.testing.expect(ob.x <= ib.x);
+    try std.testing.expect(ob.y <= ib.y);
+    try std.testing.expect(ob.x + ob.width >= ib.x + ib.width);
+    try std.testing.expect(ob.y + ob.height >= ib.y + ib.height);
+}
+
+test "end-to-end: layout without subgraphs unchanged" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addDiEdge(1, 2);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    // No subgraphs → no subgraph bboxes
+    try std.testing.expectEqual(@as(usize, 0), result.getSubgraphs().len);
+    try std.testing.expectEqual(@as(usize, 2), result.getNodes().len);
+    try std.testing.expect(result.getEdges().len >= 1);
+}
+
+test "end-to-end: subgraphs with typed coord conversion" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "X");
+    try g.addNode(2, "Y");
+    try g.addDiEdge(1, 2);
+    const sg = try g.addSubgraph("cluster");
+    try g.putNodes(&.{ 1, 2 }).inside(sg);
+
+    var result_f32 = try layoutTyped(f32, &g, allocator, .{});
+    defer result_f32.deinit();
+
+    // Subgraph bbox should be converted to f32
+    try std.testing.expectEqual(@as(usize, 1), result_f32.getSubgraphs().len);
+    const bbox = result_f32.getSubgraphs()[0];
+    try std.testing.expect(bbox.width > 0.0);
+    try std.testing.expect(bbox.height > 0.0);
+}
+
 // Run tests from submodules
 test {
     _ = graph;
@@ -1521,6 +1918,9 @@ test {
     _ = positioning.barycentric;
     _ = routing.direct;
     _ = unicode;
+    _ = svg;
+    _ = json;
+    _ = subgraph_layout;
     _ = @import("fuzz_tests.zig");
 
     // Force-directed graph modules

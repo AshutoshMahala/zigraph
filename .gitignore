@@ -26,3 +26,5 @@ docs/
 # Generated SVG files in root (keep assets/ copies)
 /*.svg
 !/assets/*.svg
+subgraph_demo.json
+subgraph_demo.svg

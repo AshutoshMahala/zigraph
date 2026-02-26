@@ -12,6 +12,7 @@
 pub const repulsion = @import("repulsion.zig");
 pub const attraction = @import("attraction.zig");
 pub const gravity = @import("gravity.zig");
+pub const cohesion = @import("cohesion.zig");
 
 // Re-export common force functions for convenience
 pub const applyPairwiseRepulsion = repulsion.applyPairwise;
@@ -21,9 +22,12 @@ pub const applyAttractionLinLog = attraction.applyBetweenLinLog;
 pub const applyGravity = gravity.applyToCenter;
 pub const applyStrongGravity = gravity.applyStrongGravity;
 pub const computeCentroid = gravity.computeCentroid;
+pub const applyCohesion = cohesion.applyCohesion;
+pub const SubgraphIndex = cohesion.SubgraphIndex;
 
 test {
     _ = repulsion;
     _ = attraction;
     _ = gravity;
+    _ = cohesion;
 }

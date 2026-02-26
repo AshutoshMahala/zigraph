@@ -172,6 +172,29 @@ pub fn LayoutEdge(comptime Coord: type) type {
     };
 }
 
+/// A subgraph (cluster) annotation in the laid-out graph.
+/// Contains bounding box computed from member node positions.
+/// Parameterized by `Coord` for flexible spatial precision.
+pub fn SubgraphInfo(comptime Coord: type) type {
+    comptime validateCoordType(Coord);
+    return struct {
+        /// Subgraph ID (matches Graph.Subgraph.id)
+        id: usize,
+        /// Parent subgraph ID (null = root-level subgraph)
+        parent_id: ?usize,
+        /// Display label
+        label: []const u8,
+        /// Bounding box X coordinate (left edge, includes padding)
+        x: Coord,
+        /// Bounding box Y coordinate (top edge, includes padding)
+        y: Coord,
+        /// Bounding box width (includes padding)
+        width: Coord,
+        /// Bounding box height (includes padding)
+        height: Coord,
+    };
+}
+
 /// Intermediate representation of a laid-out graph.
 /// Parameterized by `Coord` for flexible spatial precision.
 ///
@@ -181,6 +204,7 @@ pub fn LayoutIR(comptime Coord: type) type {
     comptime validateCoordType(Coord);
     const Node = LayoutNode(Coord);
     const Edge = LayoutEdge(Coord);
+    const SgInfo = SubgraphInfo(Coord);
 
     return struct {
         allocator: Allocator,
@@ -199,6 +223,8 @@ pub fn LayoutIR(comptime Coord: type) type {
         levels: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)),
         /// O(1) lookup from node ID to index in nodes vec
         id_to_index: std.AutoHashMapUnmanaged(usize, usize),
+        /// Subgraph annotations with bounding boxes (empty when no subgraphs)
+        subgraphs: std.ArrayListUnmanaged(SgInfo),
 
         const Self = @This();
 
@@ -213,6 +239,7 @@ pub fn LayoutIR(comptime Coord: type) type {
                 .level_count = 0,
                 .levels = .{},
                 .id_to_index = .{},
+                .subgraphs = .{},
             };
         }
 
@@ -232,6 +259,7 @@ pub fn LayoutIR(comptime Coord: type) type {
 
             self.id_to_index.deinit(self.allocator);
             self.nodes.deinit(self.allocator);
+            self.subgraphs.deinit(self.allocator);
         }
 
         /// Get the total width of the layout.
@@ -257,6 +285,11 @@ pub fn LayoutIR(comptime Coord: type) type {
         /// Get all routed edges.
         pub fn getEdges(self: *const Self) []const Edge {
             return self.edges.items;
+        }
+
+        /// Get all subgraph annotations.
+        pub fn getSubgraphs(self: *const Self) []const SgInfo {
+            return self.subgraphs.items;
         }
 
         /// Get a node by its ID.
@@ -412,6 +445,20 @@ pub fn LayoutIR(comptime Coord: type) type {
             // Convert dimensions
             result.width = coordCast(Target, Coord, self.width);
             result.height = coordCast(Target, Coord, self.height);
+
+            // Convert subgraph bounding boxes
+            try result.subgraphs.ensureTotalCapacity(target_allocator, self.subgraphs.items.len);
+            for (self.subgraphs.items) |sg| {
+                result.subgraphs.appendAssumeCapacity(.{
+                    .id = sg.id,
+                    .parent_id = sg.parent_id,
+                    .label = sg.label,
+                    .x = coordCast(Target, Coord, sg.x),
+                    .y = coordCast(Target, Coord, sg.y),
+                    .width = coordCast(Target, Coord, sg.width),
+                    .height = coordCast(Target, Coord, sg.height),
+                });
+            }
 
             return result;
         }

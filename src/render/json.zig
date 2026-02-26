@@ -3,11 +3,11 @@
 //! Serializes and deserializes `LayoutIR` to/from JSON for external tool consumption.
 //! Zero dependencies beyond the Zig standard library.
 //!
-//! ## Schema (v1.1)
+//! ## Schema (v1.2)
 //!
 //! ```json
 //! {
-//!   "version": "1.1",
+//!   "version": "1.2",
 //!   "width": 120,
 //!   "height": 40,
 //!   "level_count": 4,
@@ -16,6 +16,9 @@
 //!   ],
 //!   "edges": [
 //!     {"from": 1, "to": 2, "from_x": 11, "from_y": 1, "to_x": 20, "to_y": 3, "path": {"type": "direct"}, "edge_index": 0, "directed": true}
+//!   ],
+//!   "subgraphs": [
+//!     {"id": 0, "label": "Backend", "parent_id": null, "x": 5, "y": 2, "width": 30, "height": 10}
 //!   ]
 //! }
 //! ```
@@ -54,7 +57,7 @@ fn writeJsonString(writer: anytype, s: []const u8) !void {
 }
 
 /// Current JSON schema version
-pub const VERSION = "1.1";
+pub const VERSION = "1.2";
 
 /// Serialize any GenericLayoutIR as JSON string.
 /// Works with any coordinate type (usize, u16, f32, etc.).
@@ -158,7 +161,32 @@ fn serializeImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord),
         if (i < layout_ir.edges.items.len - 1) try writer.writeAll(",");
         try writer.writeAll("\n");
     }
-    try writer.writeAll("  ]\n");
+
+    // Subgraphs array (omitted when empty for backward compatibility)
+    if (layout_ir.subgraphs.items.len > 0) {
+        try writer.writeAll("  ],\n");
+        try writer.writeAll("  \"subgraphs\": [\n");
+        for (layout_ir.subgraphs.items, 0..) |sg, i| {
+            try writer.writeAll("    {");
+            try writer.print("\"id\": {d}, ", .{sg.id});
+            try writer.writeAll("\"label\": ");
+            try writeJsonString(writer, sg.label);
+            try writer.writeAll(", ");
+            try writer.writeAll("\"parent_id\": ");
+            if (sg.parent_id) |pid| {
+                try writer.print("{d}", .{pid});
+            } else {
+                try writer.writeAll("null");
+            }
+            try writer.print(", \"x\": {d}, \"y\": {d}, \"width\": {d}, \"height\": {d}", .{ sg.x, sg.y, sg.width, sg.height });
+            try writer.writeAll("}");
+            if (i < layout_ir.subgraphs.items.len - 1) try writer.writeAll(",");
+            try writer.writeAll("\n");
+        }
+        try writer.writeAll("  ]\n");
+    } else {
+        try writer.writeAll("  ]\n");
+    }
 
     try writer.writeAll("}\n");
 
@@ -178,7 +206,7 @@ pub fn deserializeGeneric(comptime Coord: type, json_bytes: []const u8, allocato
 }
 
 /// Deinit a LayoutIR returned by `deserialize`.
-/// 
+///
 /// **Important**: Always use this instead of `layout_ir.deinit()` for deserialized IRs.
 /// This function frees the heap-allocated label strings before releasing the IR.
 /// Calling `layout_ir.deinit()` directly will leak all label memory.
@@ -189,11 +217,14 @@ pub fn deinitDeserialized(layout_ir: *LayoutIR, allocator: Allocator) void {
     for (layout_ir.edges.items) |edge| {
         if (edge.label) |lbl| allocator.free(lbl);
     }
+    for (layout_ir.subgraphs.items) |sg| {
+        allocator.free(sg.label);
+    }
     layout_ir.deinit();
 }
 
 /// Deinit a LayoutIR returned by `deserializeGeneric`.
-/// 
+///
 /// **Important**: Always use this instead of `layout_ir.deinit()` for deserialized IRs.
 /// This function frees the heap-allocated label strings before releasing the IR.
 /// Calling `layout_ir.deinit()` directly will leak all label memory.
@@ -203,6 +234,9 @@ pub fn deinitDeserializedGeneric(comptime Coord: type, layout_ir: *ir_mod.Layout
     }
     for (layout_ir.edges.items) |edge| {
         if (edge.label) |lbl| allocator.free(lbl);
+    }
+    for (layout_ir.subgraphs.items) |sg| {
+        allocator.free(sg.label);
     }
     layout_ir.deinit();
 }
@@ -227,8 +261,8 @@ fn deserializeImpl(comptime Coord: type, json_bytes: []const u8, allocator: Allo
         else => return error.JsonVersionTypeMismatch,
     };
     if (!std.mem.eql(u8, version_str, VERSION)) {
-        // Allow v1.0 inputs with missing newer fields
-        if (!std.mem.eql(u8, version_str, "1.0")) return error.JsonVersionUnsupported;
+        // Allow older schema versions with missing newer fields
+        if (!std.mem.eql(u8, version_str, "1.0") and !std.mem.eql(u8, version_str, "1.1")) return error.JsonVersionUnsupported;
     }
 
     ir.width = try getInt(Coord, obj, "width");
@@ -327,6 +361,39 @@ fn deserializeImpl(comptime Coord: type, json_bytes: []const u8, allocator: Allo
             path.deinit();
             return err;
         };
+    }
+
+    // Subgraphs (optional, introduced in v1.2)
+    if (obj.get("subgraphs")) |sg_val| {
+        const sg_arr = switch (sg_val) {
+            .array => |a| a,
+            else => return error.JsonSubgraphsTypeMismatch,
+        };
+        try ir.subgraphs.ensureTotalCapacity(allocator, sg_arr.items.len);
+        for (sg_arr.items) |sv| {
+            const sobj = switch (sv) {
+                .object => |o| o,
+                else => return error.JsonSubgraphsTypeMismatch,
+            };
+            const sg_id = try getInt(usize, sobj, "id");
+            const sg_label_src = try getString(sobj, "label");
+            const sg_label = try allocator.dupe(u8, sg_label_src);
+            errdefer allocator.free(sg_label);
+            const parent_id = getOptionalInt(sobj.get("parent_id"));
+            const sg_x = try getInt(Coord, sobj, "x");
+            const sg_y = try getInt(Coord, sobj, "y");
+            const sg_w = try getInt(Coord, sobj, "width");
+            const sg_h = try getInt(Coord, sobj, "height");
+            ir.subgraphs.appendAssumeCapacity(.{
+                .id = sg_id,
+                .parent_id = parent_id,
+                .label = sg_label,
+                .x = sg_x,
+                .y = sg_y,
+                .width = sg_w,
+                .height = sg_h,
+            });
+        }
     }
 
     // Levels are not serialized; rebuild basic levels array using level field.
@@ -525,7 +592,7 @@ test "json: serialize basic layout" {
     const json = try serialize(&layout_ir, allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"version\": \"1.1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"version\": \"1.2\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\": \"explicit\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"edge_index\": 0") != null);
 }
@@ -612,4 +679,128 @@ test "json: roundtrip serialize/deserialize" {
     try std.testing.expectEqual(@as(usize, 20), decoded.width);
     try std.testing.expectEqual(@as(usize, 10), decoded.height);
     try std.testing.expectEqual(@as(usize, 2), decoded.levels.items.len);
+}
+
+test "json: subgraph serialization" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 5,
+        .y = 3,
+        .width = 3,
+        .center_x = 6,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "backend",
+        .x = 3,
+        .y = 1,
+        .width = 10,
+        .height = 8,
+    });
+
+    layout_ir.setDimensions(20, 15);
+
+    const json = try serialize(&layout_ir, allocator);
+    defer allocator.free(json);
+
+    // Should contain subgraphs array
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"subgraphs\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"backend\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"parent_id\": null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"version\": \"1.2\"") != null);
+}
+
+test "json: subgraph roundtrip" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "X",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 10,
+        .parent_id = null,
+        .label = "outer",
+        .x = 0,
+        .y = 0,
+        .width = 20,
+        .height = 15,
+    });
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 20,
+        .parent_id = 10,
+        .label = "inner",
+        .x = 2,
+        .y = 2,
+        .width = 10,
+        .height = 8,
+    });
+
+    layout_ir.setDimensions(25, 20);
+    try layout_ir.ensureLevels(1);
+    try layout_ir.addNodeToLevel(0, 0);
+
+    const json = try serialize(&layout_ir, allocator);
+    defer allocator.free(json);
+
+    var decoded = try deserialize(json, allocator);
+    defer deinitDeserialized(&decoded, allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), decoded.subgraphs.items.len);
+
+    const sg0 = decoded.subgraphs.items[0];
+    try std.testing.expectEqual(@as(usize, 10), sg0.id);
+    try std.testing.expectEqualStrings("outer", sg0.label);
+    try std.testing.expect(sg0.parent_id == null);
+    try std.testing.expectEqual(@as(usize, 20), sg0.width);
+
+    const sg1 = decoded.subgraphs.items[1];
+    try std.testing.expectEqual(@as(usize, 20), sg1.id);
+    try std.testing.expectEqualStrings("inner", sg1.label);
+    try std.testing.expectEqual(@as(usize, 10), sg1.parent_id.?);
+}
+
+test "json: no subgraphs omits array" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    layout_ir.setDimensions(5, 3);
+
+    const json = try serialize(&layout_ir, allocator);
+    defer allocator.free(json);
+
+    // Should NOT contain subgraphs key when empty
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"subgraphs\"") == null);
 }

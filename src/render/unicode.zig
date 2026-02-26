@@ -46,6 +46,24 @@ const CP_T_RIGHT: u21 = '├'; // T-junction: vertical with right
 const CP_T_LEFT: u21 = '┤'; // T-junction: vertical with left
 const CP_CROSS: u21 = '┼'; // Crossing
 
+// Double-line box-drawing characters for subgraph borders
+// (visually distinct from single-line edge characters)
+const CP_SG_UR: u21 = '╔'; // top-left
+const CP_SG_UL: u21 = '╗'; // top-right
+const CP_SG_DR: u21 = '╚'; // bottom-left
+const CP_SG_DL: u21 = '╝'; // bottom-right
+const CP_SG_H: u21 = '═'; // horizontal
+const CP_SG_V: u21 = '║'; // vertical
+
+// Mixed single/double box-drawing characters for edge-border crossings.
+// Used when single-line edges cross double-line subgraph borders.
+const CP_MIX_CROSS_DH: u21 = '╪'; // single vert + double horiz crossing
+const CP_MIX_CROSS_DV: u21 = '╫'; // double vert + single horiz crossing
+const CP_MIX_T_DOWN_DH: u21 = '╤'; // single down from double horizontal
+const CP_MIX_T_UP_DH: u21 = '╧'; // single up from double horizontal
+const CP_MIX_T_RIGHT_DV: u21 = '╞'; // single right from double vertical
+const CP_MIX_T_LEFT_DV: u21 = '╡'; // single left from double vertical
+
 /// 2D buffer backed by a single flat allocation for cache efficiency.
 /// Includes optional color plane for ANSI edge coloring.
 const Buffer2D = struct {
@@ -120,6 +138,9 @@ pub const Config = struct {
     /// When set, edges will be colored based on their edge_index
     /// Use colors.ansi, colors.ansi_dark, or colors.ansi_light
     edge_palette: ?[]const u8 = null,
+
+    /// Show subgraph bounding boxes (when subgraphs exist in the IR)
+    show_subgraphs: bool = true,
 };
 
 /// Render any GenericLayoutIR to a Unicode string.
@@ -297,6 +318,11 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     var buffer = try Buffer2D.init(allocator, width, height);
     defer buffer.deinit(allocator);
 
+    // Paint subgraph boxes first (background layer)
+    if (config.show_subgraphs) {
+        paintSubgraphs(&buffer, layout_ir);
+    }
+
     // Paint edges first (so nodes overwrite them)
     // Skip reversed edges — they'll be drawn separately with side routing.
     for (layout_ir.getEdges()) |edge| {
@@ -328,12 +354,12 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                 // Draw vertical line at dummy position
                 const x = node.center_x;
                 const y = node.y;
-                
+
                 // Set the dummy position itself to vertical line
                 const current = buffer.get(x, y);
                 const merged = mergeJunction(current, true, true, false, false);
                 buffer.set(x, y, merged);
-                
+
                 // Also fix any arrows above/below to be vertical lines
                 // Check row above
                 if (y > 0) {
@@ -448,6 +474,11 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         paintNode(&buffer, &node, config.show_dummy_nodes);
     }
 
+    // Paint subgraph labels last so they're not overwritten by edges/nodes
+    if (config.show_subgraphs) {
+        paintSubgraphLabels(&buffer, layout_ir);
+    }
+
     // Paint self-loop indicators (↺) after nodes, so they appear right after the node bracket
     for (reversed_groups.items) |grp| {
         if (grp.target_y >= grp.source_y) {
@@ -546,6 +577,70 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     return output.toOwnedSlice(allocator);
 }
 
+/// Paint subgraph bounding boxes onto the buffer using double-line box characters.
+/// Renders parent subgraphs first (larger boxes in background), then children on top.
+/// Labels are painted separately via `paintSubgraphLabels` after edges and nodes.
+fn paintSubgraphs(buffer: *Buffer2D, layout_ir: *const LayoutIR) void {
+    const items = layout_ir.subgraphs.items;
+    if (items.len == 0) return;
+
+    // Render in reverse order: parents first (they appear last in the array
+    // since computeBoundingBoxes processes deepest-first).
+    var idx: usize = items.len;
+    while (idx > 0) {
+        idx -= 1;
+        const sg = items[idx];
+        paintSubgraphBox(buffer, sg.x, sg.y, sg.width, sg.height);
+    }
+}
+
+/// Paint subgraph labels after edges and nodes so they remain visible.
+fn paintSubgraphLabels(buffer: *Buffer2D, layout_ir: *const LayoutIR) void {
+    for (layout_ir.subgraphs.items) |sg| {
+        if (sg.label.len == 0) continue;
+        if (sg.width < 4 or sg.height < 3) continue;
+
+        const max_label_len = sg.width - 4; // leave room for borders + spacing
+        const display_len = @min(sg.label.len, max_label_len);
+        if (display_len == 0) continue;
+
+        // Place label starting at x+2 on the row just below the top border
+        const label_start = sg.x + 2;
+        const label_y = sg.y + 1;
+        for (sg.label[0..display_len], 0..) |ch, i| {
+            buffer.set(label_start + i, label_y, @as(u21, ch));
+        }
+    }
+}
+
+/// Draw a single subgraph box with double-line borders.
+fn paintSubgraphBox(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: usize) void {
+    if (w < 2 or h < 2) return;
+
+    const right = x + w - 1;
+    const bottom = y + h - 1;
+
+    // Corners
+    buffer.set(x, y, CP_SG_UR); // top-left
+    buffer.set(right, y, CP_SG_UL); // top-right
+    buffer.set(x, bottom, CP_SG_DR); // bottom-left
+    buffer.set(right, bottom, CP_SG_DL); // bottom-right
+
+    // Top and bottom horizontal lines
+    var col = x + 1;
+    while (col < right) : (col += 1) {
+        buffer.set(col, y, CP_SG_H);
+        buffer.set(col, bottom, CP_SG_H);
+    }
+
+    // Left and right vertical lines
+    var row = y + 1;
+    while (row < bottom) : (row += 1) {
+        buffer.set(x, row, CP_SG_V);
+        buffer.set(right, row, CP_SG_V);
+    }
+}
+
 /// Paint a node onto the buffer.
 /// Uses different brackets based on node kind:
 /// - explicit: [label]
@@ -615,7 +710,12 @@ fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, c
         if (directed and y == arrow_y) {
             buffer.setWithColor(x, y, arrow_char, color);
         } else if (reversed) {
-            buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
+            const cur = buffer.get(x, y);
+            if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(x, y, mergeWithDoubleLine(cur, true, true, false, false), color);
+            } else {
+                buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
+            }
         } else {
             const cur = buffer.get(x, y);
             buffer.setWithColor(x, y, mergeJunction(cur, true, true, false, false), color);
@@ -641,7 +741,12 @@ fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize,
         if (directed and x == arrow_x) {
             buffer.setWithColor(x, y, arrow_char, color);
         } else if (reversed) {
-            buffer.setWithColor(x, y, CP_H_LINE_DASH, color);
+            const cur = buffer.get(x, y);
+            if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(x, y, mergeWithDoubleLine(cur, false, false, true, true), color);
+            } else {
+                buffer.setWithColor(x, y, CP_H_LINE_DASH, color);
+            }
         } else {
             const cur = buffer.get(x, y);
             buffer.setWithColor(x, y, mergeJunction(cur, false, false, true, true), color);
@@ -666,7 +771,12 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
             var y = seg_lo + 1;
             while (y < seg_hi) : (y += 1) {
                 if (reversed) {
-                    buffer.setWithColor(x0, y, CP_V_LINE_DASH, color);
+                    const cur = buffer.get(x0, y);
+                    if (isSubgraphBorderChar(cur)) {
+                        buffer.setWithColor(x0, y, mergeWithDoubleLine(cur, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x0, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const cur = buffer.get(x0, y);
                     buffer.setWithColor(x0, y, mergeJunction(cur, true, true, false, false), color);
@@ -692,7 +802,12 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
             var x = lo_x + 1;
             while (x < hi_x) : (x += 1) {
                 if (reversed) {
-                    buffer.setWithColor(x, mid_y, CP_H_LINE_DASH, color);
+                    const cur = buffer.get(x, mid_y);
+                    if (isSubgraphBorderChar(cur)) {
+                        buffer.setWithColor(x, mid_y, mergeWithDoubleLine(cur, false, false, true, true), color);
+                    } else {
+                        buffer.setWithColor(x, mid_y, CP_H_LINE_DASH, color);
+                    }
                 } else {
                     const cur = buffer.get(x, mid_y);
                     buffer.setWithColor(x, mid_y, mergeJunction(cur, false, false, true, true), color);
@@ -718,7 +833,12 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
             var y = seg_lo + 1;
             while (y < seg_hi) : (y += 1) {
                 if (reversed) {
-                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    const cur = buffer.get(x1, y);
+                    if (isSubgraphBorderChar(cur)) {
+                        buffer.setWithColor(x1, y, mergeWithDoubleLine(cur, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const cur = buffer.get(x1, y);
                     buffer.setWithColor(x1, y, mergeJunction(cur, true, true, false, false), color);
@@ -769,9 +889,72 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
     }
 }
 
+/// Check if a character is a double-line subgraph border or mixed crossing character.
+fn isSubgraphBorderChar(ch: u21) bool {
+    return switch (ch) {
+        CP_SG_H,
+        CP_SG_V,
+        CP_SG_UR,
+        CP_SG_UL,
+        CP_SG_DR,
+        CP_SG_DL,
+        CP_MIX_CROSS_DH,
+        CP_MIX_CROSS_DV,
+        CP_MIX_T_DOWN_DH,
+        CP_MIX_T_UP_DH,
+        CP_MIX_T_RIGHT_DV,
+        CP_MIX_T_LEFT_DV,
+        => true,
+        else => false,
+    };
+}
+
+/// Merge a single-line edge direction into a double-line subgraph border character.
+/// Produces the appropriate mixed single/double box-drawing character.
+fn mergeWithDoubleLine(current: u21, from_above: bool, to_below: bool, to_right: bool, to_left: bool) u21 {
+    return switch (current) {
+        // ═ double horizontal border
+        CP_SG_H => {
+            if (from_above and to_below) return CP_MIX_CROSS_DH; // ╪
+            if (to_below) return CP_MIX_T_DOWN_DH; // ╤
+            if (from_above) return CP_MIX_T_UP_DH; // ╧
+            return current; // horizontal-only: keep ═
+        },
+        // ║ double vertical border
+        CP_SG_V => {
+            if (to_right and to_left) return CP_MIX_CROSS_DV; // ╫
+            if (to_right) return CP_MIX_T_RIGHT_DV; // ╞
+            if (to_left) return CP_MIX_T_LEFT_DV; // ╡
+            return current; // vertical-only: keep ║
+        },
+        // Mixed T-junctions: upgrade to full crossing if opposite direction added
+        CP_MIX_T_DOWN_DH => if (from_above) CP_MIX_CROSS_DH else current,
+        CP_MIX_T_UP_DH => if (to_below) CP_MIX_CROSS_DH else current,
+        CP_MIX_T_RIGHT_DV => if (to_left) CP_MIX_CROSS_DV else current,
+        CP_MIX_T_LEFT_DV => if (to_right) CP_MIX_CROSS_DV else current,
+        // Full crossings and corners: preserve as-is
+        CP_MIX_CROSS_DH,
+        CP_MIX_CROSS_DV,
+        CP_SG_UR,
+        CP_SG_UL,
+        CP_SG_DR,
+        CP_SG_DL,
+        => current,
+        else => current,
+    };
+}
+
 /// Merge a junction character based on which directions are connected.
 /// Returns the appropriate box-drawing character for the intersection.
+/// Handles mixed single/double crossings when edges cross subgraph borders.
 fn mergeJunction(current: u21, from_above: bool, to_below: bool, to_right: bool, to_left: bool) u21 {
+    // Handle double-line (subgraph border) characters first.
+    // When a single-line edge crosses a double-line border, produce a mixed char
+    // so the border remains visually intact while showing the crossing.
+    if (isSubgraphBorderChar(current)) {
+        return mergeWithDoubleLine(current, from_above, to_below, to_right, to_left);
+    }
+
     // Determine what directions the current character connects
     var up = from_above;
     var down = to_below;
@@ -930,7 +1113,12 @@ fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color
         const src_x = info.source_right_x;
         var x = src_x;
         while (x < ch_x) : (x += 1) {
-            buffer.setWithColor(x, bot_y, CP_H_LINE_DASH, color);
+            const cur = buffer.get(x, bot_y);
+            if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(x, bot_y, mergeWithDoubleLine(cur, false, false, true, true), color);
+            } else {
+                buffer.setWithColor(x, bot_y, CP_H_LINE_DASH, color);
+            }
         }
         // Corner at channel: connects from left and from above
         buffer.setWithColor(ch_x, bot_y, mergeJunction(' ', true, false, false, true), color);
@@ -940,11 +1128,16 @@ fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color
     {
         var y = top_y + 1;
         while (y < bot_y) : (y += 1) {
-            buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+            const cur = buffer.get(ch_x, y);
+            if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(ch_x, y, mergeWithDoubleLine(cur, true, true, false, false), color);
+            } else {
+                buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+            }
         }
     }
 
-    // 3. Horizontal dashed line from target node right to channel, with ⇡ arrow
+    // 3. Horizontal dashed line from target node right to channel, with ⇠ arrow
     {
         const tgt_x = info.target_right_x;
         // Corner at channel: connects from below and from left
@@ -952,15 +1145,17 @@ fn paintReversedEdgeSide(buffer: *Buffer2D, info: *const ReversedEdgeInfo, color
         // Dashed horizontal from target right to channel
         var x = tgt_x;
         while (x < ch_x) : (x += 1) {
+            const cur = buffer.get(x, top_y);
             if (x == tgt_x) {
                 // Arrow at the node side pointing left (toward the target)
                 buffer.setWithColor(x, top_y, CP_ARROW_LEFT_DASH, color);
+            } else if (isSubgraphBorderChar(cur)) {
+                buffer.setWithColor(x, top_y, mergeWithDoubleLine(cur, false, false, true, true), color);
             } else {
                 buffer.setWithColor(x, top_y, CP_H_LINE_DASH, color);
             }
         }
     }
-
 }
 
 /// Paint an edge onto the buffer.
@@ -1002,7 +1197,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (edge.reversed and edge.directed and y == edge.from_y) {
                     buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
                 } else if (edge.reversed) {
-                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    const current = buffer.get(x1, y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x1, y);
                     buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
@@ -1014,7 +1214,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             while (x <= max_x) : (x += 1) {
                 if (x != x1 and x != x2) {
                     if (edge.reversed) {
-                        buffer.setWithColor(x, h_y, CP_H_LINE_DASH, color);
+                        const current = buffer.get(x, h_y);
+                        if (isSubgraphBorderChar(current)) {
+                            buffer.setWithColor(x, h_y, mergeWithDoubleLine(current, false, false, true, true), color);
+                        } else {
+                            buffer.setWithColor(x, h_y, CP_H_LINE_DASH, color);
+                        }
                     } else {
                         const current = buffer.get(x, h_y);
                         buffer.setWithColor(x, h_y, mergeJunction(current, false, false, true, true), color);
@@ -1036,7 +1241,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else if (edge.reversed) {
-                    buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                    const current = buffer.get(x2, y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x2, y);
                     buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
@@ -1058,7 +1268,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (edge.reversed and edge.directed and y == first_vert_start) {
                     buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
                 } else if (edge.reversed) {
-                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    const current = buffer.get(x1, y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x1, y);
                     buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
@@ -1071,7 +1286,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             var x = min_x1;
             while (x <= max_x1) : (x += 1) {
                 if (edge.reversed) {
-                    buffer.setWithColor(x, sc.start_y, CP_H_LINE_DASH, color);
+                    const current = buffer.get(x, sc.start_y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x, sc.start_y, mergeWithDoubleLine(current, false, false, true, true), color);
+                    } else {
+                        buffer.setWithColor(x, sc.start_y, CP_H_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x, sc.start_y);
                     buffer.setWithColor(x, sc.start_y, mergeJunction(current, false, false, true, true), color);
@@ -1082,7 +1302,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             y = sc.start_y + 1;
             while (y < sc.end_y) : (y += 1) {
                 if (edge.reversed) {
-                    buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+                    const current = buffer.get(ch_x, y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(ch_x, y, mergeWithDoubleLine(current, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(ch_x, y);
                     buffer.setWithColor(ch_x, y, mergeJunction(current, true, true, false, false), color);
@@ -1095,7 +1320,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             x = min_x2;
             while (x <= max_x2) : (x += 1) {
                 if (edge.reversed) {
-                    buffer.setWithColor(x, sc.end_y, CP_H_LINE_DASH, color);
+                    const current = buffer.get(x, sc.end_y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x, sc.end_y, mergeWithDoubleLine(current, false, false, true, true), color);
+                    } else {
+                        buffer.setWithColor(x, sc.end_y, CP_H_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x, sc.end_y);
                     buffer.setWithColor(x, sc.end_y, mergeJunction(current, false, false, true, true), color);
@@ -1108,7 +1338,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else if (edge.reversed) {
-                    buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                    const current = buffer.get(x2, y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x2, y);
                     buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
@@ -1131,19 +1366,26 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (edge.reversed and edge.directed and y == edge.from_y) {
                     buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
                 } else if (edge.reversed) {
-                    buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    const current = buffer.get(x1, y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x1, y);
                     buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
                 }
             }
 
-            // Horizontal segment (only fill spaces)
+            // Horizontal segment (fill spaces and cross subgraph borders)
             var x = min_x;
             while (x <= max_x) : (x += 1) {
                 if (x != x1 and x != x2) {
                     const current = buffer.get(x, h_y);
-                    if (current == ' ') {
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x, h_y, mergeJunction(current, false, false, true, true), color);
+                    } else if (current == ' ') {
                         if (edge.reversed) {
                             buffer.setWithColor(x, h_y, CP_H_LINE_DASH, color);
                         } else {
@@ -1167,7 +1409,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
                     buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
                 } else if (edge.reversed) {
-                    buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                    const current = buffer.get(x2, y);
+                    if (isSubgraphBorderChar(current)) {
+                        buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
+                    } else {
+                        buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                    }
                 } else {
                     const current = buffer.get(x2, y);
                     buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
@@ -1276,4 +1523,188 @@ test "unicode render: empty graph" {
     defer allocator.free(output);
 
     try std.testing.expectEqual(@as(usize, 0), output.len);
+}
+
+test "unicode render: subgraph box" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 3,
+        .y = 2,
+        .width = 3,
+        .center_x = 4,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "SG",
+        .x = 1,
+        .y = 0,
+        .width = 8,
+        .height = 5,
+    });
+
+    layout_ir.setDimensions(12, 6);
+
+    const output = try render(&layout_ir, allocator);
+    defer allocator.free(output);
+
+    // Should contain double-line box characters
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") != null); // ╔
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x97") != null); // ╗
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x9a") != null); // ╚
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x9d") != null); // ╝
+    // Should contain label
+    try std.testing.expect(std.mem.indexOf(u8, output, "SG") != null);
+    // Should contain node
+    try std.testing.expect(std.mem.indexOf(u8, output, "[A]") != null);
+}
+
+test "unicode render: subgraph disabled" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "hidden",
+        .x = 0,
+        .y = 0,
+        .width = 5,
+        .height = 5,
+    });
+
+    layout_ir.setDimensions(8, 6);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{ .show_subgraphs = false });
+    defer allocator.free(output);
+
+    // Should NOT contain double-line box characters
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") == null); // ╔
+}
+
+test "mergeJunction: vertical edge crossing horizontal subgraph border" {
+    // Single vertical edge (│) crossing double horizontal border (═) → ╪
+    try std.testing.expectEqual(CP_MIX_CROSS_DH, mergeJunction(CP_SG_H, true, true, false, false));
+}
+
+test "mergeJunction: horizontal edge crossing vertical subgraph border" {
+    // Single horizontal edge (─) crossing double vertical border (║) → ╫
+    try std.testing.expectEqual(CP_MIX_CROSS_DV, mergeJunction(CP_SG_V, false, false, true, true));
+}
+
+test "mergeJunction: edge enters from above double horizontal border" {
+    // Edge only goes down from ═ → ╤
+    try std.testing.expectEqual(CP_MIX_T_DOWN_DH, mergeJunction(CP_SG_H, false, true, false, false));
+}
+
+test "mergeJunction: edge enters from below double horizontal border" {
+    // Edge only comes up to ═ → ╧
+    try std.testing.expectEqual(CP_MIX_T_UP_DH, mergeJunction(CP_SG_H, true, false, false, false));
+}
+
+test "mergeJunction: edge goes right from vertical subgraph border" {
+    // Edge goes right from ║ → ╞
+    try std.testing.expectEqual(CP_MIX_T_RIGHT_DV, mergeJunction(CP_SG_V, false, false, true, false));
+}
+
+test "mergeJunction: edge goes left from vertical subgraph border" {
+    // Edge goes left from ║ → ╡
+    try std.testing.expectEqual(CP_MIX_T_LEFT_DV, mergeJunction(CP_SG_V, false, false, false, true));
+}
+
+test "mergeJunction: T-junction upgrades to full crossing" {
+    // ╤ + from_above → ╪
+    try std.testing.expectEqual(CP_MIX_CROSS_DH, mergeJunction(CP_MIX_T_DOWN_DH, true, false, false, false));
+    // ╧ + to_below → ╪
+    try std.testing.expectEqual(CP_MIX_CROSS_DH, mergeJunction(CP_MIX_T_UP_DH, false, true, false, false));
+    // ╞ + to_left → ╫
+    try std.testing.expectEqual(CP_MIX_CROSS_DV, mergeJunction(CP_MIX_T_RIGHT_DV, false, false, false, true));
+    // ╡ + to_right → ╫
+    try std.testing.expectEqual(CP_MIX_CROSS_DV, mergeJunction(CP_MIX_T_LEFT_DV, false, false, true, false));
+}
+
+test "mergeJunction: double horizontal border without perpendicular stays" {
+    // ═ with only horizontal directions → stays ═
+    try std.testing.expectEqual(CP_SG_H, mergeJunction(CP_SG_H, false, false, true, true));
+}
+
+test "mergeJunction: double vertical border without perpendicular stays" {
+    // ║ with only vertical directions → stays ║
+    try std.testing.expectEqual(CP_SG_V, mergeJunction(CP_SG_V, true, true, false, false));
+}
+
+test "unicode render: edge crosses subgraph border cleanly" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    // Node above the subgraph
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 3,
+        .y = 0,
+        .width = 3,
+        .center_x = 4,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    // Node inside the subgraph
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 3,
+        .y = 4,
+        .width = 3,
+        .center_x = 4,
+        .level = 1,
+        .level_position = 0,
+    });
+
+    // Subgraph box covering B
+    try layout_ir.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "SG",
+        .x = 1,
+        .y = 2,
+        .width = 8,
+        .height = 5,
+    });
+
+    // Edge from A to B (crosses the top border at y=2, x=4)
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 4,
+        .from_y = 1,
+        .to_x = 4,
+        .to_y = 4,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+    });
+
+    layout_ir.setDimensions(12, 8);
+
+    const output = try render(&layout_ir, allocator);
+    defer allocator.free(output);
+
+    // Should contain the mixed crossing character ╪ (U+256A = 0xE2 0x95 0xAA)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\xaa") != null);
+    // Should still contain subgraph corners
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") != null); // ╔
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x97") != null); // ╗
 }

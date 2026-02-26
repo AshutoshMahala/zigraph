@@ -305,8 +305,11 @@ pub fn reduceVirtual(
     }
 }
 
-/// Build position maps for adjacent level lookup
-fn buildVirtualPositionMaps(
+/// Build position maps for adjacent level lookup.
+///
+/// Maps each VNode on the given level to its position index.
+/// Used by crossing reduction to look up neighbor positions in O(1).
+pub fn buildVirtualPositionMaps(
     level_vnodes: []const VNode,
     real_pos_map: []usize,
     dummy_pos_map: []usize,
@@ -341,6 +344,84 @@ fn lessThanVNodeMedian(_: void, a: VNodeMedian, b: VNodeMedian) bool {
     return a.median < b.median;
 }
 
+/// Compute the median position for a single VNode based on its neighbors
+/// in the adjacent (fixed) level.
+///
+/// Used by both standard `orderVirtualByMedian` and block-based crossing
+/// reduction in `subgraph.zig`. Position maps must be pre-built via
+/// `buildVirtualPositionMaps`.
+///
+/// - `positions_buf`: scratch buffer for collecting neighbor positions
+///   (overwritten on each call; must accommodate max neighbor count).
+/// - `default_pos`: fallback position when no neighbors are found.
+pub fn vnodeMedian(
+    g: *const Graph,
+    vnode: VNode,
+    real_pos_map: []const usize,
+    dummy_pos_map: []const usize,
+    use_parents: bool,
+    positions_buf: []usize,
+    default_pos: usize,
+) f32 {
+    var pos_count: usize = 0;
+
+    switch (vnode) {
+        .real => |node_idx| {
+            const neighbors = if (use_parents)
+                g.getParents(node_idx)
+            else
+                g.getChildren(node_idx);
+
+            for (neighbors) |n_idx| {
+                if (n_idx < real_pos_map.len) {
+                    const mapped = real_pos_map[n_idx];
+                    if (mapped != std.math.maxInt(usize)) {
+                        positions_buf[pos_count] = mapped;
+                        pos_count += 1;
+                    }
+                }
+            }
+        },
+        .dummy => |edge_idx| {
+            const edge = g.edges.items[edge_idx];
+            const from_idx = g.nodeIndex(edge.from);
+            const to_idx = g.nodeIndex(edge.to);
+
+            if (edge_idx < dummy_pos_map.len) {
+                const dummy_mapped = dummy_pos_map[edge_idx];
+                if (dummy_mapped != std.math.maxInt(usize)) {
+                    positions_buf[pos_count] = dummy_mapped;
+                    pos_count += 1;
+                }
+            }
+
+            if (use_parents) {
+                if (from_idx) |idx| {
+                    if (idx < real_pos_map.len) {
+                        const mapped = real_pos_map[idx];
+                        if (mapped != std.math.maxInt(usize)) {
+                            positions_buf[pos_count] = mapped;
+                            pos_count += 1;
+                        }
+                    }
+                }
+            } else {
+                if (to_idx) |idx| {
+                    if (idx < real_pos_map.len) {
+                        const mapped = real_pos_map[idx];
+                        if (mapped != std.math.maxInt(usize)) {
+                            positions_buf[pos_count] = mapped;
+                            pos_count += 1;
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    return computeMedian(positions_buf[0..pos_count], default_pos);
+}
+
 /// Order virtual nodes by median position of connected nodes in adjacent level
 fn orderVirtualByMedian(
     g: *const Graph,
@@ -354,70 +435,10 @@ fn orderVirtualByMedian(
     if (level_vnodes.items.len == 0) return;
 
     for (level_vnodes.items, 0..) |vnode, pos| {
-        var pos_count: usize = 0;
-
-        switch (vnode) {
-            .real => |node_idx| {
-                // Real node: find connected real nodes in adjacent level
-                const neighbors = if (use_parents)
-                    g.getParents(node_idx)
-                else
-                    g.getChildren(node_idx);
-
-                for (neighbors) |n_idx| {
-                    if (n_idx < real_pos_map.len) {
-                        const mapped = real_pos_map[n_idx];
-                        if (mapped != std.math.maxInt(usize)) {
-                            positions_buf[pos_count] = mapped;
-                            pos_count += 1;
-                        }
-                    }
-                }
-            },
-            .dummy => |edge_idx| {
-                // Dummy node: connected to same edge's dummy OR endpoint in adjacent level
-                const edge = g.edges.items[edge_idx];
-                const from_idx = g.nodeIndex(edge.from);
-                const to_idx = g.nodeIndex(edge.to);
-
-                // Check for same edge's dummy in adjacent level
-                if (edge_idx < dummy_pos_map.len) {
-                    const dummy_mapped = dummy_pos_map[edge_idx];
-                    if (dummy_mapped != std.math.maxInt(usize)) {
-                        positions_buf[pos_count] = dummy_mapped;
-                        pos_count += 1;
-                    }
-                }
-
-                // Check for endpoint in adjacent level
-                if (use_parents) {
-                    // Looking at parent level - source of edge might be there
-                    if (from_idx) |idx| {
-                        if (idx < real_pos_map.len) {
-                            const mapped = real_pos_map[idx];
-                            if (mapped != std.math.maxInt(usize)) {
-                                positions_buf[pos_count] = mapped;
-                                pos_count += 1;
-                            }
-                        }
-                    }
-                } else {
-                    // Looking at child level - target of edge might be there
-                    if (to_idx) |idx| {
-                        if (idx < real_pos_map.len) {
-                            const mapped = real_pos_map[idx];
-                            if (mapped != std.math.maxInt(usize)) {
-                                positions_buf[pos_count] = mapped;
-                                pos_count += 1;
-                            }
-                        }
-                    }
-                }
-            },
-        }
-
-        const median = computeMedian(positions_buf[0..pos_count], pos);
-        vnode_medians[pos] = .{ .vnode = vnode, .median = median };
+        vnode_medians[pos] = .{
+            .vnode = vnode,
+            .median = vnodeMedian(g, vnode, real_pos_map, dummy_pos_map, use_parents, positions_buf, pos),
+        };
     }
 
     // Sort by median

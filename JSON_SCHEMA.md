@@ -1,6 +1,6 @@
 # JSON IR Schema
 
-Version: **1.1**
+Version: **1.2**
 
 The JSON IR (Intermediate Representation) is zigraph's output format for external tool integration. Use it to build SVG renderers, web visualizations, React/Vue components, or any custom output.
 
@@ -8,7 +8,7 @@ The JSON IR (Intermediate Representation) is zigraph's output format for externa
 
 ```json
 {
-  "version": "1.1",
+  "version": "1.2",
   "width": 25,
   "height": 10,
   "level_count": 3,
@@ -20,6 +20,9 @@ The JSON IR (Intermediate Representation) is zigraph's output format for externa
   "edges": [
     {"from": 1, "to": 2, "from_x": 8, "from_y": 1, "to_x": 7, "to_y": 3, "path": {"type": "direct"}, "edge_index": 0, "directed": true},
     {"from": 2, "to": 3, "from_x": 7, "from_y": 4, "to_x": 9, "to_y": 6, "path": {"type": "direct"}, "edge_index": 1, "directed": true}
+  ],
+  "subgraphs": [
+    {"id": 0, "label": "Backend", "parent_id": null, "x": 2, "y": 2, "width": 12, "height": 6}
   ]
 }
 ```
@@ -30,12 +33,13 @@ The JSON IR (Intermediate Representation) is zigraph's output format for externa
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `version` | string | Schema version (currently `"1.1"`) |
+| `version` | string | Schema version (currently `"1.2"`) |
 | `width` | integer | Total width of layout in character cells |
 | `height` | integer | Total height of layout in character cells |
 | `level_count` | integer | Number of horizontal levels (layers) |
 | `nodes` | array | Array of node objects |
 | `edges` | array | Array of edge objects |
+| `subgraphs` | array (optional) | Array of subgraph objects (omitted when empty) |
 
 ---
 
@@ -228,6 +232,39 @@ Cubic Bezier curve definition for smooth edges.
 
 ---
 
+## Subgraph Object
+
+Each subgraph represents a cluster with a computed bounding box. Subgraphs are hierarchical — a subgraph can be nested inside another via `parent_id`. The `subgraphs` array is omitted entirely when no subgraphs exist.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | integer | Unique subgraph identifier |
+| `label` | string | Display label |
+| `parent_id` | integer&#124;null | Parent subgraph ID (`null` = root-level) |
+| `x` | integer | Bounding box left edge x-coordinate |
+| `y` | integer | Bounding box top edge y-coordinate |
+| `width` | integer | Bounding box width (includes padding) |
+| `height` | integer | Bounding box height (includes padding) |
+
+### Subgraph Rendering
+
+Subgraphs should be rendered as background rectangles (behind edges and nodes):
+
+```
+╔═Backend═══════════╗
+║                   ║
+║    [Auth]         ║
+║      │            ║
+║      ↓            ║
+║    [DB]           ║
+║                   ║
+╚═══════════════════╝
+```
+
+Nested subgraphs have their bounding boxes fully contained within their parent.
+
+---
+
 ## Usage Examples
 
 ### JavaScript/TypeScript
@@ -240,6 +277,7 @@ interface ZigraphLayout {
   level_count: number;
   nodes: ZigraphNode[];
   edges: ZigraphEdge[];
+  subgraphs?: ZigraphSubgraph[];
 }
 
 interface ZigraphNode {
@@ -275,6 +313,16 @@ type PathCorner = { type: "corner"; horizontal_y: number };
 type PathSideChannel = { type: "side_channel"; channel_x: number; start_y: number; end_y: number };
 type PathMultiSegment = { type: "multi_segment"; waypoints: [number, number][] };
 type PathSpline = { type: "spline"; cp1_x: number; cp1_y: number; cp2_x: number; cp2_y: number };
+
+interface ZigraphSubgraph {
+  id: number;
+  label: string;
+  parent_id: number | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 ```
 
 ### SVG Rendering (Pseudocode)
@@ -338,6 +386,7 @@ def node_bounds(node: dict) -> tuple:
 |---------|---------|
 | 1.0 | Initial schema |
 | 1.1 | Added `directed`, `edge_index`, `label`, `label_x`, `label_y` on edges; `kind` and `edge_index` on nodes; added deserialization support |
+| 1.2 | Added optional `subgraphs` array with bounding box annotations for hierarchical clusters |
 
 ---
 
