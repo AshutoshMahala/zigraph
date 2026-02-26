@@ -153,5 +153,78 @@ pub fn main() !void {
         std.debug.print("  Deterministic (seed=42): {}\n\n", .{identical});
     }
 
+    // ── Example 5: FDG with subgraphs ───────────────────────────────
+    {
+        std.debug.print("Example 5: FR with Subgraphs → Unicode + SVG\n", .{});
+        std.debug.print("----------------------------------------------\n\n", .{});
+        std.debug.print("Two clusters: Frontend {{WebApp, Mobile, Gateway}}\n", .{});
+        std.debug.print("              Backend  {{API, AuthSvc, DB}}\n", .{});
+        std.debug.print("Cross-cluster edge: Gateway → API\n\n", .{});
+
+        var graph = zigraph.Graph.init(allocator);
+        defer graph.deinit();
+
+        // Frontend cluster
+        try graph.addNode(1, "WebApp");
+        try graph.addNode(2, "Mobile");
+        try graph.addNode(3, "Gateway");
+
+        // Backend cluster
+        try graph.addNode(4, "API");
+        try graph.addNode(5, "AuthSvc");
+        try graph.addNode(6, "DB");
+
+        // Frontend edges
+        try graph.addEdgeLabeled(1, 3, "route"); // WebApp → Gateway
+        try graph.addEdgeLabeled(2, 3, "route"); // Mobile → Gateway
+
+        // Backend edges
+        try graph.addEdgeLabeled(4, 5, "auth"); // API → AuthSvc
+        try graph.addEdgeLabeled(5, 6, "query"); // AuthSvc → DB
+        try graph.addEdgeLabeled(4, 6, "cache"); // API → DB
+
+        // Cross-cluster
+        try graph.addEdgeLabeled(3, 4, "REST"); // Gateway → API
+
+        // Define subgraphs
+        const frontend = try graph.addSubgraph("Frontend");
+        const backend = try graph.addSubgraph("Backend");
+        try graph.putNodes(&.{ 1, 2, 3 }).inside(frontend);
+        try graph.putNodes(&.{ 4, 5, 6 }).inside(backend);
+
+        // Unicode rendering (with subgraph boxes, colors, labels)
+        const output = try zigraph.render(&graph, allocator, .{
+            .algorithm = .{ .fruchterman_reingold = .{} },
+            .edge_palette = &zigraph.colors.ansi_dark,
+        });
+        defer allocator.free(output);
+        std.debug.print("{s}\n", .{output});
+
+        // Also do the layout to inspect bounding boxes
+        var ir = try zigraph.layout(&graph, allocator, .{
+            .algorithm = .{ .fruchterman_reingold = .{} },
+        });
+        defer ir.deinit();
+
+        std.debug.print("Subgraph bounding boxes:\n", .{});
+        for (ir.getSubgraphs()) |sg| {
+            std.debug.print("  [{s}] id={d} parent={?d} x={d} y={d} w={d} h={d}\n", .{
+                sg.label, sg.id, sg.parent_id, sg.x, sg.y, sg.width, sg.height,
+            });
+        }
+
+        // SVG export
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{
+            .color_edges = true,
+        });
+        defer allocator.free(svg_output);
+
+        const cwd = std.fs.cwd();
+        cwd.writeFile(.{ .sub_path = "fdg_subgraph.svg", .data = svg_output }) catch |err| {
+            std.debug.print("  Could not write fdg_subgraph.svg: {}\n", .{err});
+        };
+        std.debug.print("  → Wrote fdg_subgraph.svg ({d} bytes)\n\n", .{svg_output.len});
+    }
+
     std.debug.print("Done.\n", .{});
 }

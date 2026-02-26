@@ -326,11 +326,15 @@ fn layoutFdg(
     var result = LayoutIR(usize).init(allocator);
     errdefer result.deinit();
 
-    // Scale FDG positions to a reasonable size.
-    // FDG produces Q16.16 coordinates spanning ~20..220 for a few nodes.
-    // We want terminal output ≤ 80 columns wide and compact vertically too.
-    // Compute a scale that maps the bounding box to a target size,
-    // ensuring nodes (which have label widths) don't overlap.
+    // Scale FDG positions to a reasonable terminal size.
+    //
+    // FDG produces Q16.16 coordinates. We need to map them to integer cells
+    // suitable for terminal rendering (typically ≤ 120 columns, proportional height).
+    //
+    // Key insight: terminal characters are roughly 2× taller than wide, so
+    // we apply a char_aspect correction. We use **uniform scaling** (same
+    // effective scale for both axes after aspect correction) to preserve the
+    // layout's proportions — independent x/y scaling distorts the graph.
     const max_label_w: usize = blk: {
         var max_w: usize = 3;
         for (0..n) |i| {
@@ -339,17 +343,28 @@ fn layoutFdg(
         }
         break :blk max_w;
     };
-    // Target: each node gets at least (label_width + 2) horizontal cells
-    // and 3 vertical cells. Scale proportionally.
-    const target_cell: f64 = @floatFromInt(max_label_w + 4);
+
+    // Character aspect ratio: a terminal cell is ~2x taller than wide.
+    // We compress Y by this factor so that visually the graph looks square.
+    const char_aspect: f64 = 2.0;
+
+    // Target: enough room so nodes don't overlap.
+    // Each node needs at least (label_width + 4) horizontal cells.
+    // Use sqrt(N) to estimate the grid dimension.
+    const cell_w: f64 = @floatFromInt(max_label_w + 4);
     const sqrt_n: f64 = @sqrt(@as(f64, @floatFromInt(n)));
-    const target_w: f64 = target_cell * (sqrt_n + 1);
-    const target_h: f64 = 3.0 * (sqrt_n + 1);
+    const target_span: f64 = cell_w * (sqrt_n + 1);
 
     const fdg_w = fp_mod.toFloat(fdg_result.width);
     const fdg_h = fp_mod.toFloat(fdg_result.height);
-    const scale_x: f64 = if (fdg_w > 1.0) target_w / fdg_w else 1.0;
-    const scale_y: f64 = if (fdg_h > 1.0) target_h / fdg_h else 1.0;
+
+    // Uniform scale: pick the scale that fits the larger axis into target_span.
+    // For the Y axis, account for char_aspect (fewer rows needed than columns
+    // for the same visual distance).
+    const effective_fdg_span = @max(fdg_w, fdg_h / char_aspect);
+    const scale: f64 = if (effective_fdg_span > 1.0) target_span / effective_fdg_span else 1.0;
+    const scale_x: f64 = scale;
+    const scale_y: f64 = scale / char_aspect;
 
     // Add nodes with scaled positions
     for (0..n) |node_idx| {
@@ -374,8 +389,62 @@ fn layoutFdg(
         });
     }
 
-    // Route edges — use direct routing (straight lines) for FDG
-    // Edge endpoints are at the center of each node box
+    // Post-processing: compress large vertical gaps.
+    // FDG repulsion can push clusters far apart, leaving huge empty bands.
+    // We detect gaps between consecutive Y coordinates that are much larger
+    // than average and shrink them.
+    if (result.nodes.items.len > 1) {
+        const items = result.nodes.items;
+        const node_count = items.len;
+
+        // Sort node indices by Y coordinate
+        const order = try allocator.alloc(usize, node_count);
+        defer allocator.free(order);
+        for (order, 0..) |*o, i| o.* = i;
+        std.mem.sort(usize, order, items, struct {
+            fn cmp(nodes: []LayoutNode(usize), a: usize, b: usize) bool {
+                return nodes[a].y < nodes[b].y;
+            }
+        }.cmp);
+
+        // Collect gaps and find the median to set a robust threshold.
+        // Using median instead of mean prevents a single large outlier
+        // from inflating the threshold.
+        const gap_count = node_count - 1;
+        const gaps = try allocator.alloc(usize, gap_count);
+        defer allocator.free(gaps);
+        for (0..gap_count) |i| {
+            gaps[i] = items[order[i + 1]].y -| items[order[i]].y;
+        }
+        std.mem.sort(usize, gaps, {}, std.sort.asc(usize));
+
+        const median_gap = gaps[gap_count / 2];
+        const max_gap = @max(median_gap * 2, 3);
+
+        // Walk sorted order, track cumulative shift for over-sized gaps
+        var shift: usize = 0;
+        var prev_y: usize = items[order[0]].y;
+        for (1..node_count) |i| {
+            const idx = order[i];
+            const cur_y = items[idx].y;
+            const gap = cur_y -| prev_y;
+            if (gap > max_gap) {
+                shift += gap - max_gap;
+            }
+            prev_y = cur_y;
+            items[idx].y -|= shift;
+        }
+
+        // Update center_x (unchanged) — but we must refresh after Y shift
+        for (items) |*nd| {
+            nd.center_x = nd.x + nd.width / 2;
+        }
+    }
+
+    // Route edges — use direct routing (straight lines) for FDG.
+    // For horizontal edges (same Y), use node box edges so the connecting
+    // line and arrow are visible between the nodes rather than hidden
+    // under node labels (which are painted last and overwrite edges).
     for (g.edges.items, 0..) |edge, edge_idx| {
         const from_idx = g.nodeIndex(edge.from) orelse continue;
         const to_idx = g.nodeIndex(edge.to) orelse continue;
@@ -383,18 +452,66 @@ fn layoutFdg(
         const from_node = result.nodes.items[from_idx];
         const to_node = result.nodes.items[to_idx];
 
+        var from_x = from_node.center_x;
+        const from_y = from_node.y;
+        var to_x = to_node.center_x;
+        const to_y = to_node.y;
+
+        // When nodes share the same row, route from the box edge of the
+        // source to the box edge of the target so the line/arrow is visible.
+        if (from_y == to_y) {
+            if (from_node.x + from_node.width <= to_node.x) {
+                // source is left of target
+                from_x = from_node.x + from_node.width; // right edge of source
+                to_x = to_node.x; // left edge of target
+            } else if (to_node.x + to_node.width <= from_node.x) {
+                // target is left of source
+                from_x = from_node.x; // left edge of source
+                to_x = to_node.x + to_node.width; // right edge of target
+            }
+        }
+
         try result.addEdge(.{
             .from_id = edge.from,
             .to_id = edge.to,
-            .from_x = from_node.center_x,
-            .from_y = from_node.y, // center of 1-row node
-            .to_x = to_node.center_x,
-            .to_y = to_node.y,
+            .from_x = from_x,
+            .from_y = from_y,
+            .to_x = to_x,
+            .to_y = to_y,
             .path = .direct,
             .edge_index = edge_idx,
             .directed = edge.directed,
             .label = edge.label,
         });
+    }
+
+    // Compute edge label positions.
+    // For FDG direct edges, place the label near the midpoint of the edge.
+    // For vertical/diagonal edges: midpoint Y, centered on the edge X.
+    // For horizontal edges: midpoint X, one row above the edge Y.
+    for (result.edges.items) |*edge| {
+        const lbl = edge.label orelse continue;
+        const label_width = lbl.len + 2; // +2 for quotes
+
+        const mid_y = if (edge.from_y <= edge.to_y)
+            edge.from_y + (edge.to_y - edge.from_y) / 2
+        else
+            edge.to_y + (edge.from_y - edge.to_y) / 2;
+
+        const mid_x = if (edge.from_x <= edge.to_x)
+            edge.from_x + (edge.to_x - edge.from_x) / 2
+        else
+            edge.to_x + (edge.from_x - edge.to_x) / 2;
+
+        if (edge.from_y == edge.to_y) {
+            // Horizontal edge: label above the line
+            edge.label_x = if (mid_x >= label_width / 2) mid_x - label_width / 2 else 0;
+            edge.label_y = if (mid_y > 0) mid_y - 1 else 0;
+        } else {
+            // Vertical/diagonal edge: label beside the midpoint
+            edge.label_x = if (mid_x >= label_width / 2) mid_x - label_width / 2 else 0;
+            edge.label_y = mid_y;
+        }
     }
 
     // Set dimensions from the actual placed node positions
@@ -406,7 +523,28 @@ fn layoutFdg(
         const bottom = node.y + 2;
         if (bottom > max_y) max_y = bottom;
     }
+    // Also account for edge labels
+    for (result.edges.items) |edge| {
+        if (edge.label) |lbl| {
+            const right = edge.label_x + lbl.len + 2;
+            if (right > max_x) max_x = right;
+        }
+    }
     result.setDimensions(max_x, max_y);
+
+    // Compute subgraph bounding boxes (reuses Sugiyama's algorithm-agnostic function)
+    if (g.hasSubgraphs()) {
+        try subgraph_layout.computeBoundingBoxes(g, &result, allocator);
+
+        // Expand layout dimensions if subgraph boxes extend beyond
+        for (result.subgraphs.items) |sg_info| {
+            const right = sg_info.x + sg_info.width;
+            const bottom = sg_info.y + sg_info.height;
+            if (right > result.width or bottom > result.height) {
+                result.setDimensions(@max(result.width, right), @max(result.height, bottom));
+            }
+        }
+    }
 
     return result;
 }
@@ -496,7 +634,13 @@ fn computeEffectiveLevelSpacing(g: *const Graph, config: LayoutConfig) usize {
         const parents = g.getParents(node_idx);
         if (parents.len > max_fan) max_fan = parents.len;
     }
-    const needed = if (max_fan > 1) @min(max_fan + 1, 20) else 2;
+    // Scale level spacing with fan-out, but cap it to avoid excessive
+    // vertical stretching. A single high-fan node should not inflate the
+    // entire graph. Use sqrt(fan) to grow sub-linearly.
+    const needed: usize = if (max_fan > 2)
+        @min(2 + std.math.sqrt(max_fan), 8)
+    else
+        2;
     return @max(config.level_spacing, needed) + label_extra;
 }
 

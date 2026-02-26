@@ -729,7 +729,10 @@ pub fn computeLevelYOffsets(
     if (num_levels == 0) return allocator.alloc(usize, 0);
 
     const sg_count = g.subgraphCount();
-    const pad = default_padding;
+    // Use a compact y-padding: 1 row per border line.
+    // The bounding box computation (computeBoundingBoxes) handles visual
+    // padding; here we only need enough space to draw the border characters.
+    const y_pad: usize = 1;
     const label_row: usize = 1; // extra row for subgraph label
 
     // For each level, compute how many subgraph top/bottom borders cross it.
@@ -782,8 +785,8 @@ pub fn computeLevelYOffsets(
             }
         }
 
-        // Each border needs 'pad' rows, top borders also need a label row
-        y_offsets[level_idx] = top_borders * (pad + label_row) + bottom_borders * pad;
+        // Each border needs y_pad rows, top borders also need a label row
+        y_offsets[level_idx] = top_borders * (y_pad + label_row) + bottom_borders * y_pad;
     }
 
     // First level: if any subgraphs start here, add top border
@@ -794,7 +797,7 @@ pub fn computeLevelYOffsets(
                 top_borders += 1;
             }
         }
-        y_offsets[0] = top_borders * (pad + label_row);
+        y_offsets[0] = top_borders * (y_pad + label_row);
     }
 
     return y_offsets;
@@ -1907,8 +1910,8 @@ test "computeLevelYOffsets: subgraph spanning all levels" {
     defer allocator.free(offsets);
 
     try std.testing.expectEqual(@as(usize, 2), offsets.len);
-    // Level 0: subgraph starts here → top border (pad=2 + label=1 = 3)
-    try std.testing.expectEqual(@as(usize, 3), offsets[0]);
+    // Level 0: subgraph starts here → top border (y_pad=1 + label=1 = 2)
+    try std.testing.expectEqual(@as(usize, 2), offsets[0]);
     // Level 1: subgraph continues (no new borders) → 0
     try std.testing.expectEqual(@as(usize, 0), offsets[1]);
 }
@@ -1943,8 +1946,8 @@ test "computeLevelYOffsets: subgraph starts mid-graph" {
     try std.testing.expectEqual(@as(usize, 3), offsets.len);
     // Level 0: no subgraphs → 0
     try std.testing.expectEqual(@as(usize, 0), offsets[0]);
-    // Level 1: subgraph starts → top border (3)
-    try std.testing.expectEqual(@as(usize, 3), offsets[1]);
+    // Level 1: subgraph starts → top border (2)
+    try std.testing.expectEqual(@as(usize, 2), offsets[1]);
     // Level 2: subgraph continues → 0
     try std.testing.expectEqual(@as(usize, 0), offsets[2]);
 }

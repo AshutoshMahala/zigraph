@@ -875,20 +875,53 @@ fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, co
             , .{ fx, fy, fx + bulge, fy, tx + bulge, ty, tx, ty, color, config.edge_width, dash });
         }
     } else {
-        // Normal edge: straight line
-        if (directed) {
-            try writer.print(
-                \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-                \\          stroke="{s}" stroke-width="{d}"{s} 
-                \\          marker-end="url(#arrow{d})"/>
-                \\
-            , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash, arrow_id });
+        // Check if the edge is nearly horizontal (same Y or very close).
+        // Horizontal straight lines overlap node borders and are hard to see,
+        // so render them as a dome-shaped curve instead.
+        const fx: f64 = @floatFromInt(from_x);
+        const fy: f64 = @floatFromInt(from_y);
+        const tx: f64 = @floatFromInt(to_x);
+        const ty: f64 = @floatFromInt(to_y);
+        const dy = @abs(ty - fy);
+        const dx = @abs(tx - fx);
+        const is_horizontal = dy < 2.0 or (dx > 0 and dy / dx < 0.15);
+
+        if (is_horizontal and dx > 10.0) {
+            // Dome curve: arc above the nodes so the edge is clearly visible.
+            // Control points are offset upward by a fraction of the horizontal span.
+            const bulge = @max(dx * 0.35, 20.0);
+            // Control points: both above the line, creating a smooth dome
+            const cp_y = @min(fy, ty) - bulge;
+            if (directed) {
+                try writer.print(
+                    \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}
+                    \\          marker-end="url(#arrow{d})"/>
+                    \\
+                , .{ fx, fy, fx, cp_y, tx, cp_y, tx, ty, color, config.edge_width, dash, arrow_id });
+            } else {
+                try writer.print(
+                    \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}/>
+                    \\
+                , .{ fx, fy, fx, cp_y, tx, cp_y, tx, ty, color, config.edge_width, dash });
+            }
         } else {
-            try writer.print(
-                \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
-                \\          stroke="{s}" stroke-width="{d}"{s}/>
-                \\
-            , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash });
+            // Normal edge: straight line
+            if (directed) {
+                try writer.print(
+                    \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+                    \\          stroke="{s}" stroke-width="{d}"{s} 
+                    \\          marker-end="url(#arrow{d})"/>
+                    \\
+                , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash, arrow_id });
+            } else {
+                try writer.print(
+                    \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
+                    \\          stroke="{s}" stroke-width="{d}"{s}/>
+                    \\
+                , .{ from_x, from_y, to_x, to_y, color, config.edge_width, dash });
+            }
         }
     }
 

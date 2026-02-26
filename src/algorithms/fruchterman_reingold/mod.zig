@@ -80,6 +80,13 @@ pub const Config = struct {
     /// 0.0 = exact, 1.0 = aggressive approximation.
     /// Default: 0.8 (52428 in Q16.16).
     theta: FP = 52428, // floor(0.8 * 65536)
+
+    /// Subgraph cohesion strength (Q16.16).
+    /// Pulls nodes in the same subgraph toward their group centroid.
+    /// 0 = disabled, 0.3–1.0 = typical range.
+    /// Default: 0.5 (32768 in Q16.16).
+    /// Only effective when the graph has subgraphs.
+    subgraph_cohesion: FP = 32768, // floor(0.5 * 65536)
 };
 
 // ============================================================================
@@ -119,6 +126,11 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
     // 1/k for attraction (pre-computed)
     const inv_k = fp.div(config.attraction_strength, k);
 
+    // Build subgraph membership index for cohesion forces
+    var sg_index = try forces.SubgraphIndex.build(g, allocator);
+    defer sg_index.deinit();
+    const has_subgraphs = sg_index.sg_count > 0;
+
     // Temporary force accumulator
     const force_accum = try allocator.alloc(Vec2, n);
     defer allocator.free(force_accum);
@@ -139,6 +151,11 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
             for (g.getChildren(u)) |v| {
                 forces.applyAttraction(positions, force_accum, u, v, inv_k);
             }
+        }
+
+        // === Subgraph cohesion: pull members toward group centroid ===
+        if (has_subgraphs and config.subgraph_cohesion > 0) {
+            forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
         }
 
         // === Apply forces with temperature clamping ===
@@ -201,6 +218,11 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
     const k_squared = fp.mul(fp.mul(k, k), config.repulsion_strength);
     const inv_k = fp.div(config.attraction_strength, k);
 
+    // Build subgraph membership index for cohesion forces
+    var sg_index = try forces.SubgraphIndex.build(g, allocator);
+    defer sg_index.deinit();
+    const has_subgraphs = sg_index.sg_count > 0;
+
     const force_accum = try allocator.alloc(Vec2, n);
     defer allocator.free(force_accum);
 
@@ -221,6 +243,11 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
             for (g.getChildren(u)) |v| {
                 forces.applyAttraction(positions, force_accum, u, v, inv_k);
             }
+        }
+
+        // === Subgraph cohesion: pull members toward group centroid ===
+        if (has_subgraphs and config.subgraph_cohesion > 0) {
+            forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
         }
 
         // === Apply forces with temperature clamping ===
@@ -412,6 +439,113 @@ test "FR fast: deterministic" {
     var r2 = try computeFast(&g, allocator, cfg);
     defer r2.deinit();
 
+    for (r1.positions, r2.positions) |p1, p2| {
+        try std.testing.expectEqual(p1.x, p2.x);
+        try std.testing.expectEqual(p1.y, p2.y);
+    }
+}
+
+test "FR standard: subgraph cohesion clusters members" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // Two clusters: {A, B} and {C, D} with one cross-cluster edge
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addNode(4, "D");
+    try g.addEdge(1, 2);
+    try g.addEdge(3, 4);
+    try g.addEdge(2, 3); // cross-cluster
+
+    const sg1 = try g.addSubgraph("left");
+    const sg2 = try g.addSubgraph("right");
+    try g.putNodes(&.{ 1, 2 }).inside(sg1);
+    try g.putNodes(&.{ 3, 4 }).inside(sg2);
+
+    // Run WITH cohesion
+    var r_cohesion = try compute(&g, allocator, .{
+        .seed = 42,
+        .convergence = .{ .max_iterations = 200 },
+        .subgraph_cohesion = 32768, // 0.5
+    });
+    defer r_cohesion.deinit();
+
+    // Run WITHOUT cohesion
+    var r_none = try compute(&g, allocator, .{
+        .seed = 42,
+        .convergence = .{ .max_iterations = 200 },
+        .subgraph_cohesion = 0,
+    });
+    defer r_none.deinit();
+
+    // With cohesion, A-B distance should be smaller than without
+    const d_ab_cohesion = r_cohesion.positions[0].distTo(r_cohesion.positions[1]);
+    const d_ab_none = r_none.positions[0].distTo(r_none.positions[1]);
+
+    // Cohesion should pull cluster members closer together
+    try std.testing.expect(d_ab_cohesion <= d_ab_none);
+}
+
+test "FR fast: subgraph cohesion clusters members" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addNode(3, "C");
+    try g.addNode(4, "D");
+    try g.addEdge(1, 2);
+    try g.addEdge(3, 4);
+    try g.addEdge(2, 3);
+
+    const sg1 = try g.addSubgraph("left");
+    const sg2 = try g.addSubgraph("right");
+    try g.putNodes(&.{ 1, 2 }).inside(sg1);
+    try g.putNodes(&.{ 3, 4 }).inside(sg2);
+
+    var result = try computeFast(&g, allocator, .{
+        .seed = 42,
+        .convergence = .{ .max_iterations = 200 },
+        .subgraph_cohesion = 32768,
+    });
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 4), result.positions.len);
+    // All positions should be non-negative after normalize
+    for (result.positions) |pos| {
+        try std.testing.expect(pos.x >= 0);
+        try std.testing.expect(pos.y >= 0);
+    }
+}
+
+test "FR standard: no subgraphs — cohesion is no-op" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addEdge(1, 2);
+
+    // With cohesion enabled but no subgraphs defined, should work identically
+    var r1 = try compute(&g, allocator, .{
+        .seed = 42,
+        .convergence = .{ .max_iterations = 50 },
+        .subgraph_cohesion = 32768,
+    });
+    defer r1.deinit();
+
+    var r2 = try compute(&g, allocator, .{
+        .seed = 42,
+        .convergence = .{ .max_iterations = 50 },
+        .subgraph_cohesion = 0,
+    });
+    defer r2.deinit();
+
+    // Should produce identical results
     for (r1.positions, r2.positions) |p1, p2| {
         try std.testing.expectEqual(p1.x, p2.x);
         try std.testing.expectEqual(p1.y, p2.y);

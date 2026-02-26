@@ -64,7 +64,7 @@ pub fn main() !void {
         try graph.addEdge(2, 3);
         try graph.addEdge(3, 4);
         try graph.addEdgeLabeled(3, 1, "retry on fail"); // Test fails → restart
-        try graph.addEdgeLabeled(4, 2, "hotfix");        // Deploy issue → rebuild
+        try graph.addEdgeLabeled(4, 2, "hotfix"); // Deploy issue → rebuild
 
         var ir = try zigraph.layout(&graph, allocator, .{
             .cycle_breaking = .depth_first,
@@ -110,7 +110,7 @@ pub fn main() !void {
 
         try graph.addEdgeLabeled(1, 2, "start");
         try graph.addEdgeLabeled(2, 3, "pause");
-        try graph.addEdgeLabeled(3, 2, "resume");  // cycle: Paused ↔ Running
+        try graph.addEdgeLabeled(3, 2, "resume"); // cycle: Paused ↔ Running
         try graph.addEdgeLabeled(2, 4, "finish");
         try graph.addEdgeLabeled(3, 4, "cancel");
 
@@ -193,5 +193,36 @@ pub fn main() !void {
         defer f.close();
         try f.writeAll(svg);
         std.debug.print(">>> SVG exported to: cycle_self_loop.svg\n\n", .{});
+    }
+
+    // --- Example 5: Cyclic graph with subgraphs ---
+    {
+        std.debug.print("Example 5: Cycle inside Subgraph\n", .{});
+        std.debug.print("---------------------------------\n", .{});
+
+        var graph = zigraph.Graph.init(allocator);
+        defer graph.deinit();
+
+        try graph.addNode(1, "A");
+        try graph.addNode(2, "B");
+        try graph.addNode(3, "C");
+        try graph.addNode(4, "D");
+
+        try graph.addEdge(1, 2);
+        try graph.addEdge(2, 3);
+        try graph.addEdgeLabeled(3, 1, "back"); // cycle: A→B→C→A
+        try graph.addEdge(2, 4); // D branches out
+
+        const sg = try graph.addSubgraph("Loop");
+        try graph.putNodes(&.{ 1, 2, 3 }).inside(sg);
+
+        const output = try zigraph.render(&graph, allocator, .{
+            .cycle_breaking = .depth_first,
+            .edge_palette = &zigraph.colors.ansi_dark,
+        });
+        defer allocator.free(output);
+
+        std.debug.print("{s}\n", .{output});
+        std.debug.print("  (Cycle A→B→C→A inside 'Loop' subgraph, D outside)\n\n", .{});
     }
 }
