@@ -54,8 +54,10 @@ pub const NodeStyle = config_mod.NodeStyle;
 pub const NodeStyleContext = config_mod.NodeStyleContext;
 pub const SubgraphStyle = config_mod.SubgraphStyle;
 pub const SubgraphStyleContext = config_mod.SubgraphStyleContext;
+pub const EdgeLabelStyle = config_mod.EdgeLabelStyle;
 pub const shapes = config_mod.shapes;
 pub const subgraph_presets = config_mod.subgraph_presets;
+pub const defaultEdgeLabelStyle = config_mod.defaultEdgeLabelStyle;
 pub const MarkerShape = types.MarkerShape;
 pub const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
 pub const defaultEdgeStyle = config_mod.defaultEdgeStyle;
@@ -131,6 +133,34 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
             .reversed = edge.reversed,
             .arena = arena_alloc,
         });
+    }
+
+    // ── Pre-compute edge label styles ───────────────────────────────────
+
+    const label_styles = try arena_alloc.alloc(EdgeLabelStyle, num_edge_indices);
+    @memset(label_styles, EdgeLabelStyle{}); // defaults for edges without labels
+    {
+        var label_computed = try arena_alloc.alloc(bool, num_edge_indices);
+        @memset(label_computed, false);
+
+        for (layout.edges.items) |edge| {
+            if (edge.label == null) continue;
+            if (label_computed[edge.edge_index]) continue;
+            label_computed[edge.edge_index] = true;
+
+            label_styles[edge.edge_index] = config.edge_label_style_fn(.{
+                .edge_index = edge.edge_index,
+                .total_edges = num_edge_indices,
+                .from_id = edge.from_id,
+                .to_id = edge.to_id,
+                .from_label = findNodeLabel(layout.nodes.items, edge.from_id),
+                .to_label = findNodeLabel(layout.nodes.items, edge.to_id),
+                .label = edge.label,
+                .directed = edge.directed,
+                .reversed = edge.reversed,
+                .arena = arena_alloc,
+            });
+        }
     }
 
     // ── Collect unique markers ──────────────────────────────────────────
@@ -295,7 +325,7 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     // Render edges
     if (config.stitch_splines) {
         // Group edges by edge_index and render as stitched splines
-        try spline_render.renderStitchedEdges(writer, layout, allocator, config, resolved);
+        try spline_render.renderStitchedEdges(writer, layout, allocator, config, resolved, label_styles);
     } else {
         // Render each edge segment individually
         for (layout.edges.items) |edge| {
@@ -305,13 +335,14 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
                 .marker_start_id = null,
                 .extra_attrs = null,
             };
+            const ls = if (edge.edge_index < label_styles.len) label_styles[edge.edge_index] else EdgeLabelStyle{};
 
             // Self-loops: render a loop arc
             if (edge.reversed and edge.from_id == edge.to_id) {
-                try edge_render.renderSelfLoop(writer, &edge, config, style, layout.nodes.items);
+                try edge_render.renderSelfLoop(writer, &edge, config, style, ls, layout.nodes.items);
                 continue;
             }
-            try edge_render.renderEdge(writer, edge, config, style);
+            try edge_render.renderEdge(writer, edge, config, style, ls);
         }
     }
 
@@ -1077,4 +1108,132 @@ test "svg: subgraph depth computation" {
     try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#depth0\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#depth1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#depth2\"") != null);
+}
+
+test "svg: edge label default inherits edge stroke" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{ .id = 1, .label = "A", .x = 0, .y = 0, .width = 3, .center_x = 1, .level = 0, .level_position = 0 });
+    try layout.addNode(.{ .id = 2, .label = "B", .x = 0, .y = 2, .width = 3, .center_x = 1, .level = 1, .level_position = 0 });
+
+    try layout.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 1,
+        .to_y = 2,
+        .path = .direct,
+        .edge_index = 0,
+        .label = "depends",
+        .directed = true,
+    });
+
+    layout.setDimensions(5, 5);
+
+    // Default: label color follows edge stroke from defaultEdgeStyle (radix palette index 0)
+    const svg = try render(&layout, allocator, .{ .stitch_splines = false });
+    defer allocator.free(svg);
+
+    // Should contain the label text
+    try std.testing.expect(std.mem.indexOf(u8, svg, "depends") != null);
+    // Should contain font-family="monospace" (default)
+    try std.testing.expect(std.mem.indexOf(u8, svg, "font-family=\"monospace\"") != null);
+    // Should contain font-size="12" (default)
+    try std.testing.expect(std.mem.indexOf(u8, svg, "font-size=\"12\"") != null);
+}
+
+test "svg: custom edge_label_style_fn" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{ .id = 1, .label = "A", .x = 0, .y = 0, .width = 3, .center_x = 1, .level = 0, .level_position = 0 });
+    try layout.addNode(.{ .id = 2, .label = "B", .x = 0, .y = 2, .width = 3, .center_x = 1, .level = 1, .level_position = 0 });
+
+    try layout.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 1,
+        .to_y = 2,
+        .path = .direct,
+        .edge_index = 0,
+        .label = "critical",
+        .directed = true,
+    });
+
+    layout.setDimensions(5, 5);
+
+    const svg = try render(&layout, allocator, .{
+        .stitch_splines = false,
+        .edge_label_style_fn = &struct {
+            fn style(_: EdgeStyleContext) EdgeLabelStyle {
+                return .{
+                    .color = "#e5484d",
+                    .font_family = "sans-serif",
+                    .font_size = 16,
+                    .extra_attrs = "font-weight=\"bold\"",
+                };
+            }
+        }.style,
+    });
+    defer allocator.free(svg);
+
+    // Custom color
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#e5484d\"") != null);
+    // Custom font
+    try std.testing.expect(std.mem.indexOf(u8, svg, "font-family=\"sans-serif\"") != null);
+    // Custom size
+    try std.testing.expect(std.mem.indexOf(u8, svg, "font-size=\"16\"") != null);
+    // Extra attrs
+    try std.testing.expect(std.mem.indexOf(u8, svg, "font-weight=\"bold\"") != null);
+    // Label text
+    try std.testing.expect(std.mem.indexOf(u8, svg, "critical") != null);
+}
+
+test "svg: edge label on_path override" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{ .id = 1, .label = "A", .x = 0, .y = 0, .width = 3, .center_x = 1, .level = 0, .level_position = 0 });
+    try layout.addNode(.{ .id = 2, .label = "B", .x = 0, .y = 2, .width = 3, .center_x = 1, .level = 1, .level_position = 0 });
+
+    try layout.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 1,
+        .to_y = 2,
+        .path = .direct,
+        .edge_index = 0,
+        .label = "flows",
+        .directed = true,
+    });
+
+    layout.setDimensions(5, 5);
+
+    // Global labels_on_path=false, but per-edge override to true
+    const svg = try render(&layout, allocator, .{
+        .stitch_splines = false,
+        .labels_on_path = false,
+        .edge_label_style_fn = &struct {
+            fn style(_: EdgeStyleContext) EdgeLabelStyle {
+                return .{ .on_path = true };
+            }
+        }.style,
+    });
+    defer allocator.free(svg);
+
+    // Should use textPath (on_path=true override)
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<textPath") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "edgepath") != null);
 }

@@ -13,12 +13,13 @@ const LayoutEdge = ir_mod.LayoutEdge(usize);
 const config_mod = @import("config.zig");
 const SvgConfig = config_mod.SvgConfig;
 const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
+const EdgeLabelStyle = config_mod.EdgeLabelStyle;
 const edge_render = @import("edges.zig");
 const Point = edge_render.Point;
 
 /// Render edges by grouping segments with the same edge_index into smooth splines.
 /// This stitches multi-segment edges through dummy nodes into single curved paths.
-pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allocator, config: SvgConfig, resolved_styles: []const ResolvedEdgeStyle) !void {
+pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allocator, config: SvgConfig, resolved_styles: []const ResolvedEdgeStyle, label_styles: []const EdgeLabelStyle) !void {
     // Group edges by edge_index
     // Use a simple approach: find max edge_index, then collect segments for each
     var max_edge_idx: usize = 0;
@@ -50,7 +51,8 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
 
         // Self-loops: render a loop arc to the right of the node
         if (segments.items[0].reversed and segments.items[0].from_id == segments.items[0].to_id) {
-            try edge_render.renderSelfLoop(writer, &segments.items[0], config, style, layout.nodes.items);
+            const ls = if (edge_idx < label_styles.len) label_styles[edge_idx] else EdgeLabelStyle{};
+            try edge_render.renderSelfLoop(writer, &segments.items[0], config, style, ls, layout.nodes.items);
             continue;
         }
 
@@ -120,16 +122,27 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
 
         // Render edge label (if any segment carries one)
         if (edge_label) |label| {
-            if (config.labels_on_path) {
+            const ls = if (edge_idx < label_styles.len) label_styles[edge_idx] else EdgeLabelStyle{};
+            const use_path = ls.on_path orelse config.labels_on_path;
+            const label_color = ls.color orelse style.stroke;
+            const font_family = ls.font_family orelse "monospace";
+            const font_size = ls.font_size orelse 12;
+            const position = @min(ls.position, 100);
+
+            if (use_path) {
                 // Text follows the edge path curve (hidden path is always L→R)
                 try writer.print(
-                    \\    <text font-family="monospace" font-size="12" fill="{s}" dy="-4">
-                    \\      <textPath href="#edgepath{d}" startOffset="50%"
+                    \\    <text font-family="{s}" font-size="{d}" fill="{s}" dy="-4"
+                , .{ font_family, font_size, label_color });
+                if (ls.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
+                try writer.print(
+                    \\>
+                    \\      <textPath href="#edgepath{d}" startOffset="{d}%"
                     \\              text-anchor="middle" dominant-baseline="auto">"{s}"</textPath></text>
                     \\
-                , .{ style.stroke, edge_idx, label });
+                , .{ edge_idx, position, label });
             } else {
-                // Center label at the midpoint along the actual edge path
+                // Position label along the actual edge path at the given percentage
                 const np = points.items.len;
                 const cw_f: f64 = @floatFromInt(config.char_width);
                 const lh_f: f64 = @floatFromInt(config.line_height);
@@ -151,8 +164,9 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                     total_len += @sqrt(ddx * ddx + ddy * ddy);
                 }
 
-                // Walk to midpoint
-                const half_len = total_len / 2.0;
+                // Walk to the requested position along the path
+                const t_pos: f64 = @as(f64, @floatFromInt(position)) / 100.0;
+                const target_len = total_len * t_pos;
                 var accum: f64 = 0;
                 var mx: f64 = ppx[0];
                 var my: f64 = ppy[0];
@@ -160,8 +174,8 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                     const ddx = ppx[idx + 1] - ppx[idx];
                     const ddy = ppy[idx + 1] - ppy[idx];
                     const slen = @sqrt(ddx * ddx + ddy * ddy);
-                    if (accum + slen >= half_len and slen > 0) {
-                        const t = (half_len - accum) / slen;
+                    if (accum + slen >= target_len and slen > 0) {
+                        const t = (target_len - accum) / slen;
                         mx = ppx[idx] + t * ddx;
                         my = ppy[idx] + t * ddy;
                         break;
@@ -173,10 +187,11 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                 const label_offset_x: f64 = if (is_reversed) 20.0 else 0.0;
 
                 try writer.print(
-                    \\    <text x="{d:.0}" y="{d:.0}" font-family="monospace" font-size="12"
-                    \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto">"{s}"</text>
-                    \\
-                , .{ mx + label_offset_x, my, style.stroke, label });
+                    \\    <text x="{d:.0}" y="{d:.0}" font-family="{s}" font-size="{d}"
+                    \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto"
+                , .{ mx + label_offset_x, my, font_family, font_size, label_color });
+                if (ls.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
+                try writer.print(">\"" ++ "{s}" ++ "\"</text>\n", .{label});
             }
         }
     }

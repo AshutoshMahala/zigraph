@@ -12,6 +12,7 @@ const LayoutNode = ir_mod.LayoutNode(usize);
 const config_mod = @import("config.zig");
 const SvgConfig = config_mod.SvgConfig;
 const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
+const EdgeLabelStyle = config_mod.EdgeLabelStyle;
 
 /// 2-D pixel coordinate used by the stitched-spline pipeline.
 pub const Point = struct {
@@ -24,7 +25,7 @@ pub const Point = struct {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Render a single LayoutEdge (used when `stitch_splines = false`).
-pub fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle) !void {
+pub fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle, label_style: EdgeLabelStyle) !void {
     // For reversed (back) edges, swap from/to coordinates so the SVG path
     // goes bottom→top. This makes marker-end point upward (correct semantic
     // direction), while the visual route remains the same.
@@ -240,7 +241,13 @@ pub fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: R
 
     // Edge label (if present)
     if (edge.label) |label| {
-        if (config.labels_on_path) {
+        const use_path = label_style.on_path orelse config.labels_on_path;
+        const label_color = label_style.color orelse style.stroke;
+        const font_family = label_style.font_family orelse "monospace";
+        const font_size = label_style.font_size orelse 12;
+        const position = @min(label_style.position, 100);
+
+        if (use_path) {
             // Emit a hidden path for text (always left-to-right for readable text)
             const ltr = from_x <= to_x;
             const text_x1 = if (ltr) from_x else to_x;
@@ -252,20 +259,30 @@ pub fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: R
                 \\
             , .{ edge.edge_index, text_x1, text_y1, text_x2, text_y2 });
             try writer.print(
-                \\    <text font-family="monospace" font-size="12" fill="{s}" dy="-4">
-                \\      <textPath href="#edgepath{d}" startOffset="50%"
+                \\    <text font-family="{s}" font-size="{d}" fill="{s}" dy="-4"
+            , .{ font_family, font_size, label_color });
+            if (label_style.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
+            try writer.print(
+                \\>
+                \\      <textPath href="#edgepath{d}" startOffset="{d}%"
                 \\              text-anchor="middle" dominant-baseline="auto">"{s}"</textPath></text>
                 \\
-            , .{ style.stroke, edge.edge_index, label });
+            , .{ edge.edge_index, position, label });
         } else {
-            // Center label at the edge midpoint (not terminal layout position)
-            const mid_x = (from_x + to_x) / 2;
-            const mid_y = (from_y + to_y) / 2;
+            // Position label along the edge path at the given percentage
+            const t_pos: f64 = @as(f64, @floatFromInt(position)) / 100.0;
+            const fx: f64 = @floatFromInt(from_x);
+            const fy: f64 = @floatFromInt(from_y);
+            const tx: f64 = @floatFromInt(to_x);
+            const ty: f64 = @floatFromInt(to_y);
+            const label_x: isize = @intFromFloat(fx + t_pos * (tx - fx));
+            const label_y: isize = @intFromFloat(fy + t_pos * (ty - fy));
             try writer.print(
-                \\    <text x="{d}" y="{d}" font-family="monospace" font-size="12"
-                \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto">"{s}"</text>
-                \\
-            , .{ mid_x, mid_y, style.stroke, label });
+                \\    <text x="{d}" y="{d}" font-family="{s}" font-size="{d}"
+                \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto"
+            , .{ label_x, label_y, font_family, font_size, label_color });
+            if (label_style.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
+            try writer.print(">\"{s}\"</text>\n", .{label});
         }
     }
 }
@@ -357,7 +374,7 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
 
 /// Render a self-loop: an arc that exits the right side of the node,
 /// curves above it, and re-enters with an arrowhead.
-pub fn renderSelfLoop(writer: anytype, edge: *const LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle, nodes: []const LayoutNode) !void {
+pub fn renderSelfLoop(writer: anytype, edge: *const LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle, label_style: EdgeLabelStyle, nodes: []const LayoutNode) !void {
     // Find the node to get its position and width
     var node_left_x: usize = edge.from_x;
     var node_width: usize = 3; // fallback
@@ -406,13 +423,17 @@ pub fn renderSelfLoop(writer: anytype, edge: *const LayoutEdge, config: SvgConfi
 
     // Label: positioned to the right of the arc
     if (edge.label) |label| {
+        const label_color = label_style.color orelse style.stroke;
+        const font_family = label_style.font_family orelse "monospace";
+        const font_size = label_style.font_size orelse 12;
         const label_x = right_x + r * 2.0 + 4.0;
         const label_y = center_y + 4.0;
         try writer.print(
-            \\    <text x="{d:.0}" y="{d:.0}" font-family="monospace" font-size="12"
-            \\          fill="{s}" text-anchor="start" dominant-baseline="auto">"{s}"</text>
-            \\
-        , .{ label_x, label_y, style.stroke, label });
+            \\    <text x="{d:.0}" y="{d:.0}" font-family="{s}" font-size="{d}"
+            \\          fill="{s}" text-anchor="start" dominant-baseline="auto"
+        , .{ label_x, label_y, font_family, font_size, label_color });
+        if (label_style.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
+        try writer.print(">\"" ++ "{s}" ++ "\"</text>\n", .{label});
     }
 }
 

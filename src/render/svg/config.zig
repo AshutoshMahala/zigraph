@@ -86,6 +86,42 @@ pub fn monoEdgeStyle(ctx: EdgeStyleContext) EdgeStyle {
     };
 }
 
+/// What the edge label style function returns — appearance and placement of edge labels.
+///
+/// Reuses the same `EdgeStyleContext` — labels are per-edge. All fields use
+/// null/defaults to inherit from the edge style or global config:
+///   - `color = null` → follows edge stroke color
+///   - `font_family = null` → `"monospace"`
+///   - `font_size = null` → `12`
+///   - `position = 50` → centered on edge path (0 = source, 100 = target)
+///   - `on_path = null` → follows global `labels_on_path` config
+pub const EdgeLabelStyle = struct {
+    /// Label text color. When null, inherits the edge stroke color.
+    color: ?[]const u8 = null,
+    /// Font family. When null, uses the renderer default ("monospace").
+    font_family: ?[]const u8 = null,
+    /// Font size in pixels. When null, uses the renderer default (12).
+    font_size: ?usize = null,
+    /// Label position along the edge path as a percentage (0–100).
+    /// 0 = at source, 50 = center (default), 100 = at target.
+    /// Values above 100 are clamped to 100.
+    position: u8 = 50,
+    /// Whether this label follows the edge path curve (`<textPath>`).
+    /// When null, uses the global `labels_on_path` config.
+    on_path: ?bool = null,
+    /// Raw attributes added to the `<text>` (or `<textPath>`) element —
+    /// CSS classes, data attrs, font-weight, opacity, onclick, etc.
+    extra_attrs: ?[]const u8 = null,
+};
+
+/// Default edge label style — inherit everything from edge style + global config.
+///
+/// All fields are null/defaults → label color follows edge stroke, font is
+/// monospace 12px, centered at 50%, placement follows global `labels_on_path`.
+pub fn defaultEdgeLabelStyle(_: EdgeStyleContext) EdgeLabelStyle {
+    return .{};
+}
+
 /// What the node style function returns — shape geometry + colors + SVG escape hatches.
 ///
 /// The `shape_svg` field contains SVG geometry relative to (0,0) — including the
@@ -250,6 +286,13 @@ pub const SvgConfig = struct {
     /// Replace with a built-in preset (`shapes.diamond`, `shapes.ellipse`, etc.)
     /// or your own function for custom shapes, colors, compound nodes, etc.
     node_style_fn: *const fn (NodeStyleContext) NodeStyle = &shapes.rounded_rectangle,
+
+    /// Edge label style function. Receives per-edge context, returns label appearance.
+    ///
+    /// Default: inherit everything from edge style + global config.
+    /// Replace with your own function for custom label colors, font sizes,
+    /// positioning, path-following overrides, etc.
+    edge_label_style_fn: *const fn (EdgeStyleContext) EdgeLabelStyle = &defaultEdgeLabelStyle,
 
     /// Subgraph style function. Receives per-subgraph context, returns visual style.
     ///
