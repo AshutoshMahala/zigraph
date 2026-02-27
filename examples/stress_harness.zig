@@ -213,7 +213,7 @@ fn stressSvgRendering(allocator: std.mem.Allocator, duration_ns: u64) !usize {
         const svg_config = zigraph.svg.SvgConfig{
             .stitch_splines = random.boolean(),
             .show_dummy_nodes = random.boolean(),
-            .color_edges = random.boolean(),
+            .edge_style_fn = if (random.boolean()) &zigraph.svg.defaultEdgeStyle else &zigraph.svg.monoEdgeStyle,
         };
 
         const output = zigraph.svg.render(&result, allocator, svg_config) catch {

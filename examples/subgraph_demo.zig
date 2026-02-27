@@ -152,7 +152,7 @@ pub fn main() !void {
 
         // SVG to file
         const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
+            
         });
         defer allocator.free(svg_output);
 
@@ -253,7 +253,7 @@ pub fn main() !void {
 
         // SVG
         const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
+            
         });
         defer allocator.free(svg_output);
 
@@ -354,7 +354,7 @@ pub fn main() !void {
 
         // SVG
         const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
+            
         });
         defer allocator.free(svg_output);
 

@@ -159,10 +159,16 @@ pub const unicode = @import("render/unicode.zig");
 pub const json = @import("render/json.zig");
 
 /// SVG renderer for high-quality vector output and spline visualization
-pub const svg = @import("render/svg.zig");
+pub const svg = @import("render/svg/mod.zig");
 
 /// Color palettes for graph visualization
 pub const colors = @import("render/colors.zig");
+
+/// Shared rendering types (MarkerShape, etc.)
+pub const render_types = @import("render/types.zig");
+pub const MarkerShape = render_types.MarkerShape;
+pub const EdgeStyleContext = render_types.EdgeStyleContext;
+pub const EdgeStyle = svg.EdgeStyle;
 
 // ============================================================================
 // Layout configuration
@@ -1283,9 +1289,7 @@ pub fn exportSvg(g: *const Graph, allocator: std.mem.Allocator, config: LayoutCo
     var layout_ir = try layout(g, allocator, config);
     defer layout_ir.deinit();
 
-    return try svg.render(&layout_ir, allocator, .{
-        .color_edges = true,
-    });
+    return try svg.render(&layout_ir, allocator, .{});
 }
 
 /// Export graph layout as SVG with a custom coordinate type.
@@ -1293,9 +1297,7 @@ pub fn exportSvgTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.
     var layout_ir = try layoutTyped(Coord, g, allocator, config);
     defer layout_ir.deinit();
 
-    return try svg.renderGeneric(Coord, &layout_ir, allocator, .{
-        .color_edges = true,
-    });
+    return try svg.renderGeneric(Coord, &layout_ir, allocator, .{});
 }
 
 // ============================================================================

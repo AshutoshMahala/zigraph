@@ -83,7 +83,6 @@ pub fn main() !void {
 
         // SVG export showing dashed reversed edges
         const svg = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
             .stitch_splines = true,
         });
         defer allocator.free(svg);
@@ -148,7 +147,6 @@ pub fn main() !void {
         std.debug.print("{s}\n", .{output});
 
         const svg = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
             .stitch_splines = true,
         });
         defer allocator.free(svg);
@@ -184,7 +182,6 @@ pub fn main() !void {
         std.debug.print("{s}\n", .{output});
 
         const svg = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
             .stitch_splines = true,
         });
         defer allocator.free(svg);

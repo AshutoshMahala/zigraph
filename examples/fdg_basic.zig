@@ -214,9 +214,7 @@ pub fn main() !void {
         }
 
         // SVG export
-        const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
-        });
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
         const cwd = std.fs.cwd();

@@ -10,12 +10,13 @@
 //! ## Module structure
 //!
 //! ```text
-//! svg.zig           ← this file: render() entry point + re-exports
-//!   svg/config.zig  ← SvgConfig struct
-//!   svg/nodes.zig   ← renderNode
-//!   svg/edges.zig   ← renderEdge, renderSingleEdge, renderSelfLoop, renderBezierEdge
-//!   svg/splines.zig ← renderStitchedEdges, renderSplinePath
-//!   svg/subgraphs.zig ← renderSubgraphs
+//! svg/
+//!   mod.zig         ← this file: render() entry point + re-exports
+//!   config.zig      ← SvgConfig struct
+//!   nodes.zig       ← renderNode
+//!   edges.zig       ← renderEdge, renderSingleEdge, renderSelfLoop, renderBezierEdge
+//!   splines.zig     ← renderStitchedEdges, renderSplinePath
+//!   subgraphs.zig   ← renderSubgraphs
 //! ```
 //!
 //! ## Usage
@@ -33,19 +34,30 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const ir_mod = @import("../core/ir.zig");
+const ir_mod = @import("../../core/ir.zig");
 const LayoutIR = ir_mod.LayoutIR(usize);
+const LayoutNode = ir_mod.LayoutNode(usize);
 
 // ── Submodule re-exports ────────────────────────────────────────────────────
 
-const config_mod = @import("svg/config.zig");
-const node_render = @import("svg/nodes.zig");
-const edge_render = @import("svg/edges.zig");
-const spline_render = @import("svg/splines.zig");
-const subgraph_render = @import("svg/subgraphs.zig");
+const config_mod = @import("config.zig");
+const node_render = @import("nodes.zig");
+const edge_render = @import("edges.zig");
+const spline_render = @import("splines.zig");
+const subgraph_render = @import("subgraphs.zig");
+const types = @import("../types.zig");
 
 pub const SvgConfig = config_mod.SvgConfig;
+pub const EdgeStyle = config_mod.EdgeStyle;
+pub const EdgeStyleContext = config_mod.EdgeStyleContext;
+pub const MarkerShape = types.MarkerShape;
+pub const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
+pub const defaultEdgeStyle = config_mod.defaultEdgeStyle;
+pub const monoEdgeStyle = config_mod.monoEdgeStyle;
 pub const renderBezierEdge = edge_render.renderBezierEdge;
+
+/// A unique (color, shape) pair for a `<marker>` definition.
+const MarkerDef = struct { color: []const u8, shape: MarkerShape };
 
 // ── Force test inclusion for submodules ─────────────────────────────────────
 
@@ -75,7 +87,75 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     var buffer: std.ArrayListUnmanaged(u8) = .{};
     errdefer buffer.deinit(allocator);
 
+    // Arena for style function results — one bulk free when render is done.
+    // Static strings (palette lookups) are zero-cost; dynamic strings
+    // (allocPrint into arena) persist until the arena is freed here.
+    var style_arena = std.heap.ArenaAllocator.init(allocator);
+    defer style_arena.deinit();
+    const arena_alloc = style_arena.allocator();
+
     const writer = buffer.writer(allocator);
+
+    // ── Pre-compute edge styles ─────────────────────────────────────────
+
+    var max_edge_idx: usize = 0;
+    for (layout.edges.items) |edge| {
+        if (edge.edge_index > max_edge_idx) max_edge_idx = edge.edge_index;
+    }
+    const num_edge_indices = if (layout.edges.items.len > 0) max_edge_idx + 1 else 0;
+
+    // Call edge_style_fn once per unique edge_index
+    const edge_styles = try arena_alloc.alloc(EdgeStyle, num_edge_indices);
+    const computed = try arena_alloc.alloc(bool, num_edge_indices);
+    @memset(computed, false);
+
+    for (layout.edges.items) |edge| {
+        if (computed[edge.edge_index]) continue;
+        computed[edge.edge_index] = true;
+
+        edge_styles[edge.edge_index] = config.edge_style_fn(.{
+            .edge_index = edge.edge_index,
+            .total_edges = num_edge_indices,
+            .from_id = edge.from_id,
+            .to_id = edge.to_id,
+            .from_label = findNodeLabel(layout.nodes.items, edge.from_id),
+            .to_label = findNodeLabel(layout.nodes.items, edge.to_id),
+            .label = edge.label,
+            .directed = edge.directed,
+            .reversed = edge.reversed,
+            .arena = arena_alloc,
+        });
+    }
+
+    // ── Collect unique markers ──────────────────────────────────────────
+
+    var unique_markers: [128]MarkerDef = undefined;
+    var num_unique_markers: usize = 0;
+
+    // Resolve each edge style to marker IDs
+    const resolved = try arena_alloc.alloc(ResolvedEdgeStyle, num_edge_indices);
+
+    for (0..num_edge_indices) |i| {
+        if (!computed[i]) {
+            resolved[i] = .{ .stroke = "#666666", .marker_end_id = null, .marker_start_id = null, .extra_attrs = null };
+            continue;
+        }
+        const style = edge_styles[i];
+        resolved[i] = .{
+            .stroke = style.stroke,
+            .marker_end_id = if (style.marker_end != .none)
+                findOrAddMarker(&unique_markers, &num_unique_markers, style.stroke, style.marker_end)
+            else
+                null,
+            .marker_start_id = if (style.marker_start != .none)
+                findOrAddMarker(&unique_markers, &num_unique_markers, style.stroke, style.marker_start)
+            else
+                null,
+            .extra_attrs = style.extra_attrs,
+        };
+    }
+
+    // ── SVG header ──────────────────────────────────────────────────────
 
     // Calculate dimensions with overflow checking
     const width = std.math.mul(usize, layout.width, config.char_width) catch return error.OutOfMemory;
@@ -83,58 +163,32 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     const height = std.math.mul(usize, layout.height, config.line_height) catch return error.OutOfMemory;
     const height_padded = std.math.add(usize, height, config.padding * 2) catch return error.OutOfMemory;
 
-    // SVG header
     try writer.print(
         \\<?xml version="1.0" encoding="UTF-8"?>
         \\<svg xmlns="http://www.w3.org/2000/svg" 
         \\     width="{d}" height="{d}" 
         \\     viewBox="0 0 {d} {d}">
         \\
-        \\  <!-- Arrow marker definitions -->
+        \\  <!-- Marker definitions -->
         \\  <defs>
         \\
     , .{ width_padded, height_padded, width_padded, height_padded });
 
-    // Generate arrowhead markers
-    if (config.color_edges) {
-        // One marker per color in palette
-        for (config.edge_palette, 0..) |color, i| {
-            try writer.print(
-                \\    <marker id="arrow{d}" markerWidth="{d}" markerHeight="{d}" 
-                \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
-                \\      <polygon points="0 0, {d} {d}, 0 {d}" fill="{s}"/>
-                \\    </marker>
-                \\
-            , .{
-                i,
-                config.arrow_size,
-                config.arrow_size,
-                config.arrow_size,
-                config.arrow_size / 2,
-                config.arrow_size,
-                config.arrow_size / 2,
-                config.arrow_size,
-                color,
-            });
+    // ── Write unique marker defs ────────────────────────────────────────
+
+    for (unique_markers[0..num_unique_markers], 0..) |m, i| {
+        try writeMarkerDef(writer, i, m.shape, m.color, config.arrow_size);
+    }
+
+    // ── Write user-provided defs from EdgeStyle.defs ────────────────────
+
+    for (0..num_edge_indices) |i| {
+        if (!computed[i]) continue;
+        if (edge_styles[i].defs) |d| {
+            try writer.writeAll("    ");
+            try writer.writeAll(d);
+            try writer.writeAll("\n");
         }
-    } else {
-        // Single default arrowhead
-        try writer.print(
-            \\    <marker id="arrow0" markerWidth="{d}" markerHeight="{d}" 
-            \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
-            \\      <polygon points="0 0, {d} {d}, 0 {d}" fill="{s}"/>
-            \\    </marker>
-            \\
-        , .{
-            config.arrow_size,
-            config.arrow_size,
-            config.arrow_size,
-            config.arrow_size / 2,
-            config.arrow_size,
-            config.arrow_size / 2,
-            config.arrow_size,
-            config.edge_stroke,
-        });
     }
 
     try writer.writeAll(
@@ -168,16 +222,23 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     // Render edges
     if (config.stitch_splines) {
         // Group edges by edge_index and render as stitched splines
-        try spline_render.renderStitchedEdges(writer, layout, allocator, config);
+        try spline_render.renderStitchedEdges(writer, layout, allocator, config, resolved);
     } else {
         // Render each edge segment individually
         for (layout.edges.items) |edge| {
+            const style = if (edge.edge_index < resolved.len) resolved[edge.edge_index] else ResolvedEdgeStyle{
+                .stroke = "#666666",
+                .marker_end_id = null,
+                .marker_start_id = null,
+                .extra_attrs = null,
+            };
+
             // Self-loops: render a loop arc
             if (edge.reversed and edge.from_id == edge.to_id) {
-                try edge_render.renderSelfLoop(writer, &edge, edge.edge_index, config, layout.nodes.items);
+                try edge_render.renderSelfLoop(writer, &edge, config, style, layout.nodes.items);
                 continue;
             }
-            try edge_render.renderEdge(writer, edge, config);
+            try edge_render.renderEdge(writer, edge, config, style);
         }
     }
 
@@ -205,6 +266,94 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     );
 
     return buffer.toOwnedSlice(allocator);
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Find a node label by ID. Returns empty string for unknown/dummy nodes.
+fn findNodeLabel(nodes: []const LayoutNode, node_id: usize) []const u8 {
+    for (nodes) |node| {
+        if (node.id == node_id) return node.label;
+    }
+    return "";
+}
+
+/// Find an existing (color, shape) marker or add a new one. Returns the index.
+fn findOrAddMarker(
+    markers: *[128]MarkerDef,
+    count: *usize,
+    color: []const u8,
+    shape: MarkerShape,
+) usize {
+    for (markers[0..count.*], 0..) |m, i| {
+        if (m.shape == shape and std.mem.eql(u8, m.color, color)) return i;
+    }
+    if (count.* >= 128) return 0; // safety cap
+    markers[count.*] = .{ .color = color, .shape = shape };
+    count.* += 1;
+    return count.* - 1;
+}
+
+/// Write a single `<marker>` definition for the given shape and color.
+fn writeMarkerDef(writer: anytype, id: usize, shape: MarkerShape, color: []const u8, size: usize) !void {
+    const half = size / 2;
+    switch (shape) {
+        .none => {},
+        .arrow => {
+            try writer.print(
+                \\    <marker id="zg-m-{d}" markerWidth="{d}" markerHeight="{d}" 
+                \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
+                \\      <polygon points="0 0, {d} {d}, 0 {d}" fill="{s}"/>
+                \\    </marker>
+                \\
+            , .{ id, size, size, size, half, size, half, size, color });
+        },
+        .open_arrow => {
+            try writer.print(
+                \\    <marker id="zg-m-{d}" markerWidth="{d}" markerHeight="{d}" 
+                \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
+                \\      <polygon points="0 0, {d} {d}, 0 {d}" fill="white" stroke="{s}" stroke-width="1"/>
+                \\    </marker>
+                \\
+            , .{ id, size, size, size, half, size, half, size, color });
+        },
+        .diamond => {
+            try writer.print(
+                \\    <marker id="zg-m-{d}" markerWidth="{d}" markerHeight="{d}" 
+                \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
+                \\      <polygon points="{d} 0, {d} {d}, {d} {d}, 0 {d}" fill="{s}"/>
+                \\    </marker>
+                \\
+            , .{ id, size, size, size, half, half, size, half, half, size, half, color });
+        },
+        .open_diamond => {
+            try writer.print(
+                \\    <marker id="zg-m-{d}" markerWidth="{d}" markerHeight="{d}" 
+                \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
+                \\      <polygon points="{d} 0, {d} {d}, {d} {d}, 0 {d}" fill="white" stroke="{s}" stroke-width="1"/>
+                \\    </marker>
+                \\
+            , .{ id, size, size, size, half, half, size, half, half, size, half, color });
+        },
+        .circle => {
+            try writer.print(
+                \\    <marker id="zg-m-{d}" markerWidth="{d}" markerHeight="{d}" 
+                \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
+                \\      <circle cx="{d}" cy="{d}" r="{d}" fill="{s}"/>
+                \\    </marker>
+                \\
+            , .{ id, size, size, size, half, half, half, half, color });
+        },
+        .open_circle => {
+            try writer.print(
+                \\    <marker id="zg-m-{d}" markerWidth="{d}" markerHeight="{d}" 
+                \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">
+                \\      <circle cx="{d}" cy="{d}" r="{d}" fill="white" stroke="{s}" stroke-width="1"/>
+                \\    </marker>
+                \\
+            , .{ id, size, size, size, half, half, half, half, color });
+        },
+    }
 }
 
 // ============================================================================
@@ -472,11 +621,14 @@ test "svg: colored edges" {
 
     layout.setDimensions(5, 5);
 
-    const svg = try render(&layout, allocator, .{ .color_edges = true });
-    defer allocator.free(svg);
+    // Default edge_style_fn does palette cycling (equivalent to old color_edges=true)
+    const svg_out = try render(&layout, allocator, .{});
+    defer allocator.free(svg_out);
 
     // Should contain colored stroke from palette
-    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg_out, "stroke=") != null);
+    // Should contain marker definitions with zg-m- prefix
+    try std.testing.expect(std.mem.indexOf(u8, svg_out, "zg-m-") != null);
 }
 
 test "svg: subgraph rendering" {
