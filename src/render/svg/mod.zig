@@ -191,6 +191,14 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
         }
     }
 
+    // ── Write global <style> inside <defs> ──────────────────────────────
+
+    if (config.global_style) |style| {
+        try writer.writeAll("    ");
+        try writer.writeAll(style);
+        try writer.writeAll("\n");
+    }
+
     try writer.writeAll(
         \\  </defs>
         \\
@@ -261,6 +269,17 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     try writer.writeAll(
         \\  </g>
         \\
+    );
+
+    // ── Write global <script> at end (DOM is ready) ─────────────────────
+
+    if (config.global_script) |script| {
+        try writer.writeAll("  ");
+        try writer.writeAll(script);
+        try writer.writeAll("\n");
+    }
+
+    try writer.writeAll(
         \\</svg>
         \\
     );
@@ -703,4 +722,49 @@ test "svg: subgraph rendering disabled" {
 
     // Should NOT contain subgraph elements
     try std.testing.expect(std.mem.indexOf(u8, svg, "id=\"subgraphs\"") == null);
+}
+
+test "svg: global_style and global_script injection" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    layout.setDimensions(5, 5);
+
+    const style_content = "<style>.node:hover { opacity: 0.8; }</style>";
+    const script_content = "<script>console.log('hello');</script>";
+
+    const svg = try render(&layout, allocator, .{
+        .global_style = style_content,
+        .global_script = script_content,
+    });
+    defer allocator.free(svg);
+
+    // Style should be inside <defs>
+    const defs_end = std.mem.indexOf(u8, svg, "</defs>").?;
+    const style_pos = std.mem.indexOf(u8, svg, ".node:hover").?;
+    try std.testing.expect(style_pos < defs_end);
+
+    // Script should be after </g> (nodes group) and before </svg>
+    const svg_end = std.mem.indexOf(u8, svg, "</svg>").?;
+    const script_pos = std.mem.indexOf(u8, svg, "console.log").?;
+    try std.testing.expect(script_pos < svg_end);
+    try std.testing.expect(script_pos > defs_end);
+}
+
+test "svg: global_style and global_script null by default" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    layout.setDimensions(5, 5);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // Should NOT contain <style> or <script> tags
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<style>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<script>") == null);
 }

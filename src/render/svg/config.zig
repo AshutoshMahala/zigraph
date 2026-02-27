@@ -139,4 +139,14 @@ pub const SvgConfig = struct {
     subgraph_font_size: usize = 11,
     /// Subgraph label color
     subgraph_label_color: []const u8 = "#4a90d9",
+
+    /// Global `<style>` block — placed inside `<defs>` at the top of the SVG.
+    /// For shared CSS: hover effects, theming, CSS variables, class-based styling.
+    /// Set to raw SVG content including the `<style>` tags.
+    global_style: ?[]const u8 = null,
+
+    /// Global `<script>` block — placed at end of SVG (DOM is ready).
+    /// For shared functions, pan/zoom, event delegation, library initialization.
+    /// Set to raw SVG content including the `<script>` tags.
+    global_script: ?[]const u8 = null,
 };
