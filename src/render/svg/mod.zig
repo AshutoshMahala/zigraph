@@ -52,7 +52,10 @@ pub const EdgeStyle = config_mod.EdgeStyle;
 pub const EdgeStyleContext = config_mod.EdgeStyleContext;
 pub const NodeStyle = config_mod.NodeStyle;
 pub const NodeStyleContext = config_mod.NodeStyleContext;
+pub const SubgraphStyle = config_mod.SubgraphStyle;
+pub const SubgraphStyleContext = config_mod.SubgraphStyleContext;
 pub const shapes = config_mod.shapes;
+pub const subgraph_presets = config_mod.subgraph_presets;
 pub const MarkerShape = types.MarkerShape;
 pub const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
 pub const defaultEdgeStyle = config_mod.defaultEdgeStyle;
@@ -204,6 +207,23 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
         });
     }
 
+    // ── Pre-compute subgraph styles ─────────────────────────────────────
+
+    const sg_items = layout.subgraphs.items;
+    const subgraph_styles = try arena_alloc.alloc(SubgraphStyle, sg_items.len);
+    for (sg_items, 0..) |sg, idx| {
+        subgraph_styles[idx] = config.subgraph_style_fn(.{
+            .subgraph_id = sg.id,
+            .parent_id = sg.parent_id,
+            .label = sg.label,
+            .depth = computeSubgraphDepth(sg_items, sg.parent_id),
+            .total_subgraphs = sg_items.len,
+            .width = sg.width * config.char_width,
+            .height = sg.height * config.line_height,
+            .arena = arena_alloc,
+        });
+    }
+
     // ── Write user-provided defs from EdgeStyle.defs ────────────────────
 
     for (0..num_edge_indices) |i| {
@@ -220,6 +240,16 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     for (layout.nodes.items, 0..) |node, idx| {
         if (node.kind == .dummy) continue;
         if (node_styles[idx].defs) |d| {
+            try writer.writeAll("    ");
+            try writer.writeAll(d);
+            try writer.writeAll("\n");
+        }
+    }
+
+    // ── Write user-provided defs from SubgraphStyle.defs ────────────────
+
+    for (subgraph_styles) |sg_style| {
+        if (sg_style.defs) |d| {
             try writer.writeAll("    ");
             try writer.writeAll(d);
             try writer.writeAll("\n");
@@ -249,7 +279,7 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
             \\  <g id="subgraphs">
             \\
         );
-        try subgraph_render.renderSubgraphs(writer, layout, config);
+        try subgraph_render.renderSubgraphs(writer, layout, config, subgraph_styles);
         try writer.writeAll(
             \\  </g>
             \\
@@ -412,6 +442,27 @@ fn writeMarkerDef(writer: anytype, id: usize, shape: MarkerShape, color: []const
             , .{ id, size, size, size, half, half, half, half, color });
         },
     }
+}
+
+/// Compute nesting depth for a subgraph by walking up parent_id chains.
+/// Returns 0 for root-level subgraphs, 1 for one level nested, etc.
+fn computeSubgraphDepth(subgraphs: []const ir_mod.SubgraphInfo(usize), parent_id: ?usize) usize {
+    var depth: usize = 0;
+    var current = parent_id;
+    while (current) |pid| {
+        depth += 1;
+        // Find the parent subgraph and continue up
+        var found = false;
+        for (subgraphs) |sg| {
+            if (sg.id == pid) {
+                current = sg.parent_id;
+                found = true;
+                break;
+            }
+        }
+        if (!found) break; // orphan parent_id — shouldn't happen, but be safe
+    }
+    return depth;
 }
 
 // ============================================================================
@@ -887,4 +938,143 @@ test "svg: custom node_style_fn" {
     try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#ff0000\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=\"#00ff00\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, svg, ">Custom<") != null);
+}
+
+test "svg: custom subgraph_style_fn" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 2,
+        .y = 2,
+        .width = 3,
+        .center_x = 3,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    // Root-level subgraph
+    try layout.subgraphs.append(allocator, .{
+        .id = 0,
+        .parent_id = null,
+        .label = "Root",
+        .x = 1,
+        .y = 1,
+        .width = 8,
+        .height = 6,
+    });
+
+    // Nested subgraph (depth 1)
+    try layout.subgraphs.append(allocator, .{
+        .id = 1,
+        .parent_id = 0,
+        .label = "Nested",
+        .x = 2,
+        .y = 2,
+        .width = 5,
+        .height = 3,
+    });
+
+    layout.setDimensions(15, 10);
+
+    const svg = try render(&layout, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn style(ctx: SubgraphStyleContext) SubgraphStyle {
+                if (ctx.depth == 0) {
+                    return .{
+                        .box_svg = std.fmt.allocPrint(ctx.arena,
+                            \\<rect x="0" y="0" width="{d}" height="{d}" rx="8" ry="8"/>
+                            \\<text x="8" y="16" font-family="monospace" font-size="12" fill="#e5484d" stroke="none">{s}</text>
+                        , .{ ctx.width, ctx.height, ctx.label }) catch "",
+                        .fill = "#fce8e8",
+                        .stroke = "#e5484d",
+                    };
+                }
+                return .{
+                    .box_svg = std.fmt.allocPrint(ctx.arena,
+                        \\<rect x="0" y="0" width="{d}" height="{d}" rx="4" ry="4"/>
+                        \\<text x="4" y="13" font-family="monospace" font-size="11" fill="#30a46c" stroke="none">{s}</text>
+                    , .{ ctx.width, ctx.height, ctx.label }) catch "",
+                    .fill = "#e6f4ea",
+                    .stroke = "#30a46c",
+                };
+            }
+        }.style,
+    });
+    defer allocator.free(svg);
+
+    // Root subgraph should use red style
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#fce8e8\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=\"#e5484d\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, ">Root<") != null);
+
+    // Nested subgraph should use green style
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#e6f4ea\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=\"#30a46c\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, ">Nested<") != null);
+
+    // Both should be inside the subgraphs group
+    try std.testing.expect(std.mem.indexOf(u8, svg, "id=\"subgraphs\"") != null);
+}
+
+test "svg: subgraph depth computation" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    // Three-level nesting: root → mid → deep
+    try layout.subgraphs.append(allocator, .{
+        .id = 10,
+        .parent_id = null,
+        .label = "root",
+        .x = 0,
+        .y = 0,
+        .width = 20,
+        .height = 15,
+    });
+    try layout.subgraphs.append(allocator, .{
+        .id = 20,
+        .parent_id = 10,
+        .label = "mid",
+        .x = 1,
+        .y = 1,
+        .width = 15,
+        .height = 10,
+    });
+    try layout.subgraphs.append(allocator, .{
+        .id = 30,
+        .parent_id = 20,
+        .label = "deep",
+        .x = 2,
+        .y = 2,
+        .width = 10,
+        .height = 5,
+    });
+
+    layout.setDimensions(25, 20);
+
+    // Use a style fn that encodes depth into the fill color for testing
+    const svg = try render(&layout, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn style(ctx: SubgraphStyleContext) SubgraphStyle {
+                const fills = [_][]const u8{ "#depth0", "#depth1", "#depth2" };
+                return .{
+                    .box_svg = std.fmt.allocPrint(ctx.arena,
+                        \\<rect x="0" y="0" width="{d}" height="{d}"/>
+                    , .{ ctx.width, ctx.height }) catch "",
+                    .fill = fills[ctx.depth % fills.len],
+                };
+            }
+        }.style,
+    });
+    defer allocator.free(svg);
+
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#depth0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#depth1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#depth2\"") != null);
 }

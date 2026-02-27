@@ -25,6 +25,7 @@ const types = @import("../types.zig");
 pub const MarkerShape = types.MarkerShape;
 pub const EdgeStyleContext = types.EdgeStyleContext;
 pub const NodeStyleContext = types.NodeStyleContext;
+pub const SubgraphStyleContext = types.SubgraphStyleContext;
 
 /// What the edge style function returns — color + markers + SVG escape hatches.
 ///
@@ -177,6 +178,49 @@ pub const shapes = struct {
     }
 };
 
+/// What the subgraph style function returns — box geometry + colors + SVG escape hatches.
+///
+/// The `box_svg` field contains SVG geometry relative to (0,0) — including the
+/// label text. The renderer wraps it in a positioned `<g>` with inherited fill/stroke.
+///
+/// Built-in preset functions (in the `subgraph_presets` namespace) produce standard shapes.
+/// Custom functions return arbitrary SVG — the renderer can't tell the difference.
+pub const SubgraphStyle = struct {
+    /// SVG geometry relative to (0,0) — box element(s) + label `<text>`.
+    /// The renderer wraps this in `<g transform="translate(x,y)" fill=... fill-opacity=... stroke=...>`.
+    /// Shape elements inherit fill/stroke from the `<g>`.
+    /// Text elements should set explicit `fill` to avoid inheriting the box's fill color.
+    box_svg: []const u8,
+    /// Box fill color — applied on the wrapping `<g>`, inherited by shape elements.
+    fill: []const u8 = "#e8f4fd",
+    /// Box fill opacity — applied on the wrapping `<g>`.
+    fill_opacity: []const u8 = "0.4",
+    /// Box stroke color — applied on the wrapping `<g>`, inherited by shape elements.
+    stroke: []const u8 = "#4a90d9",
+    /// Raw SVG injected into `<defs>` — for gradients, filters, clip paths.
+    defs: ?[]const u8 = null,
+    /// Raw attributes added to the wrapping `<g>` element — CSS classes, data attrs.
+    extra_attrs: ?[]const u8 = null,
+};
+
+/// Built-in subgraph shape presets.
+///
+/// Each function takes a `SubgraphStyleContext` and returns a `SubgraphStyle` with
+/// appropriate SVG geometry. Use as: `.subgraph_style_fn = &subgraph_presets.default`
+///
+/// The default preset reproduces the current hardcoded output: a dashed rounded
+/// rectangle with a bold label at top-left.
+pub const subgraph_presets = struct {
+    /// Dashed rounded rectangle with bold label top-left (default).
+    /// Reproduces the original hardcoded subgraph style.
+    pub fn default(ctx: SubgraphStyleContext) SubgraphStyle {
+        return .{ .box_svg = std.fmt.allocPrint(ctx.arena,
+            \\<rect x="0" y="0" width="{d}" height="{d}" rx="6" ry="6" stroke-width="1" stroke-dasharray="4,2"/>
+            \\<text x="6" y="13" font-family="monospace" font-size="11" font-weight="bold" fill="#4a90d9" stroke="none">{s}</text>
+        , .{ ctx.width, ctx.height, ctx.label }) catch "" };
+    }
+};
+
 /// SVG rendering configuration
 pub const SvgConfig = struct {
     /// Pixels per character cell (horizontal)
@@ -207,6 +251,13 @@ pub const SvgConfig = struct {
     /// or your own function for custom shapes, colors, compound nodes, etc.
     node_style_fn: *const fn (NodeStyleContext) NodeStyle = &shapes.rounded_rectangle,
 
+    /// Subgraph style function. Receives per-subgraph context, returns visual style.
+    ///
+    /// Default: dashed rounded rectangle with bold label top-left.
+    /// Replace with your own function for custom boxes, depth-based coloring,
+    /// cylinder shapes, etc.
+    subgraph_style_fn: *const fn (SubgraphStyleContext) SubgraphStyle = &subgraph_presets.default,
+
     /// Show control points for debugging bezier curves
     show_control_points: bool = false,
     /// Control point color (when show_control_points is true)
@@ -217,18 +268,6 @@ pub const SvgConfig = struct {
     labels_on_path: bool = false,
     /// Show subgraph bounding boxes (when subgraphs exist in the IR)
     show_subgraphs: bool = true,
-    /// Subgraph box fill color (with transparency)
-    subgraph_fill: []const u8 = "#e8f4fd",
-    /// Subgraph box fill opacity
-    subgraph_fill_opacity: []const u8 = "0.4",
-    /// Subgraph box stroke color
-    subgraph_stroke: []const u8 = "#4a90d9",
-    /// Subgraph box corner radius
-    subgraph_radius: usize = 6,
-    /// Subgraph label font size in pixels
-    subgraph_font_size: usize = 11,
-    /// Subgraph label color
-    subgraph_label_color: []const u8 = "#4a90d9",
 
     /// Global `<style>` block — placed inside `<defs>` at the top of the SVG.
     /// For shared CSS: hover effects, theming, CSS variables, class-based styling.

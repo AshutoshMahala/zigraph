@@ -112,3 +112,38 @@ pub const NodeStyleContext = struct {
     /// Memory persists until the render pass completes, then bulk-freed.
     arena: Allocator,
 };
+
+/// Per-subgraph context passed to style functions.
+///
+/// Contains enough information for any style decision — by label, by nesting
+/// depth, by parent identity, etc. Shared across all renderers (SVG, Unicode,
+/// JSON). Each renderer's style *return* type differs, but the context is the same.
+///
+/// ## Examples
+///
+/// ```zig
+/// fn styleByDepth(ctx: SubgraphStyleContext) svg.SubgraphStyle {
+///     const fills = [_][]const u8{ "#e8f4fd", "#e6f4ea", "#fff4e6" };
+///     return .{ .box_svg = "...", .fill = fills[ctx.depth % fills.len] };
+/// }
+/// ```
+pub const SubgraphStyleContext = struct {
+    /// Subgraph ID (matches Graph.Subgraph.id)
+    subgraph_id: usize,
+    /// Parent subgraph ID (null = root-level subgraph)
+    parent_id: ?usize,
+    /// Display label
+    label: []const u8,
+    /// Nesting depth: 0 = root-level, 1 = nested once, etc.
+    /// Computed from `parent_id` chains at render time.
+    depth: usize,
+    /// Total number of subgraphs in the graph
+    total_subgraphs: usize,
+    /// Bounding box width in pixels (layout-computed)
+    width: usize,
+    /// Bounding box height in pixels (layout-computed)
+    height: usize,
+    /// Arena allocator — use for dynamic string formatting (e.g., `allocPrint`).
+    /// Memory persists until the render pass completes, then bulk-freed.
+    arena: Allocator,
+};

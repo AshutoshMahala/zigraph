@@ -1,16 +1,30 @@
 //! SVG subgraph rendering.
 //!
-//! Renders subgraph (cluster) bounding boxes as labeled dashed rounded
-//! rectangles. Parents are drawn first (lower z-order) so children
-//! paint on top.
+//! Renders subgraph (cluster) bounding boxes as styled `<g>` wrappers
+//! containing arbitrary SVG from `SubgraphStyle.box_svg`.
+//! Parents are drawn first (lower z-order) so children paint on top.
 
+const config_mod = @import("config.zig");
+const SubgraphStyle = config_mod.SubgraphStyle;
+const SvgConfig = config_mod.SvgConfig;
 const ir_mod = @import("../../core/ir.zig");
 const LayoutIR = ir_mod.LayoutIR(usize);
-const SvgConfig = @import("config.zig").SvgConfig;
 
-/// Render subgraph bounding boxes as labeled rounded rectangles.
+/// Render subgraph bounding boxes as styled `<g>` elements.
 /// Renders parent subgraphs first (lower z-order) so children draw on top.
-pub fn renderSubgraphs(writer: anytype, layout: *const LayoutIR, config: SvgConfig) !void {
+///
+/// Each subgraph is rendered as:
+/// ```svg
+/// <g transform="translate(x,y)" fill="..." fill-opacity="..." stroke="..." {extra_attrs}>
+///   {box_svg}
+/// </g>
+/// ```
+pub fn renderSubgraphs(
+    writer: anytype,
+    layout: *const LayoutIR,
+    config: SvgConfig,
+    subgraph_styles: []const SubgraphStyle,
+) !void {
     // Render in IR order: parents before children (bottom-up computed, stored deepest first).
     // Reverse iteration gives parents first → correct z-order.
     const items = layout.subgraphs.items;
@@ -18,39 +32,26 @@ pub fn renderSubgraphs(writer: anytype, layout: *const LayoutIR, config: SvgConf
     while (i > 0) {
         i -= 1;
         const sg = items[i];
+        const style = subgraph_styles[i];
 
         const x = sg.x * config.char_width + config.padding;
         const y = sg.y * config.line_height + config.padding;
-        const w = sg.width * config.char_width;
-        const h = sg.height * config.line_height;
 
-        // Subgraph box
+        // Subgraph wrapper <g> with positioning and inherited colors
         try writer.print(
-            \\    <rect x="{d}" y="{d}" width="{d}" height="{d}" 
-            \\          rx="{d}" ry="{d}" 
-            \\          fill="{s}" fill-opacity="{s}" 
-            \\          stroke="{s}" stroke-width="1" stroke-dasharray="4,2"/>
-            \\
-        , .{
-            x,                      y,                      w,                    h,
-            config.subgraph_radius, config.subgraph_radius, config.subgraph_fill, config.subgraph_fill_opacity,
-            config.subgraph_stroke,
-        });
+            \\    <g transform="translate({d},{d})" fill="{s}" fill-opacity="{s}" stroke="{s}"
+        , .{ x, y, style.fill, style.fill_opacity, style.stroke });
 
-        // Subgraph label (top-left, inside the box)
-        if (sg.label.len > 0) {
-            const label_x = x + config.subgraph_radius;
-            const label_y = y + config.subgraph_font_size + 2;
-            try writer.print(
-                \\    <text x="{d}" y="{d}" 
-                \\          font-family="monospace" font-size="{d}" 
-                \\          font-weight="bold" fill="{s}">{s}</text>
-                \\
-            , .{
-                label_x,                   label_y,
-                config.subgraph_font_size, config.subgraph_label_color,
-                sg.label,
-            });
+        if (style.extra_attrs) |attrs| {
+            try writer.print(" {s}", .{attrs});
         }
+        try writer.writeAll(">\n");
+
+        // Write box_svg content (shape + label, indented)
+        try writer.writeAll("      ");
+        try writer.writeAll(style.box_svg);
+        try writer.writeAll("\n");
+
+        try writer.writeAll("    </g>\n");
     }
 }

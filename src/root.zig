@@ -169,9 +169,12 @@ pub const render_types = @import("render/types.zig");
 pub const MarkerShape = render_types.MarkerShape;
 pub const EdgeStyleContext = render_types.EdgeStyleContext;
 pub const NodeStyleContext = render_types.NodeStyleContext;
+pub const SubgraphStyleContext = render_types.SubgraphStyleContext;
 pub const EdgeStyle = svg.EdgeStyle;
 pub const NodeStyle = svg.NodeStyle;
+pub const SubgraphStyle = svg.SubgraphStyle;
 pub const shapes = svg.shapes;
+pub const subgraph_presets = svg.subgraph_presets;
 
 // ============================================================================
 // Layout configuration
