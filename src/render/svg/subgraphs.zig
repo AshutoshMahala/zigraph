@@ -43,13 +43,13 @@ pub fn renderSubgraphs(writer: anytype, layout: *const LayoutIR, config: SvgConf
             const label_y = y + config.subgraph_font_size + 2;
             try writer.print(
                 \\    <text x="{d}" y="{d}" 
-                \\          font-family="{s}" font-size="{d}" 
+                \\          font-family="monospace" font-size="{d}" 
                 \\          font-weight="bold" fill="{s}">{s}</text>
                 \\
             , .{
-                label_x,                     label_y,
-                config.font_family,          config.subgraph_font_size,
-                config.subgraph_label_color, sg.label,
+                label_x,                   label_y,
+                config.subgraph_font_size, config.subgraph_label_color,
+                sg.label,
             });
         }
     }

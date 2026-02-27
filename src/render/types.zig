@@ -77,3 +77,38 @@ pub const EdgeStyleContext = struct {
     /// Memory persists until the render pass completes, then bulk-freed.
     arena: Allocator,
 };
+
+/// Per-node context passed to style functions.
+///
+/// Contains enough information for any style decision — by label identity,
+/// by node count, by implicit/explicit kind, etc. Shared across all renderers
+/// (SVG, Unicode, JSON). Each renderer's style *return* type differs, but
+/// the context is the same.
+///
+/// ## Examples
+///
+/// ```zig
+/// fn styleByLabel(ctx: NodeStyleContext) svg.NodeStyle {
+///     if (std.mem.eql(u8, ctx.label, "Error"))
+///         return .{ .shape_svg = "...", .fill = "#fee2e2", .stroke = "#e5484d" };
+///     return shapes.rounded_rectangle(ctx);
+/// }
+/// ```
+pub const NodeStyleContext = struct {
+    /// Original node ID from the graph
+    node_id: usize,
+    /// Node label text
+    label: []const u8,
+    /// Total number of real (non-dummy) nodes in the graph
+    total_nodes: usize,
+    /// Bounding box width in pixels (layout-computed)
+    width: usize,
+    /// Bounding box height in pixels (layout-computed)
+    height: usize,
+    /// Whether this node was implicitly created (mentioned as edge target
+    /// but never explicitly added). Presets render dashed borders for these.
+    is_implicit: bool,
+    /// Arena allocator — use for dynamic string formatting (e.g., `allocPrint`).
+    /// Memory persists until the render pass completes, then bulk-freed.
+    arena: Allocator,
+};

@@ -50,6 +50,9 @@ const types = @import("../types.zig");
 pub const SvgConfig = config_mod.SvgConfig;
 pub const EdgeStyle = config_mod.EdgeStyle;
 pub const EdgeStyleContext = config_mod.EdgeStyleContext;
+pub const NodeStyle = config_mod.NodeStyle;
+pub const NodeStyleContext = config_mod.NodeStyleContext;
+pub const shapes = config_mod.shapes;
 pub const MarkerShape = types.MarkerShape;
 pub const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
 pub const defaultEdgeStyle = config_mod.defaultEdgeStyle;
@@ -180,11 +183,43 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
         try writeMarkerDef(writer, i, m.shape, m.color, config.arrow_size);
     }
 
+    // ── Pre-compute node styles ──────────────────────────────────────────
+
+    var total_real_nodes: usize = 0;
+    for (layout.nodes.items) |node| {
+        if (node.kind != .dummy) total_real_nodes += 1;
+    }
+
+    const node_styles = try arena_alloc.alloc(NodeStyle, layout.nodes.items.len);
+    for (layout.nodes.items, 0..) |node, idx| {
+        if (node.kind == .dummy) continue;
+        node_styles[idx] = config.node_style_fn(.{
+            .node_id = node.id,
+            .label = node.label,
+            .total_nodes = total_real_nodes,
+            .width = node.width * config.char_width,
+            .height = config.line_height,
+            .is_implicit = node.kind == .implicit,
+            .arena = arena_alloc,
+        });
+    }
+
     // ── Write user-provided defs from EdgeStyle.defs ────────────────────
 
     for (0..num_edge_indices) |i| {
         if (!computed[i]) continue;
         if (edge_styles[i].defs) |d| {
+            try writer.writeAll("    ");
+            try writer.writeAll(d);
+            try writer.writeAll("\n");
+        }
+    }
+
+    // ── Write user-provided defs from NodeStyle.defs ────────────────────
+
+    for (layout.nodes.items, 0..) |node, idx| {
+        if (node.kind == .dummy) continue;
+        if (node_styles[idx].defs) |d| {
             try writer.writeAll("    ");
             try writer.writeAll(d);
             try writer.writeAll("\n");
@@ -259,10 +294,14 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     );
 
     // Render nodes
-    for (layout.nodes.items) |node| {
-        // Skip dummy nodes if not showing them
-        if (node.kind == .dummy and !config.show_dummy_nodes) continue;
-        try node_render.renderNode(writer, node, config);
+    for (layout.nodes.items, 0..) |node, idx| {
+        if (node.kind == .dummy) {
+            if (config.show_dummy_nodes) {
+                try node_render.renderDummyNode(writer, node, config);
+            }
+            continue;
+        }
+        try node_render.renderNode(writer, node, node_styles[idx], config);
     }
 
     // SVG footer
@@ -767,4 +806,85 @@ test "svg: global_style and global_script null by default" {
     // Should NOT contain <style> or <script> tags
     try std.testing.expect(std.mem.indexOf(u8, svg, "<style>") == null);
     try std.testing.expect(std.mem.indexOf(u8, svg, "<script>") == null);
+}
+
+test "svg: node_style_fn shapes" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1,
+        .label = "Hello",
+        .x = 0,
+        .y = 0,
+        .width = 7,
+        .center_x = 3,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    layout.setDimensions(10, 5);
+
+    // Test default (rounded_rectangle)
+    const svg_default = try render(&layout, allocator, .{});
+    defer allocator.free(svg_default);
+    // Should have <g transform=...> wrapper and <rect with rx
+    try std.testing.expect(std.mem.indexOf(u8, svg_default, "<g transform=") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg_default, "rx=\"4\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg_default, ">Hello<") != null);
+
+    // Test diamond shape
+    const svg_diamond = try render(&layout, allocator, .{
+        .node_style_fn = &config_mod.shapes.diamond,
+    });
+    defer allocator.free(svg_diamond);
+    try std.testing.expect(std.mem.indexOf(u8, svg_diamond, "<polygon") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg_diamond, ">Hello<") != null);
+
+    // Test ellipse shape
+    const svg_ellipse = try render(&layout, allocator, .{
+        .node_style_fn = &config_mod.shapes.ellipse,
+    });
+    defer allocator.free(svg_ellipse);
+    try std.testing.expect(std.mem.indexOf(u8, svg_ellipse, "<ellipse") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg_ellipse, ">Hello<") != null);
+}
+
+test "svg: custom node_style_fn" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1,
+        .label = "Custom",
+        .x = 0,
+        .y = 0,
+        .width = 8,
+        .center_x = 4,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    layout.setDimensions(10, 5);
+
+    const svg = try render(&layout, allocator, .{
+        .node_style_fn = &struct {
+            fn style(_: NodeStyleContext) NodeStyle {
+                return .{
+                    .shape_svg = "<circle cx=\"40\" cy=\"10\" r=\"10\"/><text x=\"40\" y=\"14\" text-anchor=\"middle\" fill=\"#333\" stroke=\"none\">Custom</text>",
+                    .fill = "#ff0000",
+                    .stroke = "#00ff00",
+                };
+            }
+        }.style,
+    });
+    defer allocator.free(svg);
+
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fill=\"#ff0000\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "stroke=\"#00ff00\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, ">Custom<") != null);
 }

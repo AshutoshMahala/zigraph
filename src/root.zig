@@ -168,7 +168,10 @@ pub const colors = @import("render/colors.zig");
 pub const render_types = @import("render/types.zig");
 pub const MarkerShape = render_types.MarkerShape;
 pub const EdgeStyleContext = render_types.EdgeStyleContext;
+pub const NodeStyleContext = render_types.NodeStyleContext;
 pub const EdgeStyle = svg.EdgeStyle;
+pub const NodeStyle = svg.NodeStyle;
+pub const shapes = svg.shapes;
 
 // ============================================================================
 // Layout configuration

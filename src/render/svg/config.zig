@@ -24,6 +24,7 @@ const types = @import("../types.zig");
 
 pub const MarkerShape = types.MarkerShape;
 pub const EdgeStyleContext = types.EdgeStyleContext;
+pub const NodeStyleContext = types.NodeStyleContext;
 
 /// What the edge style function returns — color + markers + SVG escape hatches.
 ///
@@ -84,6 +85,98 @@ pub fn monoEdgeStyle(ctx: EdgeStyleContext) EdgeStyle {
     };
 }
 
+/// What the node style function returns — shape geometry + colors + SVG escape hatches.
+///
+/// The `shape_svg` field contains SVG geometry relative to (0,0) — including the
+/// label text. The renderer wraps it in a positioned `<g>` with inherited fill/stroke.
+///
+/// Built-in preset functions (in the `shapes` namespace) produce standard shapes.
+/// Custom functions return arbitrary SVG — the renderer can't tell the difference.
+pub const NodeStyle = struct {
+    /// SVG geometry relative to (0,0) — shape element(s) + label `<text>`.
+    /// The renderer wraps this in `<g transform="translate(x,y)" fill=... stroke=...>`.
+    /// Shape elements inherit fill/stroke from the `<g>`.
+    /// Text elements should set explicit `fill` and `stroke="none"` to avoid
+    /// inheriting the shape's fill color.
+    shape_svg: []const u8,
+    /// Shape fill color — applied on the wrapping `<g>`, inherited by shape elements.
+    fill: []const u8 = "#f0f0f0",
+    /// Shape stroke color — applied on the wrapping `<g>`, inherited by shape elements.
+    stroke: []const u8 = "#333333",
+    /// Raw SVG injected into `<defs>` — for gradients, filters, clip paths.
+    defs: ?[]const u8 = null,
+    /// Raw attributes added to the wrapping `<g>` element — CSS classes, data attrs.
+    extra_attrs: ?[]const u8 = null,
+};
+
+/// Built-in node shape presets.
+///
+/// Each function takes a `NodeStyleContext` and returns a `NodeStyle` with
+/// appropriate SVG geometry. Use as: `.node_style_fn = &shapes.diamond`
+///
+/// All presets:
+/// - Render dashed borders for implicit nodes (`ctx.is_implicit`)
+/// - Use monospace 12px font for labels
+/// - Center text vertically and horizontally within the bounding box
+/// - Set explicit `fill`/`stroke="none"` on `<text>` to prevent SVG inheritance issues
+pub const shapes = struct {
+    /// Rounded rectangle (default) — `<rect>` with `rx="4"`.
+    pub fn rounded_rectangle(ctx: NodeStyleContext) NodeStyle {
+        const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
+            \\<rect x="0" y="0" width="{d}" height="{d}" rx="4" ry="4"{s}/>
+            \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
+        , .{ ctx.width, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+    }
+
+    /// Sharp rectangle — `<rect>` with no corner rounding.
+    pub fn rectangle(ctx: NodeStyleContext) NodeStyle {
+        const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
+            \\<rect x="0" y="0" width="{d}" height="{d}"{s}/>
+            \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
+        , .{ ctx.width, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+    }
+
+    /// Ellipse — `<ellipse>` filling the bounding box.
+    pub fn ellipse(ctx: NodeStyleContext) NodeStyle {
+        const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
+            \\<ellipse cx="{d}" cy="{d}" rx="{d}" ry="{d}"{s}/>
+            \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
+        , .{ ctx.width / 2, ctx.height / 2, ctx.width / 2, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+    }
+
+    /// Diamond — `<polygon>` rotated 45°. Good for decision nodes in flowcharts.
+    pub fn diamond(ctx: NodeStyleContext) NodeStyle {
+        const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
+            \\<polygon points="{d},0 {d},{d} {d},{d} 0,{d}"{s}/>
+            \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
+        , .{ ctx.width / 2, ctx.width, ctx.height / 2, ctx.width / 2, ctx.height, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+    }
+
+    /// Parallelogram — skewed rectangle. Good for I/O nodes in flowcharts.
+    pub fn parallelogram(ctx: NodeStyleContext) NodeStyle {
+        const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        const skew = ctx.width / 5;
+        return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
+            \\<polygon points="{d},0 {d},0 {d},{d} 0,{d}"{s}/>
+            \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
+        , .{ skew, ctx.width, ctx.width - skew, ctx.height, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+    }
+
+    /// Hexagon — six-sided polygon. Good for preparation/state nodes.
+    pub fn hexagon(ctx: NodeStyleContext) NodeStyle {
+        const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        const inset = ctx.width / 4;
+        return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
+            \\<polygon points="{d},0 {d},0 {d},{d} {d},{d} {d},{d} 0,{d}"{s}/>
+            \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
+        , .{ inset, ctx.width - inset, ctx.width, ctx.height / 2, ctx.width - inset, ctx.height, inset, ctx.height, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+    }
+};
+
 /// SVG rendering configuration
 pub const SvgConfig = struct {
     /// Pixels per character cell (horizontal)
@@ -92,12 +185,6 @@ pub const SvgConfig = struct {
     line_height: usize = 20,
     /// Padding around the entire SVG
     padding: usize = 20,
-    /// Node corner radius
-    node_radius: usize = 4,
-    /// Node fill color
-    node_fill: []const u8 = "#f0f0f0",
-    /// Node stroke color
-    node_stroke: []const u8 = "#333333",
     /// Edge stroke width
     edge_width: usize = 2,
     /// Arrow / marker size (px)
@@ -113,10 +200,13 @@ pub const SvgConfig = struct {
     /// Replace with your own function for custom coloring, markers, gradients, etc.
     edge_style_fn: *const fn (EdgeStyleContext) EdgeStyle = &defaultEdgeStyle,
 
-    /// Font family
-    font_family: []const u8 = "monospace",
-    /// Font size in pixels
-    font_size: usize = 12,
+    /// Node style function. Receives per-node context, returns visual style.
+    ///
+    /// Default: rounded rectangle with monospace label.
+    /// Replace with a built-in preset (`shapes.diamond`, `shapes.ellipse`, etc.)
+    /// or your own function for custom shapes, colors, compound nodes, etc.
+    node_style_fn: *const fn (NodeStyleContext) NodeStyle = &shapes.rounded_rectangle,
+
     /// Show control points for debugging bezier curves
     show_control_points: bool = false,
     /// Control point color (when show_control_points is true)
