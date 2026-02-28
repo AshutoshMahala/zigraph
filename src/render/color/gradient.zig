@@ -38,8 +38,8 @@ pub fn linearGradient(
     n_stops: usize,
     direction: Direction,
 ) ![]const u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    const writer = buf.writer(allocator);
 
     const coords = direction.coords();
     try writer.print(
@@ -58,8 +58,25 @@ pub fn linearGradient(
     }
 
     try writer.writeAll("</linearGradient>");
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
+
+/// Configuration for radial gradient geometry.
+///
+/// Defaults to centered (`cx="50%" cy="50%" r="50%"`).
+/// Override for off-center light sources:
+/// ```zig
+/// // Top-left highlight (3D lighting effect)
+/// .{ .cx = "30%", .cy = "25%", .r = "70%" }
+/// ```
+pub const RadialConfig = struct {
+    cx: []const u8 = "50%",
+    cy: []const u8 = "50%",
+    r: []const u8 = "50%",
+    /// SVG `fx`/`fy` focal point (null = same as cx/cy).
+    fx: ?[]const u8 = null,
+    fy: ?[]const u8 = null,
+};
 
 /// Generate a `<radialGradient>` SVG element from a colormap.
 ///
@@ -71,18 +88,33 @@ pub fn linearGradient(
 /// - `inner_t`: colormap position at the center (0.0–1.0)
 ///   - `1.0` → hot center (e.g., red inner → blue outer for turbo)
 ///   - `0.0` → cold center (e.g., blue inner → red outer for turbo)
+/// - `radial_cfg`: optional geometry override (null = centered 50%/50%/50%)
 pub fn radialGradient(
     allocator: Allocator,
     id: []const u8,
     cmap: ColorMap,
     inner_t: f32,
 ) ![]const u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    const writer = buf.writer();
+    return radialGradientEx(allocator, id, cmap, inner_t, .{});
+}
+
+/// Extended radial gradient with configurable center/radius/focal point.
+pub fn radialGradientEx(
+    allocator: Allocator,
+    id: []const u8,
+    cmap: ColorMap,
+    inner_t: f32,
+    cfg: RadialConfig,
+) ![]const u8 {
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    const writer = buf.writer(allocator);
 
     try writer.print(
-        \\<radialGradient id="{s}" cx="50%" cy="50%" r="50%">
-    , .{id});
+        \\<radialGradient id="{s}" cx="{s}" cy="{s}" r="{s}"
+    , .{ id, cfg.cx, cfg.cy, cfg.r });
+    if (cfg.fx) |fx| try writer.print(" fx=\"{s}\"", .{fx});
+    if (cfg.fy) |fy| try writer.print(" fy=\"{s}\"", .{fy});
+    try writer.writeAll(">");
 
     const n_stops: usize = 10;
     for (0..n_stops) |i| {
@@ -100,7 +132,7 @@ pub fn radialGradient(
     }
 
     try writer.writeAll("</radialGradient>");
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Generate a `<radialGradient>` that fades from `center_color` to transparent.
@@ -110,19 +142,34 @@ pub fn radialGradient(
 /// - `id`: gradient element id
 /// - `center_color`: the glow color at the center
 /// - `opacity`: peak opacity at center (0.0–1.0)
+/// - Use `glowGradientEx` for off-center focal points.
 pub fn glowGradient(
     allocator: Allocator,
     id: []const u8,
     center_color: Color,
     opacity: f32,
 ) ![]const u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    const writer = buf.writer();
+    return glowGradientEx(allocator, id, center_color, opacity, .{});
+}
+
+/// Extended glow gradient with configurable geometry.
+pub fn glowGradientEx(
+    allocator: Allocator,
+    id: []const u8,
+    center_color: Color,
+    opacity: f32,
+    cfg: RadialConfig,
+) ![]const u8 {
+    var buf: std.ArrayListUnmanaged(u8) = .{};
+    const writer = buf.writer(allocator);
     const hex = center_color.toHex();
 
     try writer.print(
-        \\<radialGradient id="{s}" cx="50%" cy="50%" r="50%">
-    , .{id});
+        \\<radialGradient id="{s}" cx="{s}" cy="{s}" r="{s}"
+    , .{ id, cfg.cx, cfg.cy, cfg.r });
+    if (cfg.fx) |fx| try writer.print(" fx=\"{s}\"", .{fx});
+    if (cfg.fy) |fy| try writer.print(" fy=\"{s}\"", .{fy});
+    try writer.writeAll(">");
 
     // 5 stops: solid center → fast falloff → transparent edge
     const opacities = [5]f32{ opacity, opacity * 0.7, opacity * 0.3, opacity * 0.1, 0.0 };
@@ -135,7 +182,7 @@ pub fn glowGradient(
     }
 
     try writer.writeAll("</radialGradient>");
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Gradient direction.
@@ -204,4 +251,36 @@ test "linearGradient direction coords" {
     const h = try linearGradient(alloc, "h", ColorMap.viridis, 2, .horizontal);
     try std.testing.expect(std.mem.indexOf(u8, h, "x2=\"100%\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, h, "y2=\"0%\"") != null);
+}
+
+test "radialGradientEx with custom center" {
+    var buf: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const alloc = fba.allocator();
+
+    const svg = try radialGradientEx(alloc, "light", ColorMap.turbo, 0.8, .{
+        .cx = "30%",
+        .cy = "25%",
+        .r = "70%",
+        .fx = "20%",
+        .fy = "15%",
+    });
+    try std.testing.expect(std.mem.indexOf(u8, svg, "cx=\"30%\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "cy=\"25%\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "r=\"70%\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fx=\"20%\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fy=\"15%\"") != null);
+}
+
+test "radialGradient default is centered" {
+    var buf: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const alloc = fba.allocator();
+
+    const svg = try radialGradient(alloc, "default", ColorMap.turbo, 0.8);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "cx=\"50%\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "cy=\"50%\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, svg, "r=\"50%\"") != null);
+    // Should NOT have fx/fy when using defaults
+    try std.testing.expect(std.mem.indexOf(u8, svg, "fx=") == null);
 }

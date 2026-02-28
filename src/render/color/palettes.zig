@@ -141,6 +141,285 @@ pub const categorical = [_][]const u8{
 };
 
 // ============================================================================
+// Radix UI 12-Step Color Scales
+// ============================================================================
+//
+// Full 12-step scales from Radix UI Colors (https://www.radix-ui.com/colors).
+// Steps 1–2 are backgrounds, 3–5 are UI elements, 6–8 are borders,
+// 9–10 are solid fills, 11 is low-contrast text, 12 is high-contrast text.
+//
+// Usage:
+//   palettes.scale.blue.step9   // → "#3e63dd" (solid fill)
+//   palettes.scale.red.step3    // → "#ffefef" (light background)
+//   palettes.scale.green.all()  // → [12][]const u8 array
+
+/// A 12-step Radix color scale.
+pub const Scale = struct {
+    step1: []const u8,
+    step2: []const u8,
+    step3: []const u8,
+    step4: []const u8,
+    step5: []const u8,
+    step6: []const u8,
+    step7: []const u8,
+    step8: []const u8,
+    step9: []const u8,
+    step10: []const u8,
+    step11: []const u8,
+    step12: []const u8,
+
+    /// Return all 12 steps as an array (for palettes.get cycling).
+    pub fn all(self: Scale) [12][]const u8 {
+        return .{
+            self.step1, self.step2,  self.step3,  self.step4,
+            self.step5, self.step6,  self.step7,  self.step8,
+            self.step9, self.step10, self.step11, self.step12,
+        };
+    }
+
+    /// Get a step by 1-based index (clamped to 1–12).
+    pub fn step(self: Scale, n: usize) []const u8 {
+        const a = self.all();
+        const idx = if (n == 0) 0 else if (n > 12) 11 else n - 1;
+        return a[idx];
+    }
+};
+
+/// Radix UI 12-step color scales — light theme.
+///
+/// ```zig
+/// const blue9 = palettes.scale.blue.step9;       // "#3e63dd"
+/// const red_bg = palettes.scale.red.step(2);      // "#fff1f0"
+/// const teal_all = palettes.scale.teal.all();     // [12][]const u8
+/// ```
+pub const scale = struct {
+    pub const red: Scale = .{
+        .step1 = "#fffcfc",
+        .step2 = "#fff8f8",
+        .step3 = "#ffefef",
+        .step4 = "#ffe5e5",
+        .step5 = "#fdd8d8",
+        .step6 = "#f9c6c6",
+        .step7 = "#f3aeaf",
+        .step8 = "#eb9091",
+        .step9 = "#e5484d",
+        .step10 = "#dc3d43",
+        .step11 = "#cd2b31",
+        .step12 = "#381316",
+    };
+    pub const tomato: Scale = .{
+        .step1 = "#fffcfc",
+        .step2 = "#fff8f7",
+        .step3 = "#fff0ee",
+        .step4 = "#ffe6e2",
+        .step5 = "#fdd8d3",
+        .step6 = "#fac7be",
+        .step7 = "#f3b0a2",
+        .step8 = "#ea9280",
+        .step9 = "#e54d2e",
+        .step10 = "#db4324",
+        .step11 = "#ca3214",
+        .step12 = "#341711",
+    };
+    pub const orange: Scale = .{
+        .step1 = "#fefcfb",
+        .step2 = "#fff9f5",
+        .step3 = "#fff0e4",
+        .step4 = "#ffe4ce",
+        .step5 = "#ffd5b3",
+        .step6 = "#ffc291",
+        .step7 = "#f5a862",
+        .step8 = "#ec8e2e",
+        .step9 = "#f76b15",
+        .step10 = "#ef5f00",
+        .step11 = "#cc4e00",
+        .step12 = "#582d1d",
+    };
+    pub const amber: Scale = .{
+        .step1 = "#fefdfb",
+        .step2 = "#fefbe9",
+        .step3 = "#fff7c2",
+        .step4 = "#ffee9c",
+        .step5 = "#fbe577",
+        .step6 = "#f3d673",
+        .step7 = "#e9c162",
+        .step8 = "#e2a336",
+        .step9 = "#ffc53d",
+        .step10 = "#ffba18",
+        .step11 = "#ab6400",
+        .step12 = "#4f3422",
+    };
+    pub const yellow: Scale = .{
+        .step1 = "#fdfdf9",
+        .step2 = "#fefce9",
+        .step3 = "#fffab8",
+        .step4 = "#fff394",
+        .step5 = "#ffe770",
+        .step6 = "#f3d768",
+        .step7 = "#e4c767",
+        .step8 = "#d5ae39",
+        .step9 = "#ffe629",
+        .step10 = "#ffdc00",
+        .step11 = "#9e6c00",
+        .step12 = "#473b1f",
+    };
+    pub const green: Scale = .{
+        .step1 = "#fbfefc",
+        .step2 = "#f4fbf6",
+        .step3 = "#e6f6eb",
+        .step4 = "#d6f1df",
+        .step5 = "#c3e9d0",
+        .step6 = "#acdec0",
+        .step7 = "#8cceb0",
+        .step8 = "#5bb98b",
+        .step9 = "#30a46c",
+        .step10 = "#2b9a66",
+        .step11 = "#218358",
+        .step12 = "#193b2d",
+    };
+    pub const grass: Scale = .{
+        .step1 = "#fbfefb",
+        .step2 = "#f5fbf5",
+        .step3 = "#e9f6e9",
+        .step4 = "#daf1db",
+        .step5 = "#c9e8ca",
+        .step6 = "#b2ddb5",
+        .step7 = "#94ce9a",
+        .step8 = "#65ba74",
+        .step9 = "#46a758",
+        .step10 = "#3e9b4f",
+        .step11 = "#2d8541",
+        .step12 = "#203c25",
+    };
+    pub const teal: Scale = .{
+        .step1 = "#fafefd",
+        .step2 = "#f3fbf9",
+        .step3 = "#e0f8f3",
+        .step4 = "#ccf3ea",
+        .step5 = "#b8eae0",
+        .step6 = "#a1ded2",
+        .step7 = "#83cdc1",
+        .step8 = "#53b9ab",
+        .step9 = "#12a594",
+        .step10 = "#0d9b8a",
+        .step11 = "#008573",
+        .step12 = "#0d3d38",
+    };
+    pub const cyan: Scale = .{
+        .step1 = "#fafdfe",
+        .step2 = "#f2fafb",
+        .step3 = "#def7f9",
+        .step4 = "#caf1f6",
+        .step5 = "#b5e9f0",
+        .step6 = "#9ddde7",
+        .step7 = "#7dcedc",
+        .step8 = "#3db9cf",
+        .step9 = "#00a2c7",
+        .step10 = "#0797b9",
+        .step11 = "#107d98",
+        .step12 = "#0d3c48",
+    };
+    pub const blue: Scale = .{
+        .step1 = "#fbfdff",
+        .step2 = "#f4faff",
+        .step3 = "#e6f4fe",
+        .step4 = "#d5efff",
+        .step5 = "#c2e5ff",
+        .step6 = "#acd8fc",
+        .step7 = "#8ec8f6",
+        .step8 = "#5eb1ef",
+        .step9 = "#0090ff",
+        .step10 = "#0588f0",
+        .step11 = "#0d74ce",
+        .step12 = "#113264",
+    };
+    pub const indigo: Scale = .{
+        .step1 = "#fdfdfe",
+        .step2 = "#f7f9ff",
+        .step3 = "#edf2fe",
+        .step4 = "#e1e9ff",
+        .step5 = "#d2deff",
+        .step6 = "#c1d0ff",
+        .step7 = "#abbdf9",
+        .step8 = "#8da4ef",
+        .step9 = "#3e63dd",
+        .step10 = "#3358d4",
+        .step11 = "#3a5bc7",
+        .step12 = "#1f2d5c",
+    };
+    pub const violet: Scale = .{
+        .step1 = "#fdfcfe",
+        .step2 = "#faf8ff",
+        .step3 = "#f4f0fe",
+        .step4 = "#ebe4ff",
+        .step5 = "#e1d9ff",
+        .step6 = "#d4cafe",
+        .step7 = "#c2b5f5",
+        .step8 = "#aa99ec",
+        .step9 = "#6e56cf",
+        .step10 = "#654dc4",
+        .step11 = "#6550b9",
+        .step12 = "#2f265f",
+    };
+    pub const purple: Scale = .{
+        .step1 = "#fefcfe",
+        .step2 = "#fbf7fe",
+        .step3 = "#f7edfc",
+        .step4 = "#f2e2fc",
+        .step5 = "#ead5f9",
+        .step6 = "#dec4f4",
+        .step7 = "#cfafe9",
+        .step8 = "#bc93db",
+        .step9 = "#8e4ec6",
+        .step10 = "#8445bc",
+        .step11 = "#793aaf",
+        .step12 = "#38205c",
+    };
+    pub const pink: Scale = .{
+        .step1 = "#fffcfe",
+        .step2 = "#fef7fb",
+        .step3 = "#fee9f5",
+        .step4 = "#fbdcef",
+        .step5 = "#f6cee7",
+        .step6 = "#efbfdd",
+        .step7 = "#e4a9cf",
+        .step8 = "#d68cbb",
+        .step9 = "#d6409f",
+        .step10 = "#cf3897",
+        .step11 = "#c2298a",
+        .step12 = "#651249",
+    };
+    pub const plum: Scale = .{
+        .step1 = "#fefcff",
+        .step2 = "#fdf7fd",
+        .step3 = "#fbebfb",
+        .step4 = "#f7def8",
+        .step5 = "#f2d1f3",
+        .step6 = "#e9c2ec",
+        .step7 = "#deade3",
+        .step8 = "#cf91d8",
+        .step9 = "#ab4aba",
+        .step10 = "#a144af",
+        .step11 = "#953ea3",
+        .step12 = "#53195d",
+    };
+    pub const gray: Scale = .{
+        .step1 = "#fcfcfc",
+        .step2 = "#f9f9f9",
+        .step3 = "#f0f0f0",
+        .step4 = "#e8e8e8",
+        .step5 = "#e0e0e0",
+        .step6 = "#d9d9d9",
+        .step7 = "#cecece",
+        .step8 = "#bbbbbb",
+        .step9 = "#8d8d8d",
+        .step10 = "#838383",
+        .step11 = "#646464",
+        .step12 = "#202020",
+    };
+};
+
+// ============================================================================
 // Semantic Colors (for specific meanings)
 // ============================================================================
 
@@ -161,27 +440,27 @@ pub const semantic = struct {
 /// ANSI 256-color codes optimized for terminal edge coloring
 /// These are pre-selected to look good on both light and dark terminals
 pub const ansi = [_]u8{
-    39,  // Blue
+    39, // Blue
     203, // Red/Tomato
-    35,  // Green
+    35, // Green
     208, // Orange
     134, // Purple
-    37,  // Teal/Cyan
+    37, // Teal/Cyan
     205, // Pink
     220, // Yellow
-    81,  // Sky blue
+    81, // Sky blue
     214, // Amber
     123, // Light cyan
     170, // Plum
-    71,  // Grass green
-    99,  // Violet
+    71, // Grass green
+    99, // Violet
     196, // Bright red
-    33,  // Bright blue
+    33, // Bright blue
 };
 
 /// ANSI palette optimized for dark terminals (brighter colors)
 pub const ansi_dark = [_]u8{
-    81,  // Bright cyan
+    81, // Bright cyan
     156, // Lime green
     222, // Peach/lightorange
     183, // Lavender
@@ -191,24 +470,24 @@ pub const ansi_dark = [_]u8{
     221, // Amber
     216, // Apricot
     189, // Mauve
-    87,  // Turquoise
+    87, // Turquoise
     147, // Light purple
 };
 
 /// ANSI palette optimized for light terminals (darker colors)
 pub const ansi_light = [_]u8{
-    27,  // Dark blue
+    27, // Dark blue
     124, // Dark red
-    22,  // Dark green
+    22, // Dark green
     166, // Dark orange
-    91,  // Dark purple
-    30,  // Dark teal
+    91, // Dark purple
+    30, // Dark teal
     125, // Dark pink
     136, // Dark yellow
-    24,  // Dark steel blue
+    24, // Dark steel blue
     130, // Brown
-    23,  // Dark cyan
-    54,  // Dark violet
+    23, // Dark cyan
+    54, // Dark violet
 };
 
 /// Get an ANSI color code from the palette by index (cycles through)
@@ -345,4 +624,34 @@ test "escape.fg256 produces valid escape sequence" {
     const seq = escape.fg256(39);
     try std.testing.expectEqual(@as(u8, 0x1b), seq[0]); // ESC
     try std.testing.expectEqual(@as(u8, '['), seq[1]);
+}
+
+test "radix scale step access" {
+    // Direct field access
+    try std.testing.expectEqualStrings("#3e63dd", scale.indigo.step9);
+    try std.testing.expectEqualStrings("#e5484d", scale.red.step9);
+    try std.testing.expectEqualStrings("#30a46c", scale.green.step9);
+
+    // 1-based step() accessor
+    try std.testing.expectEqualStrings("#fbfdff", scale.blue.step(1));
+    try std.testing.expectEqualStrings("#113264", scale.blue.step(12));
+
+    // Clamping
+    try std.testing.expectEqualStrings("#fbfdff", scale.blue.step(0));
+    try std.testing.expectEqualStrings("#113264", scale.blue.step(99));
+}
+
+test "radix scale all() returns 12 valid hex colors" {
+    const blue_all = scale.blue.all();
+    try std.testing.expectEqual(@as(usize, 12), blue_all.len);
+    for (blue_all) |hex| {
+        try std.testing.expect(isValidHex(hex));
+    }
+}
+
+test "radix scale cycling via get()" {
+    const reds = scale.red.all();
+    // Cycling works through the standard get() function
+    try std.testing.expectEqualStrings(reds[0], get(&reds, 0));
+    try std.testing.expectEqualStrings(reds[0], get(&reds, 12)); // cycles
 }

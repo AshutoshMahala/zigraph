@@ -16,6 +16,7 @@ const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
 const EdgeLabelStyle = config_mod.EdgeLabelStyle;
 const edge_render = @import("edges.zig");
 const Point = edge_render.Point;
+const helpers = @import("helpers.zig");
 
 /// Render edges by grouping segments with the same edge_index into smooth splines.
 /// This stitches multi-segment edges through dummy nodes into single curved paths.
@@ -114,10 +115,10 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
         // Render based on number of points
         if (points.items.len == 2) {
             // Simple direct edge
-            try edge_render.renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, style, has_label, is_directed, is_reversed);
+            try edge_render.renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, style, has_label, is_directed, is_reversed, first_seg.from_id, last_seg.to_id);
         } else {
             // Multi-point: render as smooth spline
-            try renderSplinePath(writer, points.items, edge_idx, config, style, has_label, is_directed, is_reversed);
+            try renderSplinePath(writer, points.items, edge_idx, config, style, has_label, is_directed, is_reversed, first_seg.from_id, last_seg.to_id);
         }
 
         // Render edge label (if any segment carries one)
@@ -199,7 +200,7 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
 
 /// Render a multi-point path as a smooth cubic bezier spline.
 /// Uses Catmull-Rom to Bezier conversion for smooth curves through all points.
-pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, style: ResolvedEdgeStyle, has_label: bool, directed: bool, reversed: bool) !void {
+pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, style: ResolvedEdgeStyle, has_label: bool, directed: bool, reversed: bool, from_id: usize, to_id: usize) !void {
     if (points.len < 2) return;
 
     // Convert points to pixel coordinates
@@ -267,9 +268,19 @@ pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize,
     try writer.print(
         \\ fill="none" stroke="{s}" stroke-width="{d}"{s}
     , .{ style.stroke, config.edge_width, dash });
+    // Emit native data attrs only when extra_attrs doesn't already provide them
+    if (!helpers.attrsContain(style.extra_attrs, "data-type"))
+        try writer.print(" data-type=\"edge\"", .{});
+    if (!helpers.attrsContain(style.extra_attrs, "data-from"))
+        try writer.print(" data-from=\"{d}\"", .{from_id});
+    if (!helpers.attrsContain(style.extra_attrs, "data-to"))
+        try writer.print(" data-to=\"{d}\"", .{to_id});
     if (directed) {
         if (style.marker_end_id) |mid| {
             try writer.print(" marker-end=\"url(#zg-m-{d})\"", .{mid});
+        }
+        if (style.marker_start_id) |mid| {
+            try writer.print(" marker-start=\"url(#zg-m-{d})\"", .{mid});
         }
     }
     if (style.extra_attrs) |attrs| {

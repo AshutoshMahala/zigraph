@@ -13,6 +13,7 @@ const config_mod = @import("config.zig");
 const SvgConfig = config_mod.SvgConfig;
 const ResolvedEdgeStyle = config_mod.ResolvedEdgeStyle;
 const EdgeLabelStyle = config_mod.EdgeLabelStyle;
+const helpers = @import("helpers.zig");
 
 /// 2-D pixel coordinate used by the stitched-spline pipeline.
 pub const Point = struct {
@@ -26,6 +27,15 @@ pub const Point = struct {
 
 /// Render a single LayoutEdge (used when `stitch_splines = false`).
 pub fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle, label_style: EdgeLabelStyle) !void {
+    // Semantic wrapper for CSS/JS targeting
+    try writer.writeAll("    <g");
+    try writeEdgeDataAttrs(writer, style.extra_attrs, edge.from_id, edge.to_id);
+    try writer.writeAll(">\n");
+    try renderEdgeInner(writer, edge, config, style, label_style);
+    try writer.writeAll("    </g>\n");
+}
+
+fn renderEdgeInner(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle, label_style: EdgeLabelStyle) !void {
     // For reversed (back) edges, swap from/to coordinates so the SVG path
     // goes bottom→top. This makes marker-end point upward (correct semantic
     // direction), while the visual route remains the same.
@@ -292,7 +302,7 @@ pub fn renderEdge(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: R
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Render a simple two-point edge (straight line, dome curve, or reversed arc).
-pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig, style: ResolvedEdgeStyle, has_label: bool, directed: bool, reversed: bool) !void {
+pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize, config: SvgConfig, style: ResolvedEdgeStyle, has_label: bool, directed: bool, reversed: bool, from_id: usize, to_id: usize) !void {
     const from_x = from.x * config.char_width + config.padding;
     const from_y = from.y * config.line_height + config.padding;
     const to_x = to.x * config.char_width + config.padding;
@@ -313,7 +323,8 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
         try writer.print(
             \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
             \\          fill="none" stroke="{s}" stroke-width="{d}"{s}
-        , .{ fx, fy, fx + bulge, fy, tx + bulge, ty, tx, ty, style.stroke, config.edge_width, dash });
+            \\          data-type="edge" data-from="{d}" data-to="{d}"
+        , .{ fx, fy, fx + bulge, fy, tx + bulge, ty, tx, ty, style.stroke, config.edge_width, dash, from_id, to_id });
         if (directed) try writeMarkerEndAttr(writer, style);
         try writeExtraAttrs(writer, style);
         try writer.writeAll("/>\n");
@@ -339,6 +350,7 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
                 \\    <path d="M {d:.0} {d:.0} C {d:.0} {d:.0}, {d:.0} {d:.0}, {d:.0} {d:.0}"
                 \\          fill="none" stroke="{s}" stroke-width="{d}"{s}
             , .{ fx, fy, fx, cp_y, tx, cp_y, tx, ty, style.stroke, config.edge_width, dash });
+            try writeEdgeDataAttrs(writer, style.extra_attrs, from_id, to_id);
             if (directed) try writeMarkerEndAttr(writer, style);
             try writeExtraAttrs(writer, style);
             try writer.writeAll("/>\n");
@@ -348,6 +360,7 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
                 \\    <line x1="{d}" y1="{d}" x2="{d}" y2="{d}" 
                 \\          stroke="{s}" stroke-width="{d}"{s}
             , .{ from_x, from_y, to_x, to_y, style.stroke, config.edge_width, dash });
+            try writeEdgeDataAttrs(writer, style.extra_attrs, from_id, to_id);
             if (directed) try writeMarkerEndAttr(writer, style);
             try writeExtraAttrs(writer, style);
             try writer.writeAll("/>\n");
@@ -375,6 +388,15 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
 /// Render a self-loop: an arc that exits the right side of the node,
 /// curves above it, and re-enters with an arrowhead.
 pub fn renderSelfLoop(writer: anytype, edge: *const LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle, label_style: EdgeLabelStyle, nodes: []const LayoutNode) !void {
+    // Semantic wrapper for CSS/JS targeting
+    try writer.writeAll("    <g");
+    try writeEdgeDataAttrs(writer, style.extra_attrs, edge.from_id, edge.to_id);
+    try writer.writeAll(">\n");
+    try renderSelfLoopInner(writer, edge, config, style, label_style, nodes);
+    try writer.writeAll("    </g>\n");
+}
+
+fn renderSelfLoopInner(writer: anytype, edge: *const LayoutEdge, config: SvgConfig, style: ResolvedEdgeStyle, label_style: EdgeLabelStyle, nodes: []const LayoutNode) !void {
     // Find the node to get its position and width
     var node_left_x: usize = edge.from_x;
     var node_width: usize = 3; // fallback
@@ -517,10 +539,26 @@ pub fn renderBezierEdge(
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
-/// Write ` marker-end="url(#zg-m-{id})"` if the style has a marker_end_id.
+/// Conditionally write ` data-type="edge" data-from="{id}" data-to="{id}"`.
+///
+/// Skips any attribute already present in `extra_attrs` to avoid XML
+/// duplicate-attribute errors (fatal in SVG).
+fn writeEdgeDataAttrs(writer: anytype, extra_attrs: ?[]const u8, from_id: usize, to_id: usize) !void {
+    if (!helpers.attrsContain(extra_attrs, "data-type"))
+        try writer.print(" data-type=\"edge\"", .{});
+    if (!helpers.attrsContain(extra_attrs, "data-from"))
+        try writer.print(" data-from=\"{d}\"", .{from_id});
+    if (!helpers.attrsContain(extra_attrs, "data-to"))
+        try writer.print(" data-to=\"{d}\"", .{to_id});
+}
+
+/// Write ` marker-end="url(#zg-m-{id})"` and/or ` marker-start="url(#zg-m-{id})"` if set.
 fn writeMarkerEndAttr(writer: anytype, style: ResolvedEdgeStyle) !void {
     if (style.marker_end_id) |mid| {
         try writer.print(" marker-end=\"url(#zg-m-{d})\"", .{mid});
+    }
+    if (style.marker_start_id) |mid| {
+        try writer.print(" marker-start=\"url(#zg-m-{d})\"", .{mid});
     }
 }
 

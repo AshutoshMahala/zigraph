@@ -1,6 +1,6 @@
 //! Color Palettes for Graph Visualization
 //!
-//! **This file is a backward-compatibility re-export.**
+//! **This file is a backward-compatibility shim.**
 //! All functionality now lives in `color/` (Color struct, colormaps, palettes, gradients).
 //!
 //! Existing code using `colors.get(&colors.radix, i)` continues to work unchanged.
@@ -21,7 +21,37 @@
 //! const hex = c.toHexAlloc(arena) catch "#999";
 //! ```
 
-// Re-export everything from the new color module.
-// Internal imports (`@import("colors.zig")` from svg/config.zig and unicode.zig)
-// see the same public API as before.
-pub usingnamespace @import("color/mod.zig");
+// Explicit re-exports from color/mod.zig — avoids `usingnamespace` which
+// was removed in Zig 0.11+. Each symbol is forwarded individually so that
+// old code importing `colors.get(...)` or `colors.radix` keeps working.
+const mod = @import("color/mod.zig");
+
+// Types
+pub const Color = mod.Color;
+pub const colormaps = mod.colormaps;
+pub const ColorMap = mod.ColorMap;
+pub const gradient = mod.gradient;
+pub const RadialConfig = mod.RadialConfig;
+pub const palettes = mod.palettes;
+
+// Palette accessor functions
+pub const get = mod.get;
+pub const getAnsi = mod.getAnsi;
+pub const isValidHex = mod.isValidHex;
+pub const hexToAnsi256 = mod.hexToAnsi256;
+pub const escape = mod.escape;
+
+// Palette arrays
+pub const radix = mod.radix;
+pub const vibrant = mod.vibrant;
+pub const monochrome = mod.monochrome;
+pub const pastel = mod.pastel;
+pub const dark_mode = mod.dark_mode;
+pub const colorblind_safe = mod.colorblind_safe;
+pub const categorical = mod.categorical;
+pub const semantic = mod.semantic;
+pub const Scale = mod.Scale;
+pub const scale = mod.scale;
+pub const ansi = mod.ansi;
+pub const ansi_dark = mod.ansi_dark;
+pub const ansi_light = mod.ansi_light;

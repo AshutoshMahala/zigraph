@@ -24,60 +24,60 @@
   <!-- Edges (rendered first, under nodes) -->
   <g id="edges">
     <line x1="140" y1="40" x2="160" y2="120" 
-          stroke="#90a4ae" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#90a4ae" stroke-width="2" data-type="edge" data-from="1" data-to="2" marker-end="url(#zg-m-0)"/>
     <line x1="160" y1="140" x2="190" y2="220" 
-          stroke="#90a4ae" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#90a4ae" stroke-width="2" data-type="edge" data-from="2" data-to="3" marker-end="url(#zg-m-0)"/>
     <line x1="190" y1="240" x2="140" y2="320" 
-          stroke="#4caf50" stroke-width="2" marker-end="url(#zg-m-1)"/>
+          stroke="#4caf50" stroke-width="2" data-type="edge" data-from="3" data-to="4" marker-end="url(#zg-m-1)"/>
     <text x="165" y="280" font-family="monospace" font-size="11"
           fill="#2e7d32" text-anchor="middle" dy="-6" dominant-baseline="auto">"yes"</text>
     <line x1="190" y1="240" x2="300" y2="320" 
-          stroke="#f44336" stroke-width="2" marker-end="url(#zg-m-2)"/>
+          stroke="#f44336" stroke-width="2" data-type="edge" data-from="3" data-to="8" marker-end="url(#zg-m-2)"/>
     <text x="245" y="280" font-family="monospace" font-size="11"
           fill="#c62828" text-anchor="middle" dy="-6" dominant-baseline="auto">"no"</text>
     <line x1="140" y1="340" x2="150" y2="420" 
-          stroke="#90a4ae" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#90a4ae" stroke-width="2" data-type="edge" data-from="4" data-to="5" marker-end="url(#zg-m-0)"/>
     <line x1="150" y1="440" x2="100" y2="520" 
-          stroke="#4caf50" stroke-width="2" marker-end="url(#zg-m-1)"/>
+          stroke="#4caf50" stroke-width="2" data-type="edge" data-from="5" data-to="6" marker-end="url(#zg-m-1)"/>
     <text x="125" y="480" font-family="monospace" font-size="11"
           fill="#2e7d32" text-anchor="middle" dy="-6" dominant-baseline="auto">"yes"</text>
     <line x1="150" y1="440" x2="270" y2="520" 
-          stroke="#f44336" stroke-width="2" marker-end="url(#zg-m-2)"/>
+          stroke="#f44336" stroke-width="2" data-type="edge" data-from="5" data-to="7" marker-end="url(#zg-m-2)"/>
     <text x="210" y="480" font-family="monospace" font-size="11"
           fill="#c62828" text-anchor="middle" dy="-6" dominant-baseline="auto">"no"</text>
   </g>
 
   <!-- Nodes -->
   <g id="nodes">
-    <g transform="translate(100,20)" fill="#e8f5e9" stroke="#4caf50">
+    <g transform="translate(100,20)" fill="#e8f5e9" stroke="#4caf50" data-type="node" data-id="1">
       <polygon points="18,0 90,0 72,20 0,20"/>
 <text x="45" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">> Input</text>
     </g>
-    <g transform="translate(90,120)" fill="#e3f2fd" stroke="#2196f3">
+    <g transform="translate(90,120)" fill="#e3f2fd" stroke="#2196f3" data-type="node" data-id="2">
       <rect x="0" y="0" width="150" height="20" rx="4" ry="4"/>
 <text x="75" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Parse Request</text>
     </g>
-    <g transform="translate(140,220)" fill="#fff8e1" stroke="#f59e0b">
+    <g transform="translate(140,220)" fill="#fff8e1" stroke="#f59e0b" data-type="node" data-id="3">
       <polygon points="50,0 100,10 50,20 0,10"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">? Valid?</text>
     </g>
-    <g transform="translate(70,320)" fill="#e3f2fd" stroke="#2196f3">
+    <g transform="translate(70,320)" fill="#e3f2fd" stroke="#2196f3" data-type="node" data-id="4">
       <rect x="0" y="0" width="140" height="20" rx="4" ry="4"/>
 <text x="70" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Authenticate</text>
     </g>
-    <g transform="translate(90,420)" fill="#fff8e1" stroke="#f59e0b">
+    <g transform="translate(90,420)" fill="#fff8e1" stroke="#f59e0b" data-type="node" data-id="5">
       <polygon points="60,0 120,10 60,20 0,10"/>
 <text x="60" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">? Auth OK?</text>
     </g>
-    <g transform="translate(20,520)" fill="#e8f5e9" stroke="#4caf50">
+    <g transform="translate(20,520)" fill="#e8f5e9" stroke="#4caf50" data-type="node" data-id="6">
       <polygon points="32,0 160,0 128,20 0,20"/>
 <text x="80" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">> Response 200</text>
     </g>
-    <g transform="translate(210,520)" fill="#e8f5e9" stroke="#4caf50">
+    <g transform="translate(210,520)" fill="#e8f5e9" stroke="#4caf50" data-type="node" data-id="7">
       <polygon points="26,0 130,0 104,20 0,20"/>
 <text x="65" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">> Error 401</text>
     </g>
-    <g transform="translate(240,320)" fill="#e8f5e9" stroke="#4caf50">
+    <g transform="translate(240,320)" fill="#e8f5e9" stroke="#4caf50" data-type="node" data-id="8">
       <polygon points="26,0 130,0 104,20 0,20"/>
 <text x="65" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">> Error 400</text>
     </g>

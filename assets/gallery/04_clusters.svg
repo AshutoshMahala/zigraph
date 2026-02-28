@@ -35,54 +35,54 @@
   <!-- Edges (rendered first, under nodes) -->
   <g id="edges">
     <line x1="100" y1="40" x2="290" y2="200" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="1" data-to="2" marker-end="url(#zg-m-0)"/>
     <line x1="100" y1="40" x2="110" y2="200" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="1" data-to="5" marker-end="url(#zg-m-0)"/>
     <line x1="290" y1="220" x2="250" y2="260" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="2" data-to="3" marker-end="url(#zg-m-0)"/>
     <line x1="290" y1="220" x2="370" y2="260" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="2" data-to="4" marker-end="url(#zg-m-0)"/>
     <line x1="110" y1="220" x2="110" y2="260" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="5" data-to="6" marker-end="url(#zg-m-0)"/>
     <line x1="250" y1="280" x2="110" y2="460" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="3" data-to="7" marker-end="url(#zg-m-0)"/>
     <line x1="370" y1="280" x2="270" y2="460" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="4" data-to="8" marker-end="url(#zg-m-0)"/>
     <line x1="110" y1="280" x2="110" y2="460" 
-          stroke="#666666" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#666666" stroke-width="2" data-type="edge" data-from="6" data-to="7" marker-end="url(#zg-m-0)"/>
   </g>
 
   <!-- Nodes -->
   <g id="nodes">
-    <g transform="translate(40,20)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(40,20)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="1">
       <rect x="0" y="0" width="130" height="20" rx="4" ry="4"/>
 <text x="65" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">API Gateway</text>
     </g>
-    <g transform="translate(260,200)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(260,200)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="2">
       <rect x="0" y="0" width="60" height="20" rx="4" ry="4"/>
 <text x="30" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Auth</text>
     </g>
-    <g transform="translate(220,260)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(220,260)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="3">
       <rect x="0" y="0" width="70" height="20" rx="4" ry="4"/>
 <text x="35" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Users</text>
     </g>
-    <g transform="translate(320,260)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(320,260)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="4">
       <rect x="0" y="0" width="100" height="20" rx="4" ry="4"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Sessions</text>
     </g>
-    <g transform="translate(60,200)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(60,200)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="5">
       <rect x="0" y="0" width="100" height="20" rx="4" ry="4"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Products</text>
     </g>
-    <g transform="translate(70,260)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(70,260)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="6">
       <rect x="0" y="0" width="80" height="20" rx="4" ry="4"/>
 <text x="40" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Orders</text>
     </g>
-    <g transform="translate(60,460)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(60,460)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="7">
       <rect x="0" y="0" width="100" height="20" rx="4" ry="4"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Postgres</text>
     </g>
-    <g transform="translate(240,460)" fill="#f8fafc" stroke="#64748b">
+    <g transform="translate(240,460)" fill="#f8fafc" stroke="#64748b" data-type="node" data-id="8">
       <rect x="0" y="0" width="70" height="20" rx="4" ry="4"/>
 <text x="35" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">Redis</text>
     </g>

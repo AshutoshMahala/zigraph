@@ -40,44 +40,44 @@
   <!-- Edges (rendered first, under nodes) -->
   <g id="edges">
     <line x1="130" y1="40" x2="70" y2="80" 
-          stroke="#3e63dd" stroke-width="2" marker-end="url(#zg-m-0)"/>
+          stroke="#3e63dd" stroke-width="2" data-type="edge" data-from="1" data-to="2" marker-end="url(#zg-m-0)"/>
     <line x1="130" y1="40" x2="200" y2="80" 
-          stroke="#e54d2e" stroke-width="2" marker-end="url(#zg-m-1)"/>
+          stroke="#e54d2e" stroke-width="2" data-type="edge" data-from="1" data-to="3" marker-end="url(#zg-m-1)"/>
     <line x1="70" y1="100" x2="80" y2="140" 
-          stroke="#30a46c" stroke-width="2" marker-end="url(#zg-m-2)"/>
+          stroke="#30a46c" stroke-width="2" data-type="edge" data-from="2" data-to="4" marker-end="url(#zg-m-2)"/>
     <line x1="70" y1="100" x2="200" y2="140" 
-          stroke="#f76b15" stroke-width="2" marker-end="url(#zg-m-3)"/>
+          stroke="#f76b15" stroke-width="2" data-type="edge" data-from="2" data-to="5" marker-end="url(#zg-m-3)"/>
     <line x1="200" y1="100" x2="200" y2="140" 
-          stroke="#8e4ec6" stroke-width="2" marker-end="url(#zg-m-4)"/>
+          stroke="#8e4ec6" stroke-width="2" data-type="edge" data-from="3" data-to="5" marker-end="url(#zg-m-4)"/>
     <line x1="80" y1="160" x2="130" y2="200" 
-          stroke="#12a594" stroke-width="2" marker-end="url(#zg-m-5)"/>
+          stroke="#12a594" stroke-width="2" data-type="edge" data-from="4" data-to="6" marker-end="url(#zg-m-5)"/>
     <line x1="200" y1="160" x2="130" y2="200" 
-          stroke="#e93d82" stroke-width="2" marker-end="url(#zg-m-6)"/>
+          stroke="#e93d82" stroke-width="2" data-type="edge" data-from="5" data-to="6" marker-end="url(#zg-m-6)"/>
   </g>
 
   <!-- Nodes -->
   <g id="nodes">
-    <g transform="translate(80,20)" fill="#f0f0f0" stroke="#333333">
+    <g transform="translate(80,20)" fill="#f0f0f0" stroke="#333333" data-type="node" data-id="1">
       <rect x="0" y="0" width="100" height="20" rx="4" ry="4"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">main.zig</text>
     </g>
-    <g transform="translate(20,80)" fill="#f0f0f0" stroke="#333333">
+    <g transform="translate(20,80)" fill="#f0f0f0" stroke="#333333" data-type="node" data-id="2">
       <rect x="0" y="0" width="100" height="20" rx="4" ry="4"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">http.zig</text>
     </g>
-    <g transform="translate(150,80)" fill="#f0f0f0" stroke="#333333">
+    <g transform="translate(150,80)" fill="#f0f0f0" stroke="#333333" data-type="node" data-id="3">
       <rect x="0" y="0" width="100" height="20" rx="4" ry="4"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">json.zig</text>
     </g>
-    <g transform="translate(30,140)" fill="#f0f0f0" stroke="#333333">
+    <g transform="translate(30,140)" fill="#f0f0f0" stroke="#333333" data-type="node" data-id="4">
       <rect x="0" y="0" width="100" height="20" rx="4" ry="4"/>
 <text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">auth.zig</text>
     </g>
-    <g transform="translate(160,140)" fill="#f0f0f0" stroke="#333333">
+    <g transform="translate(160,140)" fill="#f0f0f0" stroke="#333333" data-type="node" data-id="5">
       <rect x="0" y="0" width="80" height="20" rx="4" ry="4"/>
 <text x="40" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">db.zig</text>
     </g>
-    <g transform="translate(90,200)" fill="#f0f0f0" stroke="#333333">
+    <g transform="translate(90,200)" fill="#f0f0f0" stroke="#333333" data-type="node" data-id="6">
       <rect x="0" y="0" width="90" height="20" rx="4" ry="4"/>
 <text x="45" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">log.zig</text>
     </g>

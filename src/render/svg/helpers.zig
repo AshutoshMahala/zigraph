@@ -2,8 +2,19 @@
 //!
 //! Small utility functions extracted from mod.zig for reuse across submodules.
 
+const std = @import("std");
 const ir_mod = @import("../../core/ir.zig");
 const LayoutNode = ir_mod.LayoutNode(usize);
+
+/// Check whether a raw attribute string already contains a given attribute name.
+///
+/// This prevents the renderer from emitting a native `data-id`, `data-from`, etc.
+/// when the user's `extra_attrs` already provides it — duplicating an XML attribute
+/// is a fatal parse error in SVG.
+pub fn attrsContain(extra_attrs: ?[]const u8, attr_name: []const u8) bool {
+    const attrs = extra_attrs orelse return false;
+    return std.mem.indexOf(u8, attrs, attr_name) != null;
+}
 
 /// Find a node label by ID. Returns empty string for unknown/dummy nodes.
 pub fn findNodeLabel(nodes: []const LayoutNode, node_id: usize) []const u8 {

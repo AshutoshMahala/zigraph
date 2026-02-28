@@ -11,6 +11,7 @@ const SvgConfig = config_mod.SvgConfig;
 const NodeStyle = config_mod.NodeStyle;
 const ir_mod = @import("../../core/ir.zig");
 const LayoutNode = ir_mod.LayoutNode(usize);
+const helpers = @import("helpers.zig");
 
 /// Render a real (non-dummy) node using its pre-computed `NodeStyle`.
 ///
@@ -24,6 +25,11 @@ pub fn renderNode(writer: anytype, node: LayoutNode, style: NodeStyle, config: S
     try writer.print(
         \\    <g transform="translate({d},{d})" fill="{s}" stroke="{s}"
     , .{ x, y, style.fill, style.stroke });
+    // Emit native data attrs only when extra_attrs doesn't already provide them
+    if (!helpers.attrsContain(style.extra_attrs, "data-type"))
+        try writer.print(" data-type=\"node\"", .{});
+    if (!helpers.attrsContain(style.extra_attrs, "data-id"))
+        try writer.print(" data-id=\"{d}\"", .{node.id});
     if (style.extra_attrs) |attrs| {
         try writer.print(" {s}", .{attrs});
     }

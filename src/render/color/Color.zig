@@ -4,8 +4,8 @@
 //!   - **Conversions:** sRGB ↔ linear RGB ↔ Oklab ↔ HSL ↔ hex string
 //!   - **Interpolation:** `lerp()` in Oklab space (perceptually uniform)
 //!   - **Operations:** darken, lighten, saturate, desaturate, withAlpha
-//!   - **Comptime hex:** `toHex()` returns `[7]u8` — zero-cost at comptime
-//!   - **Runtime hex:** `toHexAlloc(arena)` returns `[]const u8`
+//!   - **Comptime hex:** `toHex()` returns `[7]u8`, `toHex8()` returns `[9]u8` — zero-cost at comptime
+//!   - **Runtime hex:** `toHexAlloc(arena)` auto-picks 6 vs 8 digit based on alpha
 //!
 //! ## Comptime usage (zero allocation)
 //!
@@ -65,9 +65,18 @@ pub fn rgb8(r: u8, g: u8, b: u8) Color {
     };
 }
 
-/// Parse a hex color string (`#rrggbb` or `#rgb`).
+/// Parse a hex color string (`#rrggbb`, `#rrggbbaa`, or `#rgb`).
 /// Returns black on invalid input.
 pub fn fromHex(hex: []const u8) Color {
+    if (hex.len == 9 and hex[0] == '#') {
+        const r = parseHexPair(hex[1], hex[2]);
+        const g = parseHexPair(hex[3], hex[4]);
+        const b = parseHexPair(hex[5], hex[6]);
+        const a = parseHexPair(hex[7], hex[8]);
+        var c = rgb8(r, g, b);
+        c.a = @as(f32, @floatFromInt(a)) / 255.0;
+        return c;
+    }
     if (hex.len == 7 and hex[0] == '#') {
         const r = parseHexPair(hex[1], hex[2]);
         const g = parseHexPair(hex[3], hex[4]);
@@ -133,6 +142,8 @@ pub fn fromOklab(L: f32, a_: f32, b_: f32) Color {
 ///
 /// Comptime: `const hex = comptime color.toHex();` → `[7]u8` in .rodata
 /// Then `&hex` coerces to `[]const u8`.
+///
+/// Note: Alpha is ignored — use `toHex8()` for `#rrggbbaa` when alpha < 1.0.
 pub fn toHex(self: Color) [7]u8 {
     const r_byte: u8 = @intFromFloat(@round(clamp01(self.r) * 255.0));
     const g_byte: u8 = @intFromFloat(@round(clamp01(self.g) * 255.0));
@@ -149,14 +160,45 @@ pub fn toHex(self: Color) [7]u8 {
     return buf;
 }
 
-/// Convert to `#rrggbb` hex string, allocated from an arena.
+/// Convert to `#rrggbbaa` hex string with alpha channel.
+/// Works at comptime (zero allocation).
+///
+/// Comptime: `const hex = comptime color.withAlpha(0.5).toHex8();` → `[9]u8` in .rodata
+pub fn toHex8(self: Color) [9]u8 {
+    const r_byte: u8 = @intFromFloat(@round(clamp01(self.r) * 255.0));
+    const g_byte: u8 = @intFromFloat(@round(clamp01(self.g) * 255.0));
+    const b_byte: u8 = @intFromFloat(@round(clamp01(self.b) * 255.0));
+    const a_byte: u8 = @intFromFloat(@round(clamp01(self.a) * 255.0));
+
+    var buf: [9]u8 = undefined;
+    buf[0] = '#';
+    buf[1] = hex_lut[r_byte >> 4];
+    buf[2] = hex_lut[r_byte & 0x0f];
+    buf[3] = hex_lut[g_byte >> 4];
+    buf[4] = hex_lut[g_byte & 0x0f];
+    buf[5] = hex_lut[b_byte >> 4];
+    buf[6] = hex_lut[b_byte & 0x0f];
+    buf[7] = hex_lut[a_byte >> 4];
+    buf[8] = hex_lut[a_byte & 0x0f];
+    return buf;
+}
+
+/// Convert to hex string, allocated from an arena.
+/// Returns `#rrggbb` for fully opaque colors, `#rrggbbaa` when alpha < 1.0.
 ///
 /// Use in style functions: `return .{ .fill = color.toHexAlloc(ctx.arena) catch "#999" };`
 pub fn toHexAlloc(self: Color, allocator: Allocator) ![]const u8 {
-    const hex = self.toHex();
-    const slice = try allocator.alloc(u8, 7);
-    @memcpy(slice, &hex);
-    return slice;
+    if (self.a >= 1.0 - 1e-4) {
+        const hex = self.toHex();
+        const slice = try allocator.alloc(u8, 7);
+        @memcpy(slice, &hex);
+        return slice;
+    } else {
+        const hex = self.toHex8();
+        const slice = try allocator.alloc(u8, 9);
+        @memcpy(slice, &hex);
+        return slice;
+    }
 }
 
 /// Oklab representation: perceptual lightness + a (green-red) + b (blue-yellow).
@@ -438,6 +480,37 @@ test "toHexAlloc runtime" {
     const c = fromHex("#3b82f6");
     const hex = try c.toHexAlloc(alloc);
     try std.testing.expectEqualStrings("#3b82f6", hex);
+}
+
+test "toHex8 with alpha" {
+    const c = comptime fromHex("#3b82f6").withAlpha(0.5);
+    const hex8 = comptime c.toHex8();
+    try std.testing.expectEqual(@as(usize, 9), hex8.len);
+    try std.testing.expectEqual(@as(u8, '#'), hex8[0]);
+    // Alpha 0.5 → ~128 → 0x80
+    try std.testing.expectEqualStrings("#3b82f680", &hex8);
+}
+
+test "toHexAlloc auto-picks 6 vs 8 digit" {
+    var buf: [256]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const alloc = fba.allocator();
+
+    // Opaque → 7 chars (#rrggbb)
+    const opaque_hex = try fromHex("#ff0000").toHexAlloc(alloc);
+    try std.testing.expectEqual(@as(usize, 7), opaque_hex.len);
+
+    // Semi-transparent → 9 chars (#rrggbbaa)
+    const semi_hex = try fromHex("#ff0000").withAlpha(0.5).toHexAlloc(alloc);
+    try std.testing.expectEqual(@as(usize, 9), semi_hex.len);
+}
+
+test "fromHex parses 8-digit hex with alpha" {
+    const c = fromHex("#3b82f680");
+    try std.testing.expect(@abs(c.r - 0.231) < 0.01);
+    try std.testing.expect(@abs(c.g - 0.510) < 0.01);
+    try std.testing.expect(@abs(c.b - 0.965) < 0.01);
+    try std.testing.expect(@abs(c.a - 0.502) < 0.01);
 }
 
 test "rgb8 constructor" {

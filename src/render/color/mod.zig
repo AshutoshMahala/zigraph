@@ -29,6 +29,7 @@ pub const Color = @import("Color.zig");
 pub const colormaps = @import("colormaps.zig");
 pub const ColorMap = colormaps.ColorMap;
 pub const gradient = @import("gradient.zig");
+pub const RadialConfig = gradient.RadialConfig;
 pub const palettes = @import("palettes.zig");
 
 // Re-export frequently used palette functions at module level\n// so `zigraph.color.get(&zigraph.color.radix, i)` works directly.
@@ -47,6 +48,8 @@ pub const dark_mode = palettes.dark_mode;
 pub const colorblind_safe = palettes.colorblind_safe;
 pub const categorical = palettes.categorical;
 pub const semantic = palettes.semantic;
+pub const Scale = palettes.Scale;
+pub const scale = palettes.scale;
 pub const ansi = palettes.ansi;
 pub const ansi_dark = palettes.ansi_dark;
 pub const ansi_light = palettes.ansi_light;
