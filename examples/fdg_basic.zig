@@ -195,7 +195,7 @@ pub fn main() !void {
         // Unicode rendering (with subgraph boxes, colors, labels)
         const output = try zigraph.render(&graph, allocator, .{
             .algorithm = .{ .fruchterman_reingold = .{} },
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
         std.debug.print("{s}\n", .{output});

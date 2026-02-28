@@ -19,7 +19,7 @@
 //! ```
 
 const std = @import("std");
-const colors = @import("../colors.zig");
+const colors = @import("../color/mod.zig");
 const types = @import("../types.zig");
 
 pub const MarkerShape = types.MarkerShape;

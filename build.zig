@@ -471,4 +471,41 @@ pub fn build(b: *std.Build) void {
     const run_cycle = b.addRunArtifact(cycle_exe);
     const run_cycle_step = b.step("run-cycle", "Run cycle breaking example");
     run_cycle_step.dependOn(&run_cycle.step);
+
+    // ── SVG Gallery Examples ────────────────────────────────────────────────
+
+    const svg_gallery = [_]struct { file: []const u8, name: []const u8, desc: []const u8 }{
+        .{ .file = "examples/svg/01_basic.zig", .name = "svg_01_basic", .desc = "SVG gallery: 01 basic" },
+        .{ .file = "examples/svg/02_presets.zig", .name = "svg_02_presets", .desc = "SVG gallery: 02 presets" },
+        .{ .file = "examples/svg/03_flowchart.zig", .name = "svg_03_flowchart", .desc = "SVG gallery: 03 flowchart" },
+        .{ .file = "examples/svg/04_clusters.zig", .name = "svg_04_clusters", .desc = "SVG gallery: 04 clusters" },
+        .{ .file = "examples/svg/05_dark_theme.zig", .name = "svg_05_dark_theme", .desc = "SVG gallery: 05 dark theme" },
+        .{ .file = "examples/svg/06_interactive.zig", .name = "svg_06_interactive", .desc = "SVG gallery: 06 interactive" },
+        .{ .file = "examples/svg/07_heatmap.zig", .name = "svg_07_heatmap", .desc = "SVG gallery: 07 heatmap" },
+    };
+
+    const run_gallery_step = b.step("run-svg-gallery", "Run all SVG gallery examples");
+
+    inline for (svg_gallery) |ex| {
+        const mod = b.addModule(ex.name, .{
+            .root_source_file = b.path(ex.file),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        });
+        const exe = b.addExecutable(.{
+            .name = ex.name,
+            .root_module = mod,
+        });
+        b.installArtifact(exe);
+        const run = b.addRunArtifact(exe);
+        run_gallery_step.dependOn(&run.step);
+
+        // Individual step: zig build run-svg-01, run-svg-02, etc.
+        const step_name = "run-" ++ ex.name;
+        const individual = b.step(step_name, ex.desc);
+        individual.dependOn(&run.step);
+    }
 }

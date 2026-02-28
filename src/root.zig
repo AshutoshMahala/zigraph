@@ -161,8 +161,11 @@ pub const json = @import("render/json.zig");
 /// SVG renderer for high-quality vector output and spline visualization
 pub const svg = @import("render/svg/mod.zig");
 
-/// Color palettes for graph visualization
-pub const colors = @import("render/colors.zig");
+/// Type-erased renderer interface (wraps SVG, Unicode, JSON, or custom backends)
+pub const Renderer = @import("render/Renderer.zig");
+
+/// Color system — numeric Color struct, scientific colormaps, palettes, gradients
+pub const color = @import("render/color/mod.zig");
 
 /// Shared rendering types (MarkerShape, etc.)
 pub const render_types = @import("render/types.zig");

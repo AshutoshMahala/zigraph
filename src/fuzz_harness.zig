@@ -139,7 +139,7 @@ pub fn fuzzLayoutPipeline(data: []const u8) !void {
 
 /// Fuzz SVG rendering with random layouts.
 pub fn fuzzSvgRendering(data: []const u8) !void {
-    const svg = @import("render/svg.zig");
+    const svg = @import("render/svg/mod.zig");
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();

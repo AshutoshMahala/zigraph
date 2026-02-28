@@ -75,7 +75,7 @@ pub fn main() !void {
         defer ir.deinit();
 
         const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
 
@@ -215,7 +215,7 @@ pub fn main() !void {
 
         const output = try zigraph.render(&graph, allocator, .{
             .cycle_breaking = .depth_first,
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
 

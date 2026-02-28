@@ -67,7 +67,7 @@ pub fn main() !void {
         const output = try zigraph.render(&dag, allocator, .{
             .crossing_reducers = &zigraph.crossing.quality,
             .positioning = .brandes_kopf,
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
             .cycle_breaking = .depth_first,
         });
         defer allocator.free(output);

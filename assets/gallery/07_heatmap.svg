@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" 
+     width="440" height="1000" 
+     viewBox="0 0 440 1000">
+
+  <!-- Marker definitions -->
+  <defs>
+    <marker id="zg-m-0" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#64748b"/>
+    </marker>
+    <radialGradient id="sg-1" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.15" fy="0.50">
+  <stop offset="0%"   stop-color="#26c4e2"/>
+  <stop offset="30%"  stop-color="#4b72f6"/>
+  <stop offset="65%"  stop-color="#381e5c"/>
+  <stop offset="100%" stop-color="#30123b"/>
+</radialGradient>
+    <radialGradient id="sg-2" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.22" fy="0.25">
+  <stop offset="0%"   stop-color="#9ae200"/>
+  <stop offset="30%"  stop-color="#1ff19a"/>
+  <stop offset="65%"  stop-color="#36aef7"/>
+  <stop offset="100%" stop-color="#4959d3"/>
+</radialGradient>
+    <radialGradient id="sg-3" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.78" fy="0.75">
+  <stop offset="0%"   stop-color="#bed000"/>
+  <stop offset="30%"  stop-color="#5ff254"/>
+  <stop offset="65%"  stop-color="#1bd1d4"/>
+  <stop offset="100%" stop-color="#497df9"/>
+</radialGradient>
+    <radialGradient id="sg-4" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.22" fy="0.25">
+  <stop offset="0%"   stop-color="#403492"/>
+  <stop offset="30%"  stop-color="#30123b"/>
+  <stop offset="65%"  stop-color="#30123b"/>
+  <stop offset="100%" stop-color="#30123b"/>
+</radialGradient>
+    <radialGradient id="sg-5" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.78" fy="0.75">
+  <stop offset="0%"   stop-color="#3f9fff"/>
+  <stop offset="30%"  stop-color="#474dc3"/>
+  <stop offset="65%"  stop-color="#30123b"/>
+  <stop offset="100%" stop-color="#30123b"/>
+</radialGradient>
+    <radialGradient id="sg-6" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.45" fy="0.30">
+  <stop offset="0%"   stop-color="#6bf22d"/>
+  <stop offset="30%"  stop-color="#18d9c8"/>
+  <stop offset="65%"  stop-color="#468afd"/>
+  <stop offset="100%" stop-color="#403492"/>
+</radialGradient>
+    <radialGradient id="sg-7" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.78" fy="0.75">
+  <stop offset="0%"   stop-color="#ec5500"/>
+  <stop offset="30%"  stop-color="#f69200"/>
+  <stop offset="65%"  stop-color="#cac800"/>
+  <stop offset="100%" stop-color="#6bf22d"/>
+</radialGradient>
+<radialGradient id="sg2-7" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.7" fx="0.19" fy="0.26">
+  <stop offset="0%"   stop-color="#ec5500" stop-opacity="0.6"/>
+  <stop offset="50%"  stop-color="#f69200" stop-opacity="0.3"/>
+  <stop offset="100%" stop-color="#6bf22d" stop-opacity="0"/>
+</radialGradient>
+    <radialGradient id="sg-8" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.45" fy="0.30">
+  <stop offset="0%"   stop-color="#7a0403"/>
+  <stop offset="30%"  stop-color="#b51625"/>
+  <stop offset="65%"  stop-color="#e64c05"/>
+  <stop offset="100%" stop-color="#f88900"/>
+</radialGradient>
+<radialGradient id="sg2-8" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.7" fx="0.59" fy="0.63">
+  <stop offset="0%"   stop-color="#7a0403" stop-opacity="0.6"/>
+  <stop offset="50%"  stop-color="#b51625" stop-opacity="0.3"/>
+  <stop offset="100%" stop-color="#f88900" stop-opacity="0"/>
+</radialGradient>
+    <radialGradient id="sg-9" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.22" fy="0.75">
+  <stop offset="0%"   stop-color="#f66f00"/>
+  <stop offset="30%"  stop-color="#e9ac00"/>
+  <stop offset="65%"  stop-color="#a8dc00"/>
+  <stop offset="100%" stop-color="#3bf288"/>
+</radialGradient>
+<radialGradient id="sg2-9" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.7" fx="0.74" fy="0.25">
+  <stop offset="0%"   stop-color="#f66f00" stop-opacity="0.6"/>
+  <stop offset="50%"  stop-color="#e9ac00" stop-opacity="0.3"/>
+  <stop offset="100%" stop-color="#3bf288" stop-opacity="0"/>
+</radialGradient>
+    <radialGradient id="sg-10" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.45" fy="0.30">
+  <stop offset="0%"   stop-color="#a10e27"/>
+  <stop offset="30%"  stop-color="#da3a12"/>
+  <stop offset="65%"  stop-color="#f87400"/>
+  <stop offset="100%" stop-color="#e3b300"/>
+</radialGradient>
+<radialGradient id="sg2-10" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.7" fx="0.59" fy="0.77">
+  <stop offset="0%"   stop-color="#a10e27" stop-opacity="0.6"/>
+  <stop offset="50%"  stop-color="#da3a12" stop-opacity="0.3"/>
+  <stop offset="100%" stop-color="#e3b300" stop-opacity="0"/>
+</radialGradient>
+    <radialGradient id="sg-11" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.22" fy="0.75">
+  <stop offset="0%"   stop-color="#4492ff"/>
+  <stop offset="30%"  stop-color="#433fad"/>
+  <stop offset="65%"  stop-color="#30123b"/>
+  <stop offset="100%" stop-color="#30123b"/>
+</radialGradient>
+    <radialGradient id="sg-12" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.85" fy="0.50">
+  <stop offset="0%"   stop-color="#497df9"/>
+  <stop offset="30%"  stop-color="#3c2977"/>
+  <stop offset="65%"  stop-color="#30123b"/>
+  <stop offset="100%" stop-color="#30123b"/>
+</radialGradient>
+    <radialGradient id="sg-13" gradientUnits="objectBoundingBox"
+  cx="0.5" cy="0.5" r="0.85" fx="0.22" fy="0.75">
+  <stop offset="0%"   stop-color="#3b266f"/>
+  <stop offset="30%"  stop-color="#30123b"/>
+  <stop offset="65%"  stop-color="#30123b"/>
+  <stop offset="100%" stop-color="#30123b"/>
+</radialGradient>
+    <style>
+  svg { background: #ffffff; }
+  rect[width="100%"] { fill: #ffffff; }
+</style>
+<filter id="heatblur" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur stdDeviation="8"/>
+</filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="white"/>
+  <!-- Subgraphs -->
+  <g id="subgraphs">
+    <g transform="translate(20,860)" fill="#f1f5f9" fill-opacity="0.5" stroke="#cbd5e1" stroke-width="1">
+      <rect x="0" y="0" width="380" height="120" rx="3" ry="3"/>
+<text x="6" y="14" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="9" fill="#64748b" letter-spacing="0.5" stroke="none">Output</text>
+    </g>
+    <g transform="translate(50,440)" fill="#f1f5f9" fill-opacity="0.5" stroke="#cbd5e1" stroke-width="1">
+      <rect x="0" y="0" width="210" height="280" rx="3" ry="3"/>
+<text x="6" y="14" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="9" fill="#64748b" letter-spacing="0.5" stroke="none">Core</text>
+    </g>
+    <g transform="translate(150,20)" fill="#f1f5f9" fill-opacity="0.5" stroke="#cbd5e1" stroke-width="1">
+      <rect x="0" y="0" width="270" height="280" rx="3" ry="3"/>
+<text x="6" y="14" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="9" fill="#64748b" letter-spacing="0.5" stroke="none">Intake</text>
+    </g>
+  </g>
+  <!-- Edges (rendered first, under nodes) -->
+  <g id="edges">
+    <line x1="230" y1="100" x2="260" y2="160" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="260" y1="180" x2="210" y2="240" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="260" y1="180" x2="350" y2="240" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="210" y1="260" x2="150" y2="360" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="210" y1="260" x2="290" y2="360" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="150" y1="380" x2="170" y2="500" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="290" y1="380" x2="170" y2="500" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="170" y1="520" x2="150" y2="580" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="150" y1="600" x2="150" y2="660" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="150" y1="680" x2="150" y2="780" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="150" y1="800" x2="90" y2="920" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="150" y1="800" x2="200" y2="920" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+    <line x1="150" y1="800" x2="320" y2="920" 
+          stroke="#64748b" stroke-width="2" marker-end="url(#zg-m-0)" opacity="0.7"/>
+  </g>
+
+  <!-- Nodes -->
+  <g id="nodes">
+    <g transform="translate(170,80)" fill="none" stroke="none">
+      
+<rect x="0" y="-2" width="130" height="24" rx="4" ry="4" fill="url(#sg-1)" stroke="#240430" stroke-width="1.5"/>
+<text x="65" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#1e293b" stroke="none">Feature Req</text>
+<text x="65" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#1e293b" opacity="0.85" stroke="none">25%</text>
+    </g>
+    <g transform="translate(210,160)" fill="none" stroke="none">
+      <ellipse cx="42" cy="9" rx="69" ry="21" fill="#bed000" opacity="0.04" filter="url(#heatblur)"/>
+<rect x="0" y="-4" width="100" height="27" rx="5" ry="5" fill="url(#sg-2)" stroke="#3530b7" stroke-width="1.5"/>
+<text x="50" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#1e293b" stroke="none">Evaluate</text>
+<text x="50" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#1e293b" opacity="0.85" stroke="none">45%</text>
+    </g>
+    <g transform="translate(170,240)" fill="none" stroke="none">
+      <ellipse cx="53" cy="12" rx="63" ry="22" fill="#dabb00" opacity="0.08" filter="url(#heatblur)"/>
+<rect x="0" y="-4" width="90" height="28" rx="6" ry="6" fill="url(#sg-3)" stroke="#2e50d6" stroke-width="1.5"/>
+<text x="45" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#1e293b" stroke="none">Advance</text>
+<text x="45" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#1e293b" opacity="0.85" stroke="none">50%</text>
+    </g>
+    <g transform="translate(310,240)" fill="none" stroke="none">
+      
+<rect x="0" y="0" width="90" height="21" rx="2" ry="2" fill="url(#sg-4)" stroke="#240430" stroke-width="1.5"/>
+<text x="45" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#f8fafc" stroke="none">Backlog</text>
+<text x="45" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#f8fafc" opacity="0.85" stroke="none">5%</text>
+    </g>
+    <g transform="translate(110,360)" fill="none" stroke="none">
+      
+<rect x="0" y="-2" width="90" height="23" rx="3" ry="3" fill="url(#sg-5)" stroke="#240430" stroke-width="1.5"/>
+<text x="45" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#f8fafc" stroke="none">Prepare</text>
+<text x="45" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#f8fafc" opacity="0.85" stroke="none">20%</text>
+    </g>
+    <g transform="translate(230,360)" fill="none" stroke="none">
+      
+<rect x="0" y="-3" width="120" height="26" rx="5" ry="5" fill="url(#sg-6)" stroke="#30157f" stroke-width="1.5"/>
+<text x="60" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#1e293b" stroke="none">Quick Prep</text>
+<text x="60" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#1e293b" opacity="0.85" stroke="none">40%</text>
+    </g>
+    <g transform="translate(130,500)" fill="none" stroke="none">
+      <ellipse cx="47" cy="12" rx="62" ry="28" fill="#dc3d0f" opacity="0.28" filter="url(#heatblur)"/>
+<rect x="0" y="-6" width="80" height="32" rx="9" ry="9" fill="url(#sg-7)" stroke="#20ba00" stroke-width="1.5"/>
+<rect x="0" y="-6" width="80" height="32" rx="9" ry="9" fill="url(#sg2-7)" stroke="none"/>
+<text x="40" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#1e293b" stroke="none">Buffer</text>
+<text x="40" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#1e293b" opacity="0.85" stroke="none">75%</text>
+    </g>
+    <g transform="translate(70,580)" fill="none" stroke="none">
+      <ellipse cx="82" cy="9" rx="145" ry="34" fill="#7a0403" opacity="0.48" filter="url(#heatblur)"/>
+<rect x="0" y="-8" width="170" height="36" rx="12" ry="12" fill="url(#sg-8)" stroke="#c55c00" stroke-width="1.5"/>
+<rect x="0" y="-8" width="170" height="36" rx="12" ry="12" fill="url(#sg2-8)" stroke="none"/>
+<text x="85" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#f8fafc" stroke="none">Main Processing</text>
+<text x="85" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#f8fafc" opacity="0.85" stroke="none">100%</text>
+    </g>
+    <g transform="translate(90,660)" fill="none" stroke="none">
+      <ellipse cx="50" cy="12" rx="91" ry="26" fill="#ec5500" opacity="0.24" filter="url(#heatblur)"/>
+<rect x="0" y="-6" width="120" height="31" rx="8" ry="8" fill="url(#sg-9)" stroke="#00ba3d" stroke-width="1.5"/>
+<rect x="0" y="-6" width="120" height="31" rx="8" ry="8" fill="url(#sg2-9)" stroke="none"/>
+<text x="60" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#1e293b" stroke="none">Refinement</text>
+<text x="60" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#1e293b" opacity="0.85" stroke="none">70%</text>
+    </g>
+    <g transform="translate(110,780)" fill="none" stroke="none">
+      <ellipse cx="44" cy="9" rx="74" ry="32" fill="#880716" opacity="0.42" filter="url(#heatblur)"/>
+<rect x="0" y="-7" width="90" height="35" rx="11" ry="11" fill="url(#sg-10)" stroke="#b08200" stroke-width="1.5"/>
+<rect x="0" y="-7" width="90" height="35" rx="11" ry="11" fill="url(#sg2-10)" stroke="none"/>
+<text x="45" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#f8fafc" stroke="none">Testing</text>
+<text x="45" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#f8fafc" opacity="0.85" stroke="none">92%</text>
+    </g>
+    <g transform="translate(40,920)" fill="none" stroke="none">
+      
+<rect x="0" y="-1" width="100" height="23" rx="3" ry="3" fill="url(#sg-11)" stroke="#240430" stroke-width="1.5"/>
+<text x="50" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#f8fafc" stroke="none">Delivery</text>
+<text x="50" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#f8fafc" opacity="0.85" stroke="none">18%</text>
+    </g>
+    <g transform="translate(170,920)" fill="none" stroke="none">
+      
+<rect x="0" y="-1" width="70" height="22" rx="3" ry="3" fill="url(#sg-12)" stroke="#240430" stroke-width="1.5"/>
+<text x="35" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#f8fafc" stroke="none">Store</text>
+<text x="35" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#f8fafc" opacity="0.85" stroke="none">15%</text>
+    </g>
+    <g transform="translate(270,920)" fill="none" stroke="none">
+      
+<rect x="0" y="0" width="110" height="20" rx="2" ry="2" fill="url(#sg-13)" stroke="#240430" stroke-width="1.5"/>
+<text x="55" y="11" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="600" font-size="11" fill="#f8fafc" stroke="none">Rejection</text>
+<text x="55" y="23" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="9" fill="#f8fafc" opacity="0.85" stroke="none">3%</text>
+    </g>
+  </g>
+  <g id="legend" transform="translate(20, 20)">
+  <text x="0" y="14" font-family="Inter, Helvetica, Arial, sans-serif" font-weight="700" font-size="10" fill="#334155" letter-spacing="0.5">THROUGHPUT</text>
+  <rect x="12" y="30" width="16" height="6" fill="#7a0403" stroke="none"/>
+  <rect x="12" y="35" width="16" height="6" fill="#890717" stroke="none"/>
+  <rect x="12" y="40" width="16" height="6" fill="#990b27" stroke="none"/>
+  <rect x="12" y="45" width="16" height="6" fill="#ab1226" stroke="none"/>
+  <rect x="12" y="50" width="16" height="6" fill="#bd1923" stroke="none"/>
+  <rect x="12" y="55" width="16" height="6" fill="#cb2a1d" stroke="none"/>
+  <rect x="12" y="60" width="16" height="6" fill="#d93a12" stroke="none"/>
+  <rect x="12" y="65" width="16" height="6" fill="#e44a07" stroke="none"/>
+  <rect x="12" y="70" width="16" height="6" fill="#ef5900" stroke="none"/>
+  <rect x="12" y="75" width="16" height="6" fill="#f56900" stroke="none"/>
+  <rect x="12" y="80" width="16" height="6" fill="#f97a00" stroke="none"/>
+  <rect x="12" y="85" width="16" height="6" fill="#f88c00" stroke="none"/>
+  <rect x="12" y="90" width="16" height="6" fill="#f29e00" stroke="none"/>
+  <rect x="12" y="95" width="16" height="6" fill="#e8ae00" stroke="none"/>
+  <rect x="12" y="100" width="16" height="6" fill="#d9bc00" stroke="none"/>
+  <rect x="12" y="105" width="16" height="6" fill="#c8c900" stroke="none"/>
+  <rect x="12" y="110" width="16" height="6" fill="#b3d600" stroke="none"/>
+  <rect x="12" y="115" width="16" height="6" fill="#9be200" stroke="none"/>
+  <rect x="12" y="120" width="16" height="6" fill="#80ec15" stroke="none"/>
+  <rect x="12" y="125" width="16" height="6" fill="#61f24f" stroke="none"/>
+  <rect x="12" y="130" width="16" height="6" fill="#41f281" stroke="none"/>
+  <rect x="12" y="135" width="16" height="6" fill="#19eca6" stroke="none"/>
+  <rect x="12" y="140" width="16" height="6" fill="#17dcc3" stroke="none"/>
+  <rect x="12" y="145" width="16" height="6" fill="#22cadc" stroke="none"/>
+  <rect x="12" y="150" width="16" height="6" fill="#33b3f3" stroke="none"/>
+  <rect x="12" y="155" width="16" height="6" fill="#409bff" stroke="none"/>
+  <rect x="12" y="160" width="16" height="6" fill="#4785fb" stroke="none"/>
+  <rect x="12" y="165" width="16" height="6" fill="#4b6ef1" stroke="none"/>
+  <rect x="12" y="170" width="16" height="6" fill="#4856d0" stroke="none"/>
+  <rect x="12" y="175" width="16" height="6" fill="#433fad" stroke="none"/>
+  <rect x="12" y="180" width="16" height="6" fill="#3c2873" stroke="none"/>
+  <rect x="12" y="185" width="16" height="6" fill="#30123b" stroke="none"/>
+  <rect x="12" y="30" width="16" height="180" fill="none" stroke="#94a3b8" stroke-width="0.5" rx="1"/>
+  <line x1="28" y1="30" x2="31" y2="30" stroke="#94a3b8" stroke-width="0.5"/>
+  <text x="33" y="30" font-family="Inter, Helvetica, Arial, sans-serif" font-size="8" fill="#64748b" dominant-baseline="central">1.0</text>
+  <line x1="28" y1="75" x2="31" y2="75" stroke="#94a3b8" stroke-width="0.5"/>
+  <text x="33" y="75" font-family="Inter, Helvetica, Arial, sans-serif" font-size="8" fill="#64748b" dominant-baseline="central">0.75</text>
+  <line x1="28" y1="120" x2="31" y2="120" stroke="#94a3b8" stroke-width="0.5"/>
+  <text x="33" y="120" font-family="Inter, Helvetica, Arial, sans-serif" font-size="8" fill="#64748b" dominant-baseline="central">0.5</text>
+  <line x1="28" y1="165" x2="31" y2="165" stroke="#94a3b8" stroke-width="0.5"/>
+  <text x="33" y="165" font-family="Inter, Helvetica, Arial, sans-serif" font-size="8" fill="#64748b" dominant-baseline="central">0.25</text>
+  <line x1="28" y1="210" x2="31" y2="210" stroke="#94a3b8" stroke-width="0.5"/>
+  <text x="33" y="210" font-family="Inter, Helvetica, Arial, sans-serif" font-size="8" fill="#64748b" dominant-baseline="central">0.0</text>
+</g>
+
+</svg>
