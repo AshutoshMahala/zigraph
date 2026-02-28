@@ -153,7 +153,10 @@ pub const categorical = [_][]const u8{
 //   palettes.scale.red.step3    // → "#ffefef" (light background)
 //   palettes.scale.green.all()  // → [12][]const u8 array
 
-/// A 12-step Radix color scale.
+/// Color mode for light/dark theme selection.
+pub const Mode = enum { light, dark };
+
+/// A 12-step Radix color scale (single theme).
 pub const Scale = struct {
     step1: []const u8,
     step2: []const u8,
@@ -185,237 +188,261 @@ pub const Scale = struct {
     }
 };
 
-/// Radix UI 12-step color scales — light theme.
+/// A paired Radix color scale with light and dark variants.
 ///
 /// ```zig
-/// const blue9 = palettes.scale.blue.step9;       // "#3e63dd"
-/// const red_bg = palettes.scale.red.step(2);      // "#fff1f0"
-/// const teal_all = palettes.scale.teal.all();     // [12][]const u8
+/// const red = palettes.scale.red;
+/// const bg = red.light.step(2);      // "#fff8f8" — light mode
+/// const bg_d = red.dark.step(2);     // "#291415" — dark mode
+/// const active = red.forMode(.dark).step(9);  // "#e5484d"
+/// ```
+pub const DualScale = struct {
+    light: Scale,
+    dark: Scale,
+
+    /// Select the scale for the given color mode.
+    pub fn forMode(self: DualScale, mode: Mode) Scale {
+        return switch (mode) {
+            .light => self.light,
+            .dark => self.dark,
+        };
+    }
+};
+
+/// Radix UI 12-step color scales — light + dark variants.
+///
+/// Each scale is a `DualScale` with `.light` and `.dark` sub-scales.
+///
+/// ```zig
+/// const blue9 = palettes.scale.blue.light.step9;          // "#0090ff" (light)
+/// const blue9d = palettes.scale.blue.dark.step9;          // "#0090ff" (dark)
+/// const red_bg = palettes.scale.red.forMode(.dark).step(2); // "#291415"
+/// const teal_all = palettes.scale.teal.light.all();       // [12][]const u8
 /// ```
 pub const scale = struct {
-    pub const red: Scale = .{
-        .step1 = "#fffcfc",
-        .step2 = "#fff8f8",
-        .step3 = "#ffefef",
-        .step4 = "#ffe5e5",
-        .step5 = "#fdd8d8",
-        .step6 = "#f9c6c6",
-        .step7 = "#f3aeaf",
-        .step8 = "#eb9091",
-        .step9 = "#e5484d",
-        .step10 = "#dc3d43",
-        .step11 = "#cd2b31",
-        .step12 = "#381316",
+    pub const red: DualScale = .{
+        .light = .{
+            .step1 = "#fffcfc", .step2 = "#fff8f8", .step3 = "#ffefef",
+            .step4 = "#ffe5e5", .step5 = "#fdd8d8", .step6 = "#f9c6c6",
+            .step7 = "#f3aeaf", .step8 = "#eb9091", .step9 = "#e5484d",
+            .step10 = "#dc3d43", .step11 = "#cd2b31", .step12 = "#381316",
+        },
+        .dark = .{
+            .step1 = "#191111", .step2 = "#201314", .step3 = "#3b1219",
+            .step4 = "#500f1c", .step5 = "#611623", .step6 = "#72232d",
+            .step7 = "#8c333a", .step8 = "#b54548", .step9 = "#e5484d",
+            .step10 = "#ec5d5e", .step11 = "#ff9592", .step12 = "#ffd1d9",
+        },
     };
-    pub const tomato: Scale = .{
-        .step1 = "#fffcfc",
-        .step2 = "#fff8f7",
-        .step3 = "#fff0ee",
-        .step4 = "#ffe6e2",
-        .step5 = "#fdd8d3",
-        .step6 = "#fac7be",
-        .step7 = "#f3b0a2",
-        .step8 = "#ea9280",
-        .step9 = "#e54d2e",
-        .step10 = "#db4324",
-        .step11 = "#ca3214",
-        .step12 = "#341711",
+    pub const tomato: DualScale = .{
+        .light = .{
+            .step1 = "#fffcfc", .step2 = "#fff8f7", .step3 = "#fff0ee",
+            .step4 = "#ffe6e2", .step5 = "#fdd8d3", .step6 = "#fac7be",
+            .step7 = "#f3b0a2", .step8 = "#ea9280", .step9 = "#e54d2e",
+            .step10 = "#db4324", .step11 = "#ca3214", .step12 = "#341711",
+        },
+        .dark = .{
+            .step1 = "#181111", .step2 = "#1f1513", .step3 = "#391714",
+            .step4 = "#4e1511", .step5 = "#5e1c16", .step6 = "#6e2920",
+            .step7 = "#853a2d", .step8 = "#ac4d39", .step9 = "#e54d2e",
+            .step10 = "#ec6142", .step11 = "#ff977d", .step12 = "#fbd3cb",
+        },
     };
-    pub const orange: Scale = .{
-        .step1 = "#fefcfb",
-        .step2 = "#fff9f5",
-        .step3 = "#fff0e4",
-        .step4 = "#ffe4ce",
-        .step5 = "#ffd5b3",
-        .step6 = "#ffc291",
-        .step7 = "#f5a862",
-        .step8 = "#ec8e2e",
-        .step9 = "#f76b15",
-        .step10 = "#ef5f00",
-        .step11 = "#cc4e00",
-        .step12 = "#582d1d",
+    pub const orange: DualScale = .{
+        .light = .{
+            .step1 = "#fefcfb", .step2 = "#fff9f5", .step3 = "#fff0e4",
+            .step4 = "#ffe4ce", .step5 = "#ffd5b3", .step6 = "#ffc291",
+            .step7 = "#f5a862", .step8 = "#ec8e2e", .step9 = "#f76b15",
+            .step10 = "#ef5f00", .step11 = "#cc4e00", .step12 = "#582d1d",
+        },
+        .dark = .{
+            .step1 = "#17120e", .step2 = "#1e160f", .step3 = "#331e0b",
+            .step4 = "#462100", .step5 = "#562800", .step6 = "#66350c",
+            .step7 = "#7e451d", .step8 = "#a35829", .step9 = "#f76b15",
+            .step10 = "#ff801f", .step11 = "#ffa057", .step12 = "#ffe0c2",
+        },
     };
-    pub const amber: Scale = .{
-        .step1 = "#fefdfb",
-        .step2 = "#fefbe9",
-        .step3 = "#fff7c2",
-        .step4 = "#ffee9c",
-        .step5 = "#fbe577",
-        .step6 = "#f3d673",
-        .step7 = "#e9c162",
-        .step8 = "#e2a336",
-        .step9 = "#ffc53d",
-        .step10 = "#ffba18",
-        .step11 = "#ab6400",
-        .step12 = "#4f3422",
+    pub const amber: DualScale = .{
+        .light = .{
+            .step1 = "#fefdfb", .step2 = "#fefbe9", .step3 = "#fff7c2",
+            .step4 = "#ffee9c", .step5 = "#fbe577", .step6 = "#f3d673",
+            .step7 = "#e9c162", .step8 = "#e2a336", .step9 = "#ffc53d",
+            .step10 = "#ffba18", .step11 = "#ab6400", .step12 = "#4f3422",
+        },
+        .dark = .{
+            .step1 = "#16120c", .step2 = "#1d180f", .step3 = "#302008",
+            .step4 = "#3f2700", .step5 = "#4d3000", .step6 = "#5c3d05",
+            .step7 = "#714f19", .step8 = "#8f6424", .step9 = "#ffc53d",
+            .step10 = "#ffd60a", .step11 = "#ffca16", .step12 = "#ffe7b3",
+        },
     };
-    pub const yellow: Scale = .{
-        .step1 = "#fdfdf9",
-        .step2 = "#fefce9",
-        .step3 = "#fffab8",
-        .step4 = "#fff394",
-        .step5 = "#ffe770",
-        .step6 = "#f3d768",
-        .step7 = "#e4c767",
-        .step8 = "#d5ae39",
-        .step9 = "#ffe629",
-        .step10 = "#ffdc00",
-        .step11 = "#9e6c00",
-        .step12 = "#473b1f",
+    pub const yellow: DualScale = .{
+        .light = .{
+            .step1 = "#fdfdf9", .step2 = "#fefce9", .step3 = "#fffab8",
+            .step4 = "#fff394", .step5 = "#ffe770", .step6 = "#f3d768",
+            .step7 = "#e4c767", .step8 = "#d5ae39", .step9 = "#ffe629",
+            .step10 = "#ffdc00", .step11 = "#9e6c00", .step12 = "#473b1f",
+        },
+        .dark = .{
+            .step1 = "#14120b", .step2 = "#1b180f", .step3 = "#2d2305",
+            .step4 = "#362b00", .step5 = "#433500", .step6 = "#524202",
+            .step7 = "#665417", .step8 = "#836a21", .step9 = "#ffe629",
+            .step10 = "#ffff57", .step11 = "#f5e147", .step12 = "#f6eeb4",
+        },
     };
-    pub const green: Scale = .{
-        .step1 = "#fbfefc",
-        .step2 = "#f4fbf6",
-        .step3 = "#e6f6eb",
-        .step4 = "#d6f1df",
-        .step5 = "#c3e9d0",
-        .step6 = "#acdec0",
-        .step7 = "#8cceb0",
-        .step8 = "#5bb98b",
-        .step9 = "#30a46c",
-        .step10 = "#2b9a66",
-        .step11 = "#218358",
-        .step12 = "#193b2d",
+    pub const green: DualScale = .{
+        .light = .{
+            .step1 = "#fbfefc", .step2 = "#f4fbf6", .step3 = "#e6f6eb",
+            .step4 = "#d6f1df", .step5 = "#c3e9d0", .step6 = "#acdec0",
+            .step7 = "#8cceb0", .step8 = "#5bb98b", .step9 = "#30a46c",
+            .step10 = "#2b9a66", .step11 = "#218358", .step12 = "#193b2d",
+        },
+        .dark = .{
+            .step1 = "#0e1512", .step2 = "#121b17", .step3 = "#132d21",
+            .step4 = "#113b29", .step5 = "#174933", .step6 = "#20573e",
+            .step7 = "#28684a", .step8 = "#2f7c57", .step9 = "#30a46c",
+            .step10 = "#33b074", .step11 = "#3dd68c", .step12 = "#b1f1cb",
+        },
     };
-    pub const grass: Scale = .{
-        .step1 = "#fbfefb",
-        .step2 = "#f5fbf5",
-        .step3 = "#e9f6e9",
-        .step4 = "#daf1db",
-        .step5 = "#c9e8ca",
-        .step6 = "#b2ddb5",
-        .step7 = "#94ce9a",
-        .step8 = "#65ba74",
-        .step9 = "#46a758",
-        .step10 = "#3e9b4f",
-        .step11 = "#2d8541",
-        .step12 = "#203c25",
+    pub const grass: DualScale = .{
+        .light = .{
+            .step1 = "#fbfefb", .step2 = "#f5fbf5", .step3 = "#e9f6e9",
+            .step4 = "#daf1db", .step5 = "#c9e8ca", .step6 = "#b2ddb5",
+            .step7 = "#94ce9a", .step8 = "#65ba74", .step9 = "#46a758",
+            .step10 = "#3e9b4f", .step11 = "#2d8541", .step12 = "#203c25",
+        },
+        .dark = .{
+            .step1 = "#0e1511", .step2 = "#141a15", .step3 = "#1b2a1e",
+            .step4 = "#1d3a24", .step5 = "#25482d", .step6 = "#2d5736",
+            .step7 = "#366740", .step8 = "#3e7949", .step9 = "#46a758",
+            .step10 = "#53b365", .step11 = "#71d083", .step12 = "#c2f0c2",
+        },
     };
-    pub const teal: Scale = .{
-        .step1 = "#fafefd",
-        .step2 = "#f3fbf9",
-        .step3 = "#e0f8f3",
-        .step4 = "#ccf3ea",
-        .step5 = "#b8eae0",
-        .step6 = "#a1ded2",
-        .step7 = "#83cdc1",
-        .step8 = "#53b9ab",
-        .step9 = "#12a594",
-        .step10 = "#0d9b8a",
-        .step11 = "#008573",
-        .step12 = "#0d3d38",
+    pub const teal: DualScale = .{
+        .light = .{
+            .step1 = "#fafefd", .step2 = "#f3fbf9", .step3 = "#e0f8f3",
+            .step4 = "#ccf3ea", .step5 = "#b8eae0", .step6 = "#a1ded2",
+            .step7 = "#83cdc1", .step8 = "#53b9ab", .step9 = "#12a594",
+            .step10 = "#0d9b8a", .step11 = "#008573", .step12 = "#0d3d38",
+        },
+        .dark = .{
+            .step1 = "#0d1514", .step2 = "#111c1b", .step3 = "#0d2d2a",
+            .step4 = "#023b37", .step5 = "#084843", .step6 = "#145750",
+            .step7 = "#1c6961", .step8 = "#207e73", .step9 = "#12a594",
+            .step10 = "#0eb39e", .step11 = "#0bd8b6", .step12 = "#adf0dd",
+        },
     };
-    pub const cyan: Scale = .{
-        .step1 = "#fafdfe",
-        .step2 = "#f2fafb",
-        .step3 = "#def7f9",
-        .step4 = "#caf1f6",
-        .step5 = "#b5e9f0",
-        .step6 = "#9ddde7",
-        .step7 = "#7dcedc",
-        .step8 = "#3db9cf",
-        .step9 = "#00a2c7",
-        .step10 = "#0797b9",
-        .step11 = "#107d98",
-        .step12 = "#0d3c48",
+    pub const cyan: DualScale = .{
+        .light = .{
+            .step1 = "#fafdfe", .step2 = "#f2fafb", .step3 = "#def7f9",
+            .step4 = "#caf1f6", .step5 = "#b5e9f0", .step6 = "#9ddde7",
+            .step7 = "#7dcedc", .step8 = "#3db9cf", .step9 = "#00a2c7",
+            .step10 = "#0797b9", .step11 = "#107d98", .step12 = "#0d3c48",
+        },
+        .dark = .{
+            .step1 = "#0b1518", .step2 = "#111b1f", .step3 = "#082c36",
+            .step4 = "#003848", .step5 = "#004558", .step6 = "#045468",
+            .step7 = "#12677e", .step8 = "#117d98", .step9 = "#00a2c7",
+            .step10 = "#23afd0", .step11 = "#4ccce6", .step12 = "#b6ecf7",
+        },
     };
-    pub const blue: Scale = .{
-        .step1 = "#fbfdff",
-        .step2 = "#f4faff",
-        .step3 = "#e6f4fe",
-        .step4 = "#d5efff",
-        .step5 = "#c2e5ff",
-        .step6 = "#acd8fc",
-        .step7 = "#8ec8f6",
-        .step8 = "#5eb1ef",
-        .step9 = "#0090ff",
-        .step10 = "#0588f0",
-        .step11 = "#0d74ce",
-        .step12 = "#113264",
+    pub const blue: DualScale = .{
+        .light = .{
+            .step1 = "#fbfdff", .step2 = "#f4faff", .step3 = "#e6f4fe",
+            .step4 = "#d5efff", .step5 = "#c2e5ff", .step6 = "#acd8fc",
+            .step7 = "#8ec8f6", .step8 = "#5eb1ef", .step9 = "#0090ff",
+            .step10 = "#0588f0", .step11 = "#0d74ce", .step12 = "#113264",
+        },
+        .dark = .{
+            .step1 = "#0d1520", .step2 = "#111927", .step3 = "#0d2847",
+            .step4 = "#003362", .step5 = "#004078", .step6 = "#104d93",
+            .step7 = "#205d9e", .step8 = "#2870bd", .step9 = "#0090ff",
+            .step10 = "#3b9eff", .step11 = "#70b8ff", .step12 = "#c2e6ff",
+        },
     };
-    pub const indigo: Scale = .{
-        .step1 = "#fdfdfe",
-        .step2 = "#f7f9ff",
-        .step3 = "#edf2fe",
-        .step4 = "#e1e9ff",
-        .step5 = "#d2deff",
-        .step6 = "#c1d0ff",
-        .step7 = "#abbdf9",
-        .step8 = "#8da4ef",
-        .step9 = "#3e63dd",
-        .step10 = "#3358d4",
-        .step11 = "#3a5bc7",
-        .step12 = "#1f2d5c",
+    pub const indigo: DualScale = .{
+        .light = .{
+            .step1 = "#fdfdfe", .step2 = "#f7f9ff", .step3 = "#edf2fe",
+            .step4 = "#e1e9ff", .step5 = "#d2deff", .step6 = "#c1d0ff",
+            .step7 = "#abbdf9", .step8 = "#8da4ef", .step9 = "#3e63dd",
+            .step10 = "#3358d4", .step11 = "#3a5bc7", .step12 = "#1f2d5c",
+        },
+        .dark = .{
+            .step1 = "#11131f", .step2 = "#141726", .step3 = "#182449",
+            .step4 = "#1d2e62", .step5 = "#253974", .step6 = "#304384",
+            .step7 = "#3a4f97", .step8 = "#435db1", .step9 = "#3e63dd",
+            .step10 = "#5472e4", .step11 = "#9eb1ff", .step12 = "#d6e1ff",
+        },
     };
-    pub const violet: Scale = .{
-        .step1 = "#fdfcfe",
-        .step2 = "#faf8ff",
-        .step3 = "#f4f0fe",
-        .step4 = "#ebe4ff",
-        .step5 = "#e1d9ff",
-        .step6 = "#d4cafe",
-        .step7 = "#c2b5f5",
-        .step8 = "#aa99ec",
-        .step9 = "#6e56cf",
-        .step10 = "#654dc4",
-        .step11 = "#6550b9",
-        .step12 = "#2f265f",
+    pub const violet: DualScale = .{
+        .light = .{
+            .step1 = "#fdfcfe", .step2 = "#faf8ff", .step3 = "#f4f0fe",
+            .step4 = "#ebe4ff", .step5 = "#e1d9ff", .step6 = "#d4cafe",
+            .step7 = "#c2b5f5", .step8 = "#aa99ec", .step9 = "#6e56cf",
+            .step10 = "#654dc4", .step11 = "#6550b9", .step12 = "#2f265f",
+        },
+        .dark = .{
+            .step1 = "#14121f", .step2 = "#1b1525", .step3 = "#291f43",
+            .step4 = "#33255b", .step5 = "#3c2e6e", .step6 = "#473b7f",
+            .step7 = "#544994", .step8 = "#6958ad", .step9 = "#6e56cf",
+            .step10 = "#7d66d9", .step11 = "#baa7ff", .step12 = "#e2ddfe",
+        },
     };
-    pub const purple: Scale = .{
-        .step1 = "#fefcfe",
-        .step2 = "#fbf7fe",
-        .step3 = "#f7edfc",
-        .step4 = "#f2e2fc",
-        .step5 = "#ead5f9",
-        .step6 = "#dec4f4",
-        .step7 = "#cfafe9",
-        .step8 = "#bc93db",
-        .step9 = "#8e4ec6",
-        .step10 = "#8445bc",
-        .step11 = "#793aaf",
-        .step12 = "#38205c",
+    pub const purple: DualScale = .{
+        .light = .{
+            .step1 = "#fefcfe", .step2 = "#fbf7fe", .step3 = "#f7edfc",
+            .step4 = "#f2e2fc", .step5 = "#ead5f9", .step6 = "#dec4f4",
+            .step7 = "#cfafe9", .step8 = "#bc93db", .step9 = "#8e4ec6",
+            .step10 = "#8445bc", .step11 = "#793aaf", .step12 = "#38205c",
+        },
+        .dark = .{
+            .step1 = "#18111b", .step2 = "#1e1523", .step3 = "#301c3b",
+            .step4 = "#3d224e", .step5 = "#48295c", .step6 = "#54346b",
+            .step7 = "#664282", .step8 = "#8457aa", .step9 = "#8e4ec6",
+            .step10 = "#9a5cd0", .step11 = "#d19dff", .step12 = "#ecd9fa",
+        },
     };
-    pub const pink: Scale = .{
-        .step1 = "#fffcfe",
-        .step2 = "#fef7fb",
-        .step3 = "#fee9f5",
-        .step4 = "#fbdcef",
-        .step5 = "#f6cee7",
-        .step6 = "#efbfdd",
-        .step7 = "#e4a9cf",
-        .step8 = "#d68cbb",
-        .step9 = "#d6409f",
-        .step10 = "#cf3897",
-        .step11 = "#c2298a",
-        .step12 = "#651249",
+    pub const pink: DualScale = .{
+        .light = .{
+            .step1 = "#fffcfe", .step2 = "#fef7fb", .step3 = "#fee9f5",
+            .step4 = "#fbdcef", .step5 = "#f6cee7", .step6 = "#efbfdd",
+            .step7 = "#e4a9cf", .step8 = "#d68cbb", .step9 = "#d6409f",
+            .step10 = "#cf3897", .step11 = "#c2298a", .step12 = "#651249",
+        },
+        .dark = .{
+            .step1 = "#191117", .step2 = "#21121d", .step3 = "#37172f",
+            .step4 = "#4b143d", .step5 = "#591c47", .step6 = "#692955",
+            .step7 = "#833869", .step8 = "#a84882", .step9 = "#d6409f",
+            .step10 = "#de51a8", .step11 = "#ff8dcc", .step12 = "#fdd1ea",
+        },
     };
-    pub const plum: Scale = .{
-        .step1 = "#fefcff",
-        .step2 = "#fdf7fd",
-        .step3 = "#fbebfb",
-        .step4 = "#f7def8",
-        .step5 = "#f2d1f3",
-        .step6 = "#e9c2ec",
-        .step7 = "#deade3",
-        .step8 = "#cf91d8",
-        .step9 = "#ab4aba",
-        .step10 = "#a144af",
-        .step11 = "#953ea3",
-        .step12 = "#53195d",
+    pub const plum: DualScale = .{
+        .light = .{
+            .step1 = "#fefcff", .step2 = "#fdf7fd", .step3 = "#fbebfb",
+            .step4 = "#f7def8", .step5 = "#f2d1f3", .step6 = "#e9c2ec",
+            .step7 = "#deade3", .step8 = "#cf91d8", .step9 = "#ab4aba",
+            .step10 = "#a144af", .step11 = "#953ea3", .step12 = "#53195d",
+        },
+        .dark = .{
+            .step1 = "#181118", .step2 = "#201320", .step3 = "#351a35",
+            .step4 = "#451d47", .step5 = "#512454", .step6 = "#5e3061",
+            .step7 = "#734079", .step8 = "#92549c", .step9 = "#ab4aba",
+            .step10 = "#b658c4", .step11 = "#e796f3", .step12 = "#f4d4f4",
+        },
     };
-    pub const gray: Scale = .{
-        .step1 = "#fcfcfc",
-        .step2 = "#f9f9f9",
-        .step3 = "#f0f0f0",
-        .step4 = "#e8e8e8",
-        .step5 = "#e0e0e0",
-        .step6 = "#d9d9d9",
-        .step7 = "#cecece",
-        .step8 = "#bbbbbb",
-        .step9 = "#8d8d8d",
-        .step10 = "#838383",
-        .step11 = "#646464",
-        .step12 = "#202020",
+    pub const gray: DualScale = .{
+        .light = .{
+            .step1 = "#fcfcfc", .step2 = "#f9f9f9", .step3 = "#f0f0f0",
+            .step4 = "#e8e8e8", .step5 = "#e0e0e0", .step6 = "#d9d9d9",
+            .step7 = "#cecece", .step8 = "#bbbbbb", .step9 = "#8d8d8d",
+            .step10 = "#838383", .step11 = "#646464", .step12 = "#202020",
+        },
+        .dark = .{
+            .step1 = "#111111", .step2 = "#191919", .step3 = "#222222",
+            .step4 = "#2a2a2a", .step5 = "#313131", .step6 = "#3a3a3a",
+            .step7 = "#484848", .step8 = "#606060", .step9 = "#6e6e6e",
+            .step10 = "#7b7b7b", .step11 = "#b4b4b4", .step12 = "#eeeeee",
+        },
     };
 };
 
@@ -627,31 +654,60 @@ test "escape.fg256 produces valid escape sequence" {
 }
 
 test "radix scale step access" {
-    // Direct field access
-    try std.testing.expectEqualStrings("#3e63dd", scale.indigo.step9);
-    try std.testing.expectEqualStrings("#e5484d", scale.red.step9);
-    try std.testing.expectEqualStrings("#30a46c", scale.green.step9);
+    // Direct field access via .light
+    try std.testing.expectEqualStrings("#3e63dd", scale.indigo.light.step9);
+    try std.testing.expectEqualStrings("#e5484d", scale.red.light.step9);
+    try std.testing.expectEqualStrings("#30a46c", scale.green.light.step9);
+
+    // Dark mode — same step9 semantics, different values at edges
+    try std.testing.expectEqualStrings("#e5484d", scale.red.dark.step9);
+    try std.testing.expectEqualStrings("#191111", scale.red.dark.step1);
+    try std.testing.expectEqualStrings("#ffd1d9", scale.red.dark.step12);
 
     // 1-based step() accessor
-    try std.testing.expectEqualStrings("#fbfdff", scale.blue.step(1));
-    try std.testing.expectEqualStrings("#113264", scale.blue.step(12));
+    try std.testing.expectEqualStrings("#fbfdff", scale.blue.light.step(1));
+    try std.testing.expectEqualStrings("#113264", scale.blue.light.step(12));
 
     // Clamping
-    try std.testing.expectEqualStrings("#fbfdff", scale.blue.step(0));
-    try std.testing.expectEqualStrings("#113264", scale.blue.step(99));
+    try std.testing.expectEqualStrings("#fbfdff", scale.blue.light.step(0));
+    try std.testing.expectEqualStrings("#113264", scale.blue.light.step(99));
 }
 
 test "radix scale all() returns 12 valid hex colors" {
-    const blue_all = scale.blue.all();
+    const blue_all = scale.blue.light.all();
     try std.testing.expectEqual(@as(usize, 12), blue_all.len);
     for (blue_all) |hex| {
+        try std.testing.expect(isValidHex(hex));
+    }
+    // Dark mode too
+    const blue_dark_all = scale.blue.dark.all();
+    try std.testing.expectEqual(@as(usize, 12), blue_dark_all.len);
+    for (blue_dark_all) |hex| {
         try std.testing.expect(isValidHex(hex));
     }
 }
 
 test "radix scale cycling via get()" {
-    const reds = scale.red.all();
+    const reds = scale.red.light.all();
     // Cycling works through the standard get() function
     try std.testing.expectEqualStrings(reds[0], get(&reds, 0));
     try std.testing.expectEqualStrings(reds[0], get(&reds, 12)); // cycles
+}
+
+test "radix dual scale forMode()" {
+    const red = scale.red;
+    const light = red.forMode(.light);
+    const dark = red.forMode(.dark);
+
+    // Light step1 is near-white, dark step1 is near-black
+    try std.testing.expectEqualStrings("#fffcfc", light.step1);
+    try std.testing.expectEqualStrings("#191111", dark.step1);
+
+    // Step9 (the accent) is the same in both modes for red
+    try std.testing.expectEqualStrings("#e5484d", light.step9);
+    try std.testing.expectEqualStrings("#e5484d", dark.step9);
+
+    // Light step12 is near-black, dark step12 is near-white
+    try std.testing.expectEqualStrings("#381316", light.step12);
+    try std.testing.expectEqualStrings("#ffd1d9", dark.step12);
 }
