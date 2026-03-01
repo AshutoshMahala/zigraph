@@ -81,7 +81,7 @@ pub fn computeBoundingBoxes(
         min_x[sg_idx] = @min(min_x[sg_idx], node.x);
         min_y[sg_idx] = @min(min_y[sg_idx], node.y);
         max_x[sg_idx] = @max(max_x[sg_idx], node.x + node.width);
-        max_y[sg_idx] = @max(max_y[sg_idx], node.y + 1); // node height = 1 row
+        max_y[sg_idx] = @max(max_y[sg_idx], node.y + node.height); // node bottom edge
     }
 
     // Pass 2: bottom-up — pad each subgraph, then propagate to parent

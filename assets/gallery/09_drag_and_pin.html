@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>zigraph — Drag &amp; Pin Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #f8fafc; }
+  header { background: #1e293b; color: white; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .hint { font-size: 13px; color: #94a3b8; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: #94a3b8; align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .legend .dot.free { background: #22c55e; border: 2px solid #16a34a; }
+  .legend .dot.pinned { background: #ef4444; border: 2px solid #dc2626; }
+  #canvas { width: 100%; height: calc(100vh - 48px); cursor: default; }
+  .node-group { cursor: grab; }
+  .node-group:active { cursor: grabbing; }
+  .node-group.pinned rect { stroke: #dc2626; stroke-width: 2.5; stroke-dasharray: none; }
+  .node-group.pinned .pin-icon { display: block; }
+  .pin-icon { display: none; font-size: 10px; }
+  .edge-path { fill: none; stroke: #94a3b8; stroke-width: 1.5; }
+  .edge-path.highlighted { stroke: #3b82f6; stroke-width: 2.5; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>zigraph — Drag &amp; Pin</h1>
+    <div class="hint">Drag nodes to move • Click to pin (red) • Double-click to unpin</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot free"></span> Free</span>
+    <span><span class="dot pinned"></span> Pinned</span>
+  </div>
+</header>
+<svg id="canvas" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 380">
+<defs>
+  <marker id="arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+    <polygon points="0 0, 8 4, 0 8" fill="#94a3b8"/>
+  </marker>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+
+<!-- Edges -->
+<g id="edges">
+  <line class="edge-path" data-from="6" data-to="1" 
+        x1="120" y1="44" x2="120" y2="92" 
+        marker-end="url(#arrow)"/>
+  <line class="edge-path" data-from="1" data-to="2" 
+        x1="120" y1="116" x2="80" y2="164" 
+        marker-end="url(#arrow)"/>
+  <line class="edge-path" data-from="1" data-to="3" 
+        x1="120" y1="116" x2="160" y2="164" 
+        marker-end="url(#arrow)"/>
+  <line class="edge-path" data-from="2" data-to="4" 
+        x1="80" y1="188" x2="70" y2="236" 
+        marker-end="url(#arrow)"/>
+  <line class="edge-path" data-from="3" data-to="4" 
+        x1="160" y1="188" x2="70" y2="236" 
+        marker-end="url(#arrow)"/>
+  <line class="edge-path" data-from="3" data-to="5" 
+        x1="160" y1="188" x2="180" y2="236" 
+        marker-end="url(#arrow)"/>
+</g>
+
+<!-- Nodes -->
+<g id="nodes">
+  <g class="node-group" data-id="1" transform="translate(80,92)"
+     data-cx="120" data-cy="104" data-w="80" data-h="24">
+    <rect x="0" y="0" width="80" height="24" rx="6" ry="6" 
+          fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="40" y="16" text-anchor="middle" font-family="monospace" 
+          font-size="12" fill="#334155" stroke="none">Server</text>
+    <text class="pin-icon" x="64" y="14" font-size="12">📌</text>
+  </g>
+  <g class="node-group" data-id="2" transform="translate(50,164)"
+     data-cx="80" data-cy="176" data-w="60" data-h="24">
+    <rect x="0" y="0" width="60" height="24" rx="6" ry="6" 
+          fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="30" y="16" text-anchor="middle" font-family="monospace" 
+          font-size="12" fill="#334155" stroke="none">Auth</text>
+    <text class="pin-icon" x="44" y="14" font-size="12">📌</text>
+  </g>
+  <g class="node-group" data-id="3" transform="translate(140,164)"
+     data-cx="165" data-cy="176" data-w="50" data-h="24">
+    <rect x="0" y="0" width="50" height="24" rx="6" ry="6" 
+          fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="25" y="16" text-anchor="middle" font-family="monospace" 
+          font-size="12" fill="#334155" stroke="none">API</text>
+    <text class="pin-icon" x="34" y="14" font-size="12">📌</text>
+  </g>
+  <g class="node-group" data-id="4" transform="translate(20,236)"
+     data-cx="70" data-cy="248" data-w="100" data-h="24">
+    <rect x="0" y="0" width="100" height="24" rx="6" ry="6" 
+          fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="50" y="16" text-anchor="middle" font-family="monospace" 
+          font-size="12" fill="#334155" stroke="none">Database</text>
+    <text class="pin-icon" x="84" y="14" font-size="12">📌</text>
+  </g>
+  <g class="node-group" data-id="5" transform="translate(150,236)"
+     data-cx="185" data-cy="248" data-w="70" data-h="24">
+    <rect x="0" y="0" width="70" height="24" rx="6" ry="6" 
+          fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="35" y="16" text-anchor="middle" font-family="monospace" 
+          font-size="12" fill="#334155" stroke="none">Cache</text>
+    <text class="pin-icon" x="54" y="14" font-size="12">📌</text>
+  </g>
+  <g class="node-group" data-id="6" transform="translate(80,20)"
+     data-cx="120" data-cy="32" data-w="80" data-h="24">
+    <rect x="0" y="0" width="80" height="24" rx="6" ry="6" 
+          fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="40" y="16" text-anchor="middle" font-family="monospace" 
+          font-size="12" fill="#334155" stroke="none">Client</text>
+    <text class="pin-icon" x="64" y="14" font-size="12">📌</text>
+  </g>
+</g>
+</svg>
+<script>
+(function() {
+  const svgEl = document.getElementById('canvas');
+  const nodesG = document.getElementById('nodes');
+  const edgesG = document.getElementById('edges');
+
+  // Track pinned state per node
+  const pinned = new Map();
+
+  // Convert screen coords to SVG coords
+  function svgPoint(evt) {
+    const pt = svgEl.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    return pt.matrixTransform(svgEl.getScreenCTM().inverse());
+  }
+
+  // Update all edges connected to a node
+  function updateEdges(nodeId, cx, cy) {
+    edgesG.querySelectorAll('line').forEach(line => {
+      const fromId = parseInt(line.getAttribute('data-from'));
+      const toId   = parseInt(line.getAttribute('data-to'));
+      if (fromId === nodeId) {
+        line.setAttribute('x1', cx);
+        line.setAttribute('y1', cy);
+      }
+      if (toId === nodeId) {
+        line.setAttribute('x2', cx);
+        line.setAttribute('y2', cy);
+      }
+    });
+  }
+
+  // Get center of a node group
+  function getCenter(el) {
+    return {
+      x: parseInt(el.getAttribute('data-cx')),
+      y: parseInt(el.getAttribute('data-cy'))
+    };
+  }
+
+  // Update stored center after drag
+  function setCenter(el, cx, cy) {
+    el.setAttribute('data-cx', cx);
+    el.setAttribute('data-cy', cy);
+  }
+
+  // ─── Drag handling ───────────────────────────────────────────
+  let dragging = null;
+  let dragOffset = { x: 0, y: 0 };
+  let hasDragged = false;
+
+  nodesG.addEventListener('mousedown', (evt) => {
+    const group = evt.target.closest('.node-group');
+    if (!group) return;
+    evt.preventDefault();
+    dragging = group;
+    hasDragged = false;
+    const pt = svgPoint(evt);
+    const transform = group.getAttribute('transform');
+    const match = transform.match(/translate\((\d+),(\d+)\)/);
+    const tx = parseInt(match[1]), ty = parseInt(match[2]);
+    dragOffset.x = pt.x - tx;
+    dragOffset.y = pt.y - ty;
+    group.style.opacity = '0.8';
+    // Highlight connected edges
+    const id = parseInt(group.getAttribute('data-id'));
+    edgesG.querySelectorAll('line').forEach(line => {
+      const f = parseInt(line.getAttribute('data-from'));
+      const t = parseInt(line.getAttribute('data-to'));
+      if (f === id || t === id) line.classList.add('highlighted');
+    });
+  });
+
+  svgEl.addEventListener('mousemove', (evt) => {
+    if (!dragging) return;
+    hasDragged = true;
+    const pt = svgPoint(evt);
+    const nx = Math.round(pt.x - dragOffset.x);
+    const ny = Math.round(pt.y - dragOffset.y);
+    dragging.setAttribute('transform', `translate(${nx},${ny})`);
+    // Update center and edges
+    const w = parseInt(dragging.getAttribute('data-w'));
+    const h = parseInt(dragging.getAttribute('data-h'));
+    const cx = nx + w / 2, cy = ny + h / 2;
+    setCenter(dragging, cx, cy);
+    const id = parseInt(dragging.getAttribute('data-id'));
+    updateEdges(id, cx, cy);
+  });
+
+  svgEl.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging.style.opacity = '1';
+    edgesG.querySelectorAll('.highlighted').forEach(l => l.classList.remove('highlighted'));
+    dragging = null;
+  });
+
+  // ─── Pin / Unpin ─────────────────────────────────────────────
+  // Single click = pin, double click = unpin
+  nodesG.addEventListener('click', (evt) => {
+    if (hasDragged) return; // ignore click after drag
+    const group = evt.target.closest('.node-group');
+    if (!group) return;
+    const id = parseInt(group.getAttribute('data-id'));
+    if (!pinned.has(id)) {
+      pinned.set(id, true);
+      group.classList.add('pinned');
+      console.log(`Node ${id} pinned at`, getCenter(group));
+    }
+  });
+
+  nodesG.addEventListener('dblclick', (evt) => {
+    const group = evt.target.closest('.node-group');
+    if (!group) return;
+    const id = parseInt(group.getAttribute('data-id'));
+    if (pinned.has(id)) {
+      pinned.delete(id);
+      group.classList.remove('pinned');
+      console.log(`Node ${id} unpinned`);
+    }
+  });
+
+})();
+</script>
+</body>
+</html>

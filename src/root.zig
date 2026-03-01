@@ -34,6 +34,8 @@ pub const Graph = graph.Graph;
 pub const Node = graph.Node;
 pub const Edge = graph.Edge;
 pub const NodeKind = graph.NodeKind;
+pub const NodeOptions = graph.NodeOptions;
+pub const Pin = graph.Pin;
 pub const Subgraph = graph.Subgraph;
 pub const ValidationResult = graph.ValidationResult;
 pub const CycleInfo = graph.CycleInfo;
@@ -398,7 +400,9 @@ fn layoutFdg(
             .x = x,
             .y = y,
             .width = node.width,
+            .height = node.height,
             .center_x = x + node.width / 2,
+            .center_y = y + node.height / 2,
             .level = 0, // FDG doesn't have levels
             .level_position = node_idx,
             .kind = node.kind,
@@ -831,6 +835,107 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     };
     defer layer_assignment.deinit();
 
+    // Step 1a: Apply pin.y constraints — override levels for pinned nodes,
+    // then repair topological ordering so all edges still flow downward.
+    {
+        // Phase 1: Apply pin.y hints
+        for (0..g.nodeCount()) |node_idx| {
+            const node = g.nodeAt(node_idx) orelse continue;
+            const pin = node.pin orelse continue;
+            if (pin.y) |pinned_level| {
+                layer_assignment.levels[node_idx] = pinned_level;
+                layer_assignment.max_level = @max(layer_assignment.max_level, pinned_level);
+            }
+        }
+
+        // Phase 2: Topological repair — ensure every edge u→v has level[u] < level[v].
+        // If a pin caused a violation, push the child node down (cascading).
+        // Uses fixed-point iteration; converges in O(depth) passes for DAGs.
+        var changed = true;
+        var safety: usize = 0;
+        const max_iters = g.nodeCount() + 1;
+        while (changed and safety < max_iters) : (safety += 1) {
+            changed = false;
+            for (g.edges.items, 0..) |edge, edge_idx| {
+                // Respect reversed edges from cycle breaking
+                const is_reversed = if (reversed_edges) |re| re[edge_idx] else false;
+                const from_id = if (is_reversed) edge.to else edge.from;
+                const to_id = if (is_reversed) edge.from else edge.to;
+
+                const from_idx = g.nodeIndex(from_id) orelse continue;
+                const to_idx = g.nodeIndex(to_id) orelse continue;
+                if (from_idx == to_idx) continue;
+
+                // Skip if the child is pinned — don't override explicit user intent
+                const to_node = g.nodeAt(to_idx) orelse continue;
+                if (to_node.pin) |to_pin| {
+                    if (to_pin.y != null) continue;
+                }
+
+                // Enforce: level[to] > level[from]
+                if (layer_assignment.levels[to_idx] <= layer_assignment.levels[from_idx]) {
+                    layer_assignment.levels[to_idx] = layer_assignment.levels[from_idx] + 1;
+                    layer_assignment.max_level = @max(layer_assignment.max_level, layer_assignment.levels[to_idx]);
+                    changed = true;
+                }
+            }
+        }
+
+        // Phase 3: Level compaction — collapse sparse level indices to dense
+        // consecutive values. E.g. [0, 0, 12, 13, 14, 14] → [0, 0, 1, 2, 3, 3].
+        // This prevents pin.y pixel-coordinate inflation from creating huge
+        // level gaps that spawn excessive dummy nodes for skip-level edges.
+        {
+            const node_count = g.nodeCount();
+
+            // Collect unique levels
+            const unique_buf = try allocator.alloc(usize, node_count);
+            defer allocator.free(unique_buf);
+            var unique_count: usize = 0;
+
+            for (0..node_count) |ni| {
+                const lev = layer_assignment.levels[ni];
+                var found = false;
+                for (0..unique_count) |ui| {
+                    if (unique_buf[ui] == lev) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    unique_buf[unique_count] = lev;
+                    unique_count += 1;
+                }
+            }
+
+            // Sort unique levels (insertion sort — typically very few unique levels)
+            const unique_levels = unique_buf[0..unique_count];
+            for (1..unique_count) |i| {
+                const key = unique_levels[i];
+                var j: usize = i;
+                while (j > 0 and unique_levels[j - 1] > key) {
+                    unique_levels[j] = unique_levels[j - 1];
+                    j -= 1;
+                }
+                unique_levels[j] = key;
+            }
+
+            // Remap each node's level to its dense rank
+            for (0..node_count) |ni| {
+                const old_level = layer_assignment.levels[ni];
+                for (unique_levels, 0..) |ul, rank| {
+                    if (ul == old_level) {
+                        layer_assignment.levels[ni] = rank;
+                        break;
+                    }
+                }
+            }
+
+            // Update max_level to dense count
+            layer_assignment.max_level = if (unique_count > 0) unique_count - 1 else 0;
+        }
+    }
+
     // Step 1b: Enforce contiguous level spans for subgraph members
     if (g.hasSubgraphs()) {
         try subgraph_layout.enforceContiguousLevels(g, &layer_assignment, allocator);
@@ -952,30 +1057,49 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         &virtual_positions,
         g.edges.items.len,
         effective_level_spacing,
+        real_positions.level_y,
         allocator,
     );
     defer dummy_positions.deinit();
 
     // Step 4d: Apply vertical subgraph padding (y-offsets for border rows)
     if (cumulative_y.len > 0) {
-        // Shift real node y positions
+        // Shift real node y positions and center_y
         for (0..g.nodeCount()) |node_idx| {
             const lvl = real_positions.level[node_idx];
             if (lvl < cumulative_y.len) {
                 real_positions.y[node_idx] += cumulative_y[lvl];
+                real_positions.center_y[node_idx] += cumulative_y[lvl];
+            }
+        }
+        // Shift level_y entries
+        for (real_positions.level_y, 0..) |*ly, lvl| {
+            if (lvl < cumulative_y.len) {
+                ly.* += cumulative_y[lvl];
             }
         }
         // Shift dummy waypoint y positions
+        // Use level_y to reverse-lookup which level a dummy Y corresponds to
         for (dummy_positions.waypoints.items) |*edge_wps| {
             for (edge_wps.items) |*wp| {
-                // wp.level is actually the y-coordinate (level_idx * (1 + spacing))
-                // We need to find which level_idx produced this y and apply its offset
-                const base_y_per_level = 1 + effective_level_spacing;
-                if (base_y_per_level > 0) {
-                    const approx_level = wp.level / base_y_per_level;
-                    if (approx_level < cumulative_y.len) {
-                        wp.level += cumulative_y[approx_level];
+                // Find which level this waypoint's Y coordinate came from
+                // by searching level_y (already shifted) minus cumulative shift
+                // The dummy Y was already computed from level_y, so find the
+                // matching level index and add its cumulative offset
+                var best_level: usize = 0;
+                var best_dist: usize = std.math.maxInt(usize);
+                const pre_shift_level_y = real_positions.level_y;
+                for (pre_shift_level_y, 0..) |ly, li| {
+                    // Undo the shift we just applied to find original
+                    const orig_ly = if (li < cumulative_y.len) ly - cumulative_y[li] else ly;
+                    const dist = if (wp.level >= orig_ly) wp.level - orig_ly else orig_ly - wp.level;
+                    if (dist < best_dist) {
+                        best_dist = dist;
+                        best_level = li;
                     }
+                }
+                if (best_level < cumulative_y.len) {
+                    wp.level += cumulative_y[best_level];
                 }
             }
         }
@@ -998,7 +1122,9 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             .x = real_positions.x[node_idx],
             .y = real_positions.y[node_idx],
             .width = node.width,
+            .height = real_positions.height[node_idx],
             .center_x = real_positions.center_x[node_idx],
+            .center_y = real_positions.center_y[node_idx],
             .level = real_positions.level[node_idx],
             .level_position = real_positions.level_position[node_idx],
             .kind = node.kind,
@@ -1017,7 +1143,11 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             if (vnode.dummyEdge()) |edge_idx| {
                 // Get position from virtual positions
                 const x = virtual_positions.x.items[level_idx].items[pos_in_level];
-                var y = level_idx * (1 + effective_level_spacing);
+                // Use per-level Y from real_positions (already accounts for variable heights)
+                var y = if (level_idx < real_positions.level_y.len)
+                    real_positions.level_y[level_idx]
+                else
+                    level_idx * (1 + effective_level_spacing);
 
                 // Apply subgraph y-offset for this level
                 if (cumulative_y.len > 0 and level_idx < cumulative_y.len) {
@@ -1032,7 +1162,9 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
                     .x = x,
                     .y = y,
                     .width = 1, // Single character
+                    .height = 1, // Dummy nodes always height 1
                     .center_x = x,
+                    .center_y = y, // center_y = y for height-1 nodes
                     .level = level_idx,
                     .level_position = pos_in_level,
                     .kind = .dummy,
@@ -1122,7 +1254,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 
                         prev_id = dummy_id;
                         prev_x = dummy_node.center_x;
-                        prev_y = dummy_node.y + 1; // Bottom of dummy
+                        prev_y = dummy_node.y + dummy_node.height; // Bottom of dummy
                     }
                 }
 
@@ -1820,7 +1952,7 @@ test "end-to-end: layout with subgraphs produces bounding boxes" {
             try std.testing.expect(node.x >= sg_bbox.x);
             try std.testing.expect(node.y >= sg_bbox.y);
             try std.testing.expect(node.x + node.width <= sg_bbox.x + sg_bbox.width);
-            try std.testing.expect(node.y + 1 <= sg_bbox.y + sg_bbox.height);
+            try std.testing.expect(node.y + node.height <= sg_bbox.y + sg_bbox.height);
         }
     }
 
@@ -1828,7 +1960,7 @@ test "end-to-end: layout with subgraphs produces bounding boxes" {
     for (result.getNodes()) |node| {
         if (node.id == 1) {
             const inside_x = node.x >= sg_bbox.x and node.x + node.width <= sg_bbox.x + sg_bbox.width;
-            const inside_y = node.y >= sg_bbox.y and node.y + 1 <= sg_bbox.y + sg_bbox.height;
+            const inside_y = node.y >= sg_bbox.y and node.y + node.height <= sg_bbox.y + sg_bbox.height;
             // Gateway could spatially overlap due to layout, but semantically it's not in the subgraph.
             // We just verify the subgraph bbox is computed from Auth + DB, not Gateway.
             _ = inside_x;
@@ -1918,6 +2050,366 @@ test "end-to-end: subgraphs with typed coord conversion" {
     const bbox = result_f32.getSubgraphs()[0];
     try std.testing.expect(bbox.width > 0.0);
     try std.testing.expect(bbox.height > 0.0);
+}
+
+test "layout: Sugiyama pin.y overrides level assignment" {
+    const allocator = std.testing.allocator;
+
+    // A → B → C → D  (simple chain)
+    // Pin A at level 0, C at level 2  (natural assignment would be 0,1,2,3)
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, NodeOptions{ .label = "A", .pin = Pin{ .y = 0 } });
+    try g.addNode(2, "B");
+    try g.addNode(3, NodeOptions{ .label = "C", .pin = Pin{ .y = 2 } });
+    try g.addNode(4, "D");
+    try g.addEdge(1, 2);
+    try g.addEdge(2, 3);
+    try g.addEdge(3, 4);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 4), result.getNodes().len);
+
+    // Pinned nodes must land on their requested levels
+    const a = result.nodeById(1).?;
+    const c = result.nodeById(3).?;
+    try std.testing.expectEqual(@as(usize, 0), a.level);
+    try std.testing.expectEqual(@as(usize, 2), c.level);
+
+    // Unpinned D must be after C
+    const d = result.nodeById(4).?;
+    try std.testing.expect(d.y > c.y);
+
+    // Edges still valid
+    try std.testing.expect(result.getEdges().len >= 3);
+}
+
+test "layout: Sugiyama pin.y respects topological ordering" {
+    const allocator = std.testing.allocator;
+
+    // Graph: Client(6) → Server(1), Server → Auth(2), Server → API(3),
+    //        Auth → DB(4), API → DB, API → Cache(5)
+    // Pinning Server to level 3 and API to level 5 would violate ordering
+    // (Server's natural level is 1, API's is 2). The repair pass must push
+    // children downward so all edges still flow top-to-bottom.
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(6, "Client");
+    try g.addNode(1, NodeOptions{ .label = "Server", .pin = Pin{ .y = 3 } });
+    try g.addNode(2, "Auth");
+    try g.addNode(3, NodeOptions{ .label = "API", .pin = Pin{ .y = 5 } });
+    try g.addNode(4, "Database");
+    try g.addNode(5, "Cache");
+    try g.addEdge(6, 1);
+    try g.addEdge(1, 2);
+    try g.addEdge(1, 3);
+    try g.addEdge(2, 4);
+    try g.addEdge(3, 4);
+    try g.addEdge(3, 5);
+
+    var result = try layout(&g, allocator, .{ .routing = .spline });
+    defer result.deinit();
+
+    // All real nodes must exist (plus dummy nodes for skip-level edges)
+    try std.testing.expect(result.getNodes().len >= 6);
+
+    // Every edge must flow downward (from_y < to_y for non-reversed edges)
+    for (result.getEdges()) |edge| {
+        if (!edge.reversed) {
+            try std.testing.expect(edge.from_y <= edge.to_y);
+        }
+    }
+
+    // Server (pinned to level 3) must be above Auth and API in level ordering
+    const server = result.nodeById(1).?;
+    const auth = result.nodeById(2).?;
+    const api = result.nodeById(3).?;
+    try std.testing.expect(server.level < auth.level);
+    try std.testing.expect(server.level < api.level);
+
+    // API (pinned to level 5) must be above its children
+    const db = result.nodeById(4).?;
+    const cache = result.nodeById(5).?;
+    try std.testing.expect(api.level < db.level);
+    try std.testing.expect(api.level < cache.level);
+}
+
+test "layout: Sugiyama pin re-layout feedback loop — node count stable" {
+    // Simulates what example 09 does: layout → extract positions → feed back as pins → re-layout.
+    // Verifies that dummy node count doesn't grow across iterations.
+    const allocator = std.testing.allocator;
+
+    // -- Iteration 0: no pins --
+    var g0 = Graph.init(allocator);
+    defer g0.deinit();
+    try g0.addNode(6, "Client");
+    try g0.addNode(1, "Server");
+    try g0.addNode(2, "Auth");
+    try g0.addNode(3, "API");
+    try g0.addNode(4, "Database");
+    try g0.addNode(5, "Cache");
+    try g0.addEdge(6, 1);
+    try g0.addEdge(1, 2);
+    try g0.addEdge(1, 3);
+    try g0.addEdge(2, 4);
+    try g0.addEdge(3, 4);
+    try g0.addEdge(3, 5);
+
+    var ir0 = try layout(&g0, allocator, .{ .routing = .spline });
+    defer ir0.deinit();
+
+    const total_nodes_0 = ir0.getNodes().len;
+    try std.testing.expect(total_nodes_0 >= 6); // at least 6 real nodes
+
+    // Count explicit+implicit (real) nodes and dummies
+    var real_0: usize = 0;
+    var dummy_0: usize = 0;
+    for (ir0.getNodes()) |n| {
+        if (n.kind == .dummy) {
+            dummy_0 += 1;
+        } else {
+            real_0 += 1;
+        }
+    }
+
+    // Extract positions from IR (simulating frontend's pin conversion)
+    // Pin Server(1) and API(3) at their layout positions
+    const server_y_0 = ir0.nodeById(1).?.y;
+    const api_y_0 = ir0.nodeById(3).?.y;
+
+    // -- Iteration 1: pin Server and API at their layout positions --
+    var g1 = Graph.init(allocator);
+    defer g1.deinit();
+    try g1.addNode(6, "Client");
+    try g1.addNode(1, NodeOptions{ .label = "Server", .pin = Pin{ .y = server_y_0 } });
+    try g1.addNode(2, "Auth");
+    try g1.addNode(3, NodeOptions{ .label = "API", .pin = Pin{ .y = api_y_0 } });
+    try g1.addNode(4, "Database");
+    try g1.addNode(5, "Cache");
+    try g1.addEdge(6, 1);
+    try g1.addEdge(1, 2);
+    try g1.addEdge(1, 3);
+    try g1.addEdge(2, 4);
+    try g1.addEdge(3, 4);
+    try g1.addEdge(3, 5);
+
+    var ir1 = try layout(&g1, allocator, .{ .routing = .spline });
+    defer ir1.deinit();
+
+    const total_nodes_1 = ir1.getNodes().len;
+    const total_edges_1 = ir1.getEdges().len;
+
+    var real_1: usize = 0;
+    var dummy_1: usize = 0;
+    for (ir1.getNodes()) |n| {
+        if (n.kind == .dummy) {
+            dummy_1 += 1;
+        } else {
+            real_1 += 1;
+        }
+    }
+
+    // -- Iteration 2: pin at the NEW positions from iteration 1 --
+    const server_y_1 = ir1.nodeById(1).?.y;
+    const api_y_1 = ir1.nodeById(3).?.y;
+
+    var g2 = Graph.init(allocator);
+    defer g2.deinit();
+    try g2.addNode(6, "Client");
+    try g2.addNode(1, NodeOptions{ .label = "Server", .pin = Pin{ .y = server_y_1 } });
+    try g2.addNode(2, "Auth");
+    try g2.addNode(3, NodeOptions{ .label = "API", .pin = Pin{ .y = api_y_1 } });
+    try g2.addNode(4, "Database");
+    try g2.addNode(5, "Cache");
+    try g2.addEdge(6, 1);
+    try g2.addEdge(1, 2);
+    try g2.addEdge(1, 3);
+    try g2.addEdge(2, 4);
+    try g2.addEdge(3, 4);
+    try g2.addEdge(3, 5);
+
+    var ir2 = try layout(&g2, allocator, .{ .routing = .spline });
+    defer ir2.deinit();
+
+    const total_nodes_2 = ir2.getNodes().len;
+    const total_edges_2 = ir2.getEdges().len;
+
+    var real_2: usize = 0;
+    var dummy_2: usize = 0;
+    for (ir2.getNodes()) |n| {
+        if (n.kind == .dummy) {
+            dummy_2 += 1;
+        } else {
+            real_2 += 1;
+        }
+    }
+
+    // Real node count must always be 6
+    try std.testing.expectEqual(@as(usize, 6), real_0);
+    try std.testing.expectEqual(@as(usize, 6), real_1);
+    try std.testing.expectEqual(@as(usize, 6), real_2);
+
+    // Note: un-pinned (iter 0) may differ from pinned (iter 1) in total nodes/edges
+    // because pinning changes the level structure. That's fine.
+    // The KEY invariant: pinned iterations must be STABLE (iter 1 == iter 2)
+
+    // Edge count stable between pinned iterations
+    try std.testing.expectEqual(total_edges_1, total_edges_2);
+
+    // Total node count (including dummies) must NOT grow
+    try std.testing.expectEqual(total_nodes_1, total_nodes_2);
+
+    // Dummy count must be stable between pinned iterations
+    try std.testing.expectEqual(dummy_1, dummy_2);
+}
+
+test "layout: Sugiyama pin jitter stress — dummy count stays bounded" {
+    // Simulates a realistic interactive session: pin 3 nodes, jitter their
+    // y-positions by small amounts (±1) each iteration, run 10 re-layouts.
+    // Dummy count must stay bounded — not explode across iterations.
+    const allocator = std.testing.allocator;
+
+    // Jitter offsets: small perturbations simulating user dragging nodes slightly
+    const jitter = [_]i32{ 0, 1, -1, 2, -1, 0, 1, -2, 1, 0 };
+    const N_ITERS = jitter.len;
+
+    var dummy_counts: [N_ITERS]usize = undefined;
+    var total_counts: [N_ITERS]usize = undefined;
+    var edge_counts: [N_ITERS]usize = undefined;
+
+    // Starting pin values (close to natural Sugiyama levels: Server=1, Auth=2, API=2)
+    var server_pin: usize = 1;
+    var auth_pin: usize = 2;
+    var api_pin: usize = 2;
+
+    for (0..N_ITERS) |iter| {
+        // Apply jitter to pin positions (clamp to >= 0)
+        const j = jitter[iter];
+        server_pin = if (j < 0 and @as(usize, @intCast(-j)) > server_pin) 0 else if (j >= 0) server_pin + @as(usize, @intCast(j)) else server_pin - @as(usize, @intCast(-j));
+        auth_pin = if (j < 0 and @as(usize, @intCast(-j)) > auth_pin) 0 else if (j >= 0) auth_pin + @as(usize, @intCast(j)) else auth_pin - @as(usize, @intCast(-j));
+        // API jitters in the opposite direction for variety
+        const j_inv = -j;
+        api_pin = if (j_inv < 0 and @as(usize, @intCast(-j_inv)) > api_pin) 0 else if (j_inv >= 0) api_pin + @as(usize, @intCast(j_inv)) else api_pin - @as(usize, @intCast(-j_inv));
+
+        var g = Graph.init(allocator);
+        defer g.deinit();
+        try g.addNode(6, "Client");
+        try g.addNode(1, NodeOptions{ .label = "Server", .pin = Pin{ .y = server_pin } });
+        try g.addNode(2, NodeOptions{ .label = "Auth", .pin = Pin{ .y = auth_pin } });
+        try g.addNode(3, NodeOptions{ .label = "API", .pin = Pin{ .y = api_pin } });
+        try g.addNode(4, "Database");
+        try g.addNode(5, "Cache");
+        try g.addEdge(6, 1);
+        try g.addEdge(1, 2);
+        try g.addEdge(1, 3);
+        try g.addEdge(2, 4);
+        try g.addEdge(3, 4);
+        try g.addEdge(3, 5);
+
+        var layout_ir = try layout(&g, allocator, .{ .routing = .spline });
+        defer layout_ir.deinit();
+
+        var dummies: usize = 0;
+        for (layout_ir.getNodes()) |n| {
+            if (n.kind == .dummy) dummies += 1;
+        }
+        dummy_counts[iter] = dummies;
+        total_counts[iter] = layout_ir.getNodes().len;
+        edge_counts[iter] = layout_ir.getEdges().len;
+
+        // Feed back actual positions for next iteration (simulating the browser loop)
+        server_pin = layout_ir.nodeById(1).?.y;
+        auth_pin = layout_ir.nodeById(2).?.y;
+        api_pin = layout_ir.nodeById(3).?.y;
+    }
+
+    // Find min and max dummy counts across all iterations
+    var min_dummies: usize = dummy_counts[0];
+    var max_dummies: usize = dummy_counts[0];
+    for (dummy_counts) |d| {
+        min_dummies = @min(min_dummies, d);
+        max_dummies = @max(max_dummies, d);
+    }
+
+    // Key assertion: dummy count must NOT explode.
+    // With level compaction, max should be very close to min.
+    // Allow some fluctuation (jitter can change which edges skip levels)
+    // but max must be <= min + 8.
+    try std.testing.expect(max_dummies <= min_dummies + 8);
+
+    // Also verify: total nodes should stay bounded (6 real + bounded dummies)
+    for (total_counts) |t| {
+        try std.testing.expect(t <= 6 + max_dummies);
+        try std.testing.expect(t >= 6);
+    }
+}
+
+test "layout: FR standard respects pin constraints" {
+    const allocator = std.testing.allocator;
+
+    // Triangle A → B → C, A → C   with A pinned at (0,0), C pinned at (5,5)
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, NodeOptions{ .label = "A", .pin = Pin{ .x = 0, .y = 0 } });
+    try g.addNode(2, "B");
+    try g.addNode(3, NodeOptions{ .label = "C", .pin = Pin{ .x = 5, .y = 5 } });
+    try g.addEdge(1, 2);
+    try g.addEdge(2, 3);
+    try g.addEdge(1, 3);
+
+    var result = try layout(&g, allocator, .{
+        .algorithm = .{ .fruchterman_reingold = .{} },
+    });
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 3), result.getNodes().len);
+    try std.testing.expectEqual(@as(usize, 3), result.getEdges().len);
+
+    // The two pinned nodes should be at distinct positions
+    const a = result.nodeById(1).?;
+    const c = result.nodeById(3).?;
+    // A should be closer to the origin than C
+    try std.testing.expect(a.x < c.x);
+    try std.testing.expect(a.y < c.y);
+    // The unpinned node B should exist in a valid position
+    const b = result.nodeById(2).?;
+    try std.testing.expect(b.x >= 0);
+    try std.testing.expect(b.y >= 0);
+}
+
+test "layout: FR fast respects pin constraints" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    // Pin two opposite corners of a 4-node graph
+    try g.addNode(1, NodeOptions{ .label = "TL", .pin = Pin{ .x = 0, .y = 0 } });
+    try g.addNode(2, NodeOptions{ .label = "BR", .pin = Pin{ .x = 8, .y = 8 } });
+    try g.addNode(3, "Free1");
+    try g.addNode(4, "Free2");
+    try g.addEdge(1, 3);
+    try g.addEdge(3, 2);
+    try g.addEdge(1, 4);
+    try g.addEdge(4, 2);
+
+    var result = try layout(&g, allocator, .{
+        .algorithm = .{ .fruchterman_reingold_fast = .{} },
+    });
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(usize, 4), result.getNodes().len);
+
+    // Pinned nodes keep their relative ordering
+    const tl = result.nodeById(1).?;
+    const br = result.nodeById(2).?;
+    try std.testing.expect(tl.x < br.x);
+    try std.testing.expect(tl.y < br.y);
 }
 
 // Run tests from submodules

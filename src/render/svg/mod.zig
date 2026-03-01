@@ -243,7 +243,7 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
             .label = node.label,
             .total_nodes = total_real_nodes,
             .width = node.width * config.char_width,
-            .height = config.line_height,
+            .height = node.height * config.line_height,
             .is_implicit = node.kind == .implicit,
             .arena = arena_alloc,
         });

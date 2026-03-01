@@ -64,7 +64,7 @@ pub fn route(
 
         // Compute edge endpoints (center of nodes)
         const from_x = from_node.center_x;
-        const from_y = from_node.y + 1; // Bottom of source node
+        const from_y = from_node.y + from_node.height; // Bottom of source node
         const to_x = to_node.center_x;
         const to_y = to_node.y; // Top of target node
 
@@ -136,7 +136,7 @@ pub fn routeWithDummies(
         const to_node = nodes[to_idx];
 
         const from_x = from_node.center_x;
-        const from_y = from_node.y + 1;
+        const from_y = from_node.y + from_node.height;
         const to_x = to_node.center_x;
         const to_y = to_node.y;
 

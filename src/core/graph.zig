@@ -37,6 +37,35 @@ pub const NodeKind = enum {
     dummy,
 };
 
+/// Pin constraint for fixing a node's position on one or both axes.
+///
+/// Layout algorithms respect pins:
+/// - **FDG**: zero forces on pinned axes (node stays in place)
+/// - **Sugiyama**: pin.y → level hint, pin.x → position hint
+///
+/// Enables drag-and-drop: pin the dragged node, re-layout, unpin.
+pub const Pin = struct {
+    /// Fixed X coordinate (null = free)
+    x: ?usize = null,
+    /// Fixed Y coordinate (null = free)
+    y: ?usize = null,
+};
+
+/// Options for creating a node with explicit dimensions.
+///
+/// Used via `addNode(id, .{ .label = "card", .width = 40, .height = 3 })`.
+/// All fields except `label` have sensible defaults derived from the label.
+pub const NodeOptions = struct {
+    /// Display label for the node
+    label: []const u8 = "",
+    /// Explicit width override (0 = auto-compute from label)
+    width: usize = 0,
+    /// Height in layout units (default 1 for text nodes)
+    height: usize = 1,
+    /// Pin constraint (null = fully free)
+    pin: ?Pin = null,
+};
+
 /// A node in the graph.
 pub const Node = struct {
     /// Unique identifier for this node
@@ -45,10 +74,14 @@ pub const Node = struct {
     label: []const u8,
     /// Computed display width (including brackets)
     width: usize,
+    /// Node height in layout units (default 1 for text nodes)
+    height: usize = 1,
     /// Whether the label was heap-allocated (for cleanup)
     owned_label: bool = false,
     /// How this node was created
     kind: NodeKind = .explicit,
+    /// Pin constraint for fixing position (null = fully free)
+    pin: ?Pin = null,
 
     pub fn init(id: usize, label: []const u8) Node {
         // Width = "[" + label + "]" = label.len + 2
@@ -56,6 +89,18 @@ pub const Node = struct {
             .id = id,
             .label = label,
             .width = label.len + 2,
+        };
+    }
+
+    /// Create a node from explicit options (for variable sizing).
+    pub fn initFromOptions(id: usize, opts: NodeOptions) Node {
+        const effective_width = if (opts.width > 0) opts.width else opts.label.len + 2;
+        return .{
+            .id = id,
+            .label = opts.label,
+            .width = effective_width,
+            .height = opts.height,
+            .pin = opts.pin,
         };
     }
 };
@@ -195,9 +240,39 @@ pub const Graph = struct {
 
     /// Add a node to the graph.
     ///
+    /// Supports two calling conventions:
+    /// - **Simple**: `addNode(id, "label")` — string literal or slice, height=1
+    /// - **Sized**: `addNode(id, .{ .label = "card", .width = 40, .height = 3 })` — explicit dimensions
+    ///
     /// If a node with the same ID already exists, this is a no-op.
     /// Returns error.NodeLimitExceeded if max_nodes limit would be exceeded.
-    pub fn addNode(self: *Self, id: usize, label: []const u8) !void {
+    pub fn addNode(self: *Self, id: usize, desc: anytype) !void {
+        const Desc = @TypeOf(desc);
+
+        // Resolve the node from the descriptor
+        const node: Node = switch (@typeInfo(Desc)) {
+            // String literal (pointer to array): e.g. addNode(1, "hello")
+            .pointer => |ptr| blk: {
+                if (ptr.size == .one) {
+                    const child_info = @typeInfo(ptr.child);
+                    if (child_info == .array and child_info.array.child == u8) {
+                        break :blk Node.init(id, desc);
+                    }
+                }
+                // Slice: []const u8
+                if (ptr.size == .slice and ptr.child == u8) {
+                    break :blk Node.init(id, desc);
+                }
+                @compileError("addNode: unsupported pointer type for desc; expected []const u8 or NodeOptions");
+            },
+            // Struct: NodeOptions (anonymous or named)
+            .@"struct" => blk: {
+                const opts: NodeOptions = if (Desc == NodeOptions) desc else desc;
+                break :blk Node.initFromOptions(id, opts);
+            },
+            else => @compileError("addNode: desc must be a string ([]const u8) or NodeOptions struct"),
+        };
+
         // Check if node already exists
         if (self.id_to_index.contains(id)) {
             return; // Already exists
@@ -212,7 +287,7 @@ pub const Graph = struct {
         }
 
         const idx = self.nodes.items.len;
-        try self.nodes.append(self.allocator, Node.init(id, label));
+        try self.nodes.append(self.allocator, node);
         try self.id_to_index.put(self.allocator, id, idx);
 
         // Initialize empty adjacency lists for this node

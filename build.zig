@@ -482,6 +482,8 @@ pub fn build(b: *std.Build) void {
         .{ .file = "examples/svg/05_dark_theme.zig", .name = "svg_05_dark_theme", .desc = "SVG gallery: 05 dark theme" },
         .{ .file = "examples/svg/06_interactive.zig", .name = "svg_06_interactive", .desc = "SVG gallery: 06 interactive" },
         .{ .file = "examples/svg/07_heatmap.zig", .name = "svg_07_heatmap", .desc = "SVG gallery: 07 heatmap" },
+        .{ .file = "examples/svg/08_variable_sizes.zig", .name = "svg_08_variable_sizes", .desc = "SVG gallery: 08 variable sizes" },
+        .{ .file = "examples/svg/09_drag_and_pin.zig", .name = "svg_09_drag_and_pin", .desc = "SVG gallery: 09 drag and pin" },
     };
 
     const run_gallery_step = b.step("run-svg-gallery", "Run all SVG gallery examples");

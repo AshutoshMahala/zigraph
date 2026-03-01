@@ -119,6 +119,10 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
     };
     errdefer allocator.free(positions);
 
+    // Apply pin constraints: override initial positions and build pin masks
+    const pin_masks = try applyPins(g, positions, config.spacing, allocator);
+    defer if (pin_masks) |m| allocator.free(m);
+
     // Ideal spring length: k = spacing
     const k = config.spacing;
     // k² for repulsion
@@ -158,8 +162,8 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
             forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
         }
 
-        // === Apply forces with temperature clamping ===
-        const max_disp = applyForcesWithTemp(positions, force_accum, temperature);
+        // === Apply forces with temperature clamping (respects pin constraints) ===
+        const max_disp = applyForcesWithTemp(positions, force_accum, temperature, pin_masks);
 
         // === Cool ===
         temperature = fp.mul(temperature, config.decay);
@@ -214,6 +218,10 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
     };
     errdefer allocator.free(positions);
 
+    // Apply pin constraints: override initial positions and build pin masks
+    const pin_masks = try applyPins(g, positions, config.spacing, allocator);
+    defer if (pin_masks) |m| allocator.free(m);
+
     const k = config.spacing;
     const k_squared = fp.mul(fp.mul(k, k), config.repulsion_strength);
     const inv_k = fp.div(config.attraction_strength, k);
@@ -250,8 +258,8 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
             forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
         }
 
-        // === Apply forces with temperature clamping ===
-        const max_disp = applyForcesWithTemp(positions, force_accum, temperature);
+        // === Apply forces with temperature clamping (respects pin constraints) ===
+        const max_disp = applyForcesWithTemp(positions, force_accum, temperature, pin_masks);
 
         // === Cool ===
         temperature = fp.mul(temperature, config.decay);
@@ -276,18 +284,73 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
 // Internal helpers
 // ============================================================================
 
+/// Pin mask flags for each node (packed for cache efficiency).
+const PinMask = struct {
+    /// True if this node's X axis is pinned
+    x: bool = false,
+    /// True if this node's Y axis is pinned
+    y: bool = false,
+};
+
+/// Build pin masks and override initial positions for pinned nodes.
+///
+/// For each node with a pin constraint, the corresponding axis is marked
+/// and the initial position is set to the pinned coordinate (scaled by spacing).
+fn applyPins(g: *const Graph, positions: []Vec2, spacing: FP, allocator: Allocator) !?[]PinMask {
+    const n = g.nodeCount();
+
+    // Quick scan: any pins at all?
+    var has_any_pin = false;
+    for (0..n) |i| {
+        const node = g.nodeAt(i) orelse continue;
+        if (node.pin != null) {
+            has_any_pin = true;
+            break;
+        }
+    }
+    if (!has_any_pin) return null;
+
+    const masks = try allocator.alloc(PinMask, n);
+    @memset(masks, PinMask{});
+
+    for (0..n) |i| {
+        const node = g.nodeAt(i) orelse continue;
+        const pin = node.pin orelse continue;
+
+        if (pin.x) |px| {
+            masks[i].x = true;
+            positions[i].x = fp.mul(fp.fromInt(@as(i32, @intCast(px))), spacing);
+        }
+        if (pin.y) |py| {
+            masks[i].y = true;
+            positions[i].y = fp.mul(fp.fromInt(@as(i32, @intCast(py))), spacing);
+        }
+    }
+
+    return masks;
+}
+
 /// Apply accumulated forces to positions with temperature clamping.
+/// Respects pin masks: pinned axes are not displaced.
 /// Returns the maximum displacement applied.
-fn applyForcesWithTemp(positions: []Vec2, force_accum: []const Vec2, temperature: FP) FP {
+fn applyForcesWithTemp(positions: []Vec2, force_accum: []const Vec2, temperature: FP, pin_masks: ?[]const PinMask) FP {
     var max_disp: FP = fp.ZERO;
 
     for (0..positions.len) |i| {
-        const disp = force_accum[i].length();
+        var force = force_accum[i];
+
+        // Zero out forces on pinned axes
+        if (pin_masks) |masks| {
+            if (masks[i].x) force.x = 0;
+            if (masks[i].y) force.y = 0;
+        }
+
+        const disp = force.length();
         if (disp < 1) continue;
 
         // Clamp displacement to temperature
         const clamped = fp.min(disp, temperature);
-        const scaled = force_accum[i].normalizeScaled(clamped);
+        const scaled = force.normalizeScaled(clamped);
 
         positions[i] = positions[i].addVec(scaled);
         max_disp = fp.max(max_disp, clamped);

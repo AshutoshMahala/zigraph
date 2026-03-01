@@ -62,8 +62,12 @@ pub fn LayoutNode(comptime Coord: type) type {
         y: Coord,
         /// Width (including brackets for text renderers)
         width: Coord,
+        /// Height in layout units (content height before renderer scaling)
+        height: Coord = 1,
         /// Center X coordinate (for edge routing)
         center_x: Coord,
+        /// Center Y coordinate (for edge routing)
+        center_y: Coord = 0,
         /// The level (depth) this node is at
         level: usize,
         /// Position within the level (0-indexed from left)
@@ -368,7 +372,9 @@ pub fn LayoutIR(comptime Coord: type) type {
                     .x = coordCast(Target, Coord, node.x),
                     .y = coordCast(Target, Coord, node.y),
                     .width = coordCast(Target, Coord, node.width),
+                    .height = coordCast(Target, Coord, node.height),
                     .center_x = coordCast(Target, Coord, node.center_x),
+                    .center_y = coordCast(Target, Coord, node.center_y),
                     .level = node.level,
                     .level_position = node.level_position,
                     .kind = node.kind,

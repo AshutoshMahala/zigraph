@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>zigraph — Collapsible Nodes</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #f8fafc; }
+  header { background: #1e293b; color: white; padding: 12px 24px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .hint { font-size: 13px; color: #94a3b8; margin-top: 2px; }
+  #canvas { width: 100%; height: calc(100vh - 56px); }
+  .node-group { cursor: pointer; }
+  .node-group:hover rect { filter: brightness(0.93); }
+  .node-group.collapsed rect { stroke-dasharray: 6,3; }
+  .node-group.collapsed .badge { display: block; }
+  .node-group.hidden { display: none; }
+  .edge-line.hidden { display: none; }
+  .badge { display: none; font-size: 10px; font-weight: bold; }
+  .collapse-icon { font-size: 13px; font-family: monospace; fill: #666; }
+</style>
+</head>
+<body>
+<header>
+  <h1>zigraph — Variable Sizes + Collapse/Expand</h1>
+  <div class="hint">Click a node to collapse its children • Click again to expand</div>
+</header>
+<svg id="canvas" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 530 556">
+<rect width="100%" height="100%" fill="#f8fafc"/>
+
+<defs>
+  <marker id="arrow" markerWidth="8" markerHeight="8" refX="8" refY="4"
+          orient="auto" markerUnits="userSpaceOnUse">
+    <polygon points="0 0, 8 4, 0 8" fill="#94a3b8"/>
+  </marker>
+</defs>
+
+<g id="edges">
+  <line class="edge-line" data-from="1" data-to="2"
+        x1="230" y1="68" x2="100" y2="140"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="edge-line" data-from="1" data-to="3"
+        x1="230" y1="68" x2="220" y2="140"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="edge-line" data-from="1" data-to="4"
+        x1="230" y1="68" x2="350" y2="140"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="edge-line" data-from="2" data-to="5"
+        x1="100" y1="164" x2="50" y2="284"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="edge-line" data-from="3" data-to="6"
+        x1="220" y1="212" x2="320" y2="284"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="edge-line" data-from="3" data-to="7"
+        x1="220" y1="212" x2="190" y2="284"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="edge-line" data-from="4" data-to="8"
+        x1="350" y1="164" x2="410" y2="284"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="edge-line" data-from="7" data-to="9"
+        x1="190" y1="332" x2="230" y2="404"
+        stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+</g>
+
+<g id="nodes">
+  <g class="node-group" data-id="1" data-children="2,3,4"
+     transform="translate(160,20)">
+    <rect x="0" y="0" width="140" height="48" rx="6" ry="6"
+          fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="70" y="24" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Controller</text>
+    <text x="70" y="40" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">140×48px</text>
+    <text class="collapse-icon" x="136" y="14" text-anchor="end">▼</text>
+    <text class="badge" x="136" y="14" fill="#dc2626">●</text>
+  </g>
+  <g class="node-group" data-id="2" data-children="5"
+     transform="translate(70,140)">
+    <rect x="0" y="0" width="60" height="24" rx="6" ry="6"
+          fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="30" y="12" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Auth</text>
+    <text x="30" y="28" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">60×24px</text>
+    <text class="collapse-icon" x="56" y="14" text-anchor="end">▼</text>
+    <text class="badge" x="56" y="14" fill="#dc2626">●</text>
+  </g>
+  <g class="node-group" data-id="3" data-children="6,7"
+     transform="translate(160,140)">
+    <rect x="0" y="0" width="120" height="72" rx="6" ry="6"
+          fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="60" y="36" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Logic</text>
+    <text x="60" y="52" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">120×72px</text>
+    <text class="collapse-icon" x="116" y="14" text-anchor="end">▼</text>
+    <text class="badge" x="116" y="14" fill="#dc2626">●</text>
+  </g>
+  <g class="node-group" data-id="4" data-children="8"
+     transform="translate(310,140)">
+    <rect x="0" y="0" width="80" height="24" rx="6" ry="6"
+          fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="40" y="12" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Notify</text>
+    <text x="40" y="28" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">80×24px</text>
+    <text class="collapse-icon" x="76" y="14" text-anchor="end">▼</text>
+    <text class="badge" x="76" y="14" fill="#dc2626">●</text>
+  </g>
+  <g class="node-group" data-id="5" data-children=""
+     transform="translate(20,284)">
+    <rect x="0" y="0" width="70" height="24" rx="6" ry="6"
+          fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="35" y="12" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Users</text>
+    <text x="35" y="28" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">70×24px</text>
+  </g>
+  <g class="node-group" data-id="6" data-children=""
+     transform="translate(290,284)">
+    <rect x="0" y="0" width="60" height="24" rx="6" ry="6"
+          fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="30" y="12" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Calc</text>
+    <text x="30" y="28" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">60×24px</text>
+  </g>
+  <g class="node-group" data-id="7" data-children="9"
+     transform="translate(120,284)">
+    <rect x="0" y="0" width="140" height="48" rx="6" ry="6"
+          fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="70" y="24" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Store</text>
+    <text x="70" y="40" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">140×48px</text>
+    <text class="collapse-icon" x="136" y="14" text-anchor="end">▼</text>
+    <text class="badge" x="136" y="14" fill="#dc2626">●</text>
+  </g>
+  <g class="node-group" data-id="8" data-children=""
+     transform="translate(380,284)">
+    <rect x="0" y="0" width="70" height="24" rx="6" ry="6"
+          fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="35" y="12" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">Email</text>
+    <text x="35" y="28" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">70×24px</text>
+  </g>
+  <g class="node-group" data-id="9" data-children=""
+     transform="translate(150,404)">
+    <rect x="0" y="0" width="160" height="72" rx="6" ry="6"
+          fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="80" y="36" text-anchor="middle" font-family="monospace"
+          font-size="12" fill="#333" stroke="none">DB</text>
+    <text x="80" y="52" text-anchor="middle" font-family="monospace"
+          font-size="9" fill="#999" stroke="none">160×72px</text>
+  </g>
+</g>
+</svg>
+
+<script>
+(function() {
+  const collapsed = new Set();
+  const hidden = new Set();
+
+  function getChildren(id) {
+    const el = document.querySelector(`.node-group[data-id="${id}"]`);
+    if (!el) return [];
+    const c = el.getAttribute('data-children');
+    if (!c) return [];
+    return c.split(',').map(Number).filter(n => n > 0);
+  }
+
+  // Recursively collect all descendants
+  function descendants(id) {
+    const result = [];
+    const stack = getChildren(id);
+    while (stack.length) {
+      const cid = stack.pop();
+      if (result.includes(cid)) continue;
+      result.push(cid);
+      stack.push(...getChildren(cid));
+    }
+    return result;
+  }
+
+  function updateVisibility() {
+    // Recompute hidden set from all collapsed nodes
+    hidden.clear();
+    for (const cid of collapsed) {
+      for (const d of descendants(cid)) hidden.add(d);
+    }
+
+    // Apply to nodes
+    document.querySelectorAll('.node-group').forEach(el => {
+      const id = parseInt(el.getAttribute('data-id'));
+      el.classList.toggle('hidden', hidden.has(id));
+    });
+
+    // Apply to edges: hide if either endpoint is hidden
+    document.querySelectorAll('.edge-line').forEach(el => {
+      const from = parseInt(el.getAttribute('data-from'));
+      const to   = parseInt(el.getAttribute('data-to'));
+      el.classList.toggle('hidden', hidden.has(from) || hidden.has(to));
+    });
+  }
+
+  document.getElementById('nodes').addEventListener('click', (evt) => {
+    const group = evt.target.closest('.node-group');
+    if (!group) return;
+    const id = parseInt(group.getAttribute('data-id'));
+    const children = getChildren(id);
+    if (children.length === 0) return; // leaf node, nothing to collapse
+
+    if (collapsed.has(id)) {
+      collapsed.delete(id);
+      group.classList.remove('collapsed');
+      // Update icon
+      const icon = group.querySelector('.collapse-icon');
+      if (icon) icon.textContent = '▼';
+    } else {
+      collapsed.add(id);
+      group.classList.add('collapsed');
+      const icon = group.querySelector('.collapse-icon');
+      if (icon) icon.textContent = '►';
+    }
+    updateVisibility();
+  });
+})();
+</script>
+</body>
+</html>

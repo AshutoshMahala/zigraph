@@ -47,7 +47,7 @@ pub fn renderDummyNode(writer: anytype, node: LayoutNode, config: SvgConfig) !vo
     const x = node.x * config.char_width + config.padding;
     const y = node.y * config.line_height + config.padding;
     const w = node.width * config.char_width;
-    const h = config.line_height;
+    const h = node.height * config.line_height;
     const cx = x + w / 2;
     const cy = y + h / 2;
     try writer.print(
