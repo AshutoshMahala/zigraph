@@ -57,8 +57,8 @@ pub fn route(
         else
             0;
 
-        const from_y_edge = from_node.y + 1; // Row just below source
-        const to_y_edge = to_node.y; // Row of target
+        const from_y_edge = from_node.y + from_node.height; // Row just below source (bottom edge)
+        const to_y_edge = to_node.y; // Row of target (top edge)
 
         const path: EdgePath = if (from_node.center_x == to_node.center_x) blk: {
             break :blk .{ .direct = {} };
@@ -78,7 +78,7 @@ pub fn route(
             .from_id = edge.from,
             .to_id = edge.to,
             .from_x = from_node.center_x,
-            .from_y = from_node.y + 1, // Bottom of source node
+            .from_y = from_node.y + from_node.height, // Bottom of source node
             .to_x = to_node.center_x,
             .to_y = to_node.y, // Top of target node
             .path = path,
@@ -134,7 +134,7 @@ pub fn routeWithDummies(
         const from_node = &nodes[from_ir_idx];
         const to_node = &nodes[to_ir_idx];
 
-        const from_y_edge = from_node.y + 1;
+        const from_y_edge = from_node.y + from_node.height;
         const to_y_edge = to_node.y;
 
         // Slot for this edge: nth edge from this level

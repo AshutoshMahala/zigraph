@@ -8,6 +8,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Color system** (`src/render/color/`) — Numeric `Color` struct with perceptually uniform operations
+  - `Color` type: f32 RGBA, constructors `rgb()`, `rgba()`, `rgb8()`, `fromHex()`, `fromHsl()`, `fromOklab()`
+  - Oklab color space: `toOklab()`, `lerp()` (perceptually smooth interpolation)
+  - HSL color space: `toHsl()`, `fromHsl()`
+  - Operations: `darken()`, `lighten()`, `desaturate()`, `saturate()`, `withAlpha()`
+  - `toHex()` — comptime `[7]u8`, `toHexAlloc(arena)` — runtime `[]const u8`
+  - `ColorMap` struct with 6 scientific colormaps: viridis, inferno, magma, plasma, turbo, coolwarm
+  - `ColorMap.sample(t)` — continuous color from scalar, interpolated in Oklab space
+  - `ColorMap.quantize(comptime n)` — pre-baked `[n][7]u8` hex palette at comptime
+  - SVG gradient helpers: `linearGradient()`, `radialGradient()`, `glowGradient()`
+
+- **SVG Renderer Refinements** — Full style customization via function pointers
+  - `edge_style_fn` — per-edge stroke, markers (7 shapes), `<defs>`, `extra_attrs`
+  - `node_style_fn` — per-node shape via raw SVG (`shape_svg`), fill, stroke, defs
+  - `edge_label_style_fn` — per-label color, font, size, position (0–100%), on-path toggle
+  - `subgraph_style_fn` — per-subgraph box via raw SVG (`box_svg`), fill, stroke, defs
+  - `global_style` / `global_script` — inject CSS `<style>` and `<script>` into SVG
+  - 6 built-in node shape presets: `shapes.rounded_rectangle`, `.rectangle`, `.ellipse`, `.diamond`, `.hexagon`, `.circle`
+  - `subgraph_presets.default` — default subgraph styling with depth-aware opacity
+  - `defaultEdgeStyle` — Radix palette cycling with directional arrows
+  - `monoEdgeStyle` — monochrome edge styling
+  - **Zero hardcoded visual styling** — all styling flows through function pointers; `SvgConfig` retains only structural/layout fields
+
+- **Type-erased Renderer interface** — `Renderer` struct following `std.mem.Allocator` vtable pattern
+  - `Renderer.initSvg(config)` / `Renderer.initUnicode(config)` / `Renderer.initJson()`
+  - `Renderer.init(anytype)` — wrap custom renderer backends
+  - Uniform `renderer.render(layout, allocator) ![]u8` API across all backends
+
 - **Subgraphs (Clusters)** — Hierarchical node grouping with visual boundaries
   - `graph.addSubgraph("label")` creates named clusters
   - `graph.putNodes(&.{id1, id2}).inside(sg_id)` — fluent API for node membership
@@ -21,6 +49,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **FDG edge label placement** — Labels positioned at geometric midpoint of each edge
 
 ### Changed
+
+- **`zigraph.colors` → `zigraph.color`** — Palette module renamed and expanded into `src/render/color/` sub-module.
+  Palettes (`radix`, `ansi_dark`, etc.) and utilities (`get()`, `getAnsi()`) remain at the top level:
+  `zigraph.color.get(&zigraph.color.radix, i)`. The old `colors.zig` shim has been removed.
+
+- **SVG renderer modularized** — old monolithic `svg.zig` removed; replaced by 9 focused files under `src/render/svg/`:
+  `mod.zig` (400 lines, entry point), `config.zig`, `nodes.zig`, `edges.zig`, `splines.zig`,
+  `subgraphs.zig`, `defs.zig`, `helpers.zig`, `render_tests.zig`
+- **SVG SvgConfig** — removed all hardcoded visual fields (`node_radius`, `node_fill`, `node_stroke`,
+  `font_family`, `font_size`, `subgraph_fill`, etc.); styling now fully delegated to function pointers
 
 - **Vertical spacing** — Sub-linear formula `2 + sqrt(max_fan)` (cap 8) produces more compact layouts
 - **SVG horizontal edges** — Dome-shaped cubic Bézier curves for near-horizontal edges

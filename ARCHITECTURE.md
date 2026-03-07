@@ -55,10 +55,21 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          RENDER LAYER                                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │   Unicode   │  │     SVG     │  │    JSON     │  │   Colors    │     │
-│  │ (terminal)  │  │  (vector)   │  │ (IR ⇄ JSON) │  │ (palettes)  │     │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘     │
+│                                                                         │
+│ Renderer (type-erased interface — vtable pattern like std.mem.Allocator)│
+│    ├── initSvg(*SvgConfig) → Renderer                                   │
+│    ├── initUnicode(*Config) → Renderer                                  │
+│    ├── initJson() → Renderer                                            │
+│    └── init(anytype) → Renderer       // custom backends                │
+│                                                                         │
+│  ┌─── SVG ───────────┐  ┌─── Unicode ──┐  ┌─── JSON ──┐  ┌── Color ───┐ │
+│  │ mod.zig (entry)   │  │ unicode.zig  │  │ json.zig  │  │ color/     │ │
+│  │ config.zig        │  │ Config{3}    │  │ no config │  │ Color.zig  │ │
+│  │ nodes/edges/      │  └──────────────┘  └───────────┘  │ colormaps  │ │
+│  │  splines/subgraphs│                                   │ gradient   │ │
+│  │ defs/helpers      │  Shared: types.zig (MarkerShape,  │ palettes   │ │
+│  │ 4 style fn ptrs   │         StyleContexts)            └────────────┘ │
+│  └───────────────────┘                                                  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -118,10 +129,27 @@ zigraph/
 │   │       └── mod.zig                # Standard O(N²) + Fast O(N log N)
 │   │
 │   └── render/
+│       ├── Renderer.zig       # Type-erased renderer interface (vtable pattern)
+│       ├── types.zig          # Shared types: MarkerShape, EdgeStyleContext,
+│       │                      #   NodeStyleContext, SubgraphStyleContext
+│       ├── color/             # Color system (numeric, perceptually uniform)
+│       │   ├── mod.zig        # Module root + re-exports
+│       │   ├── Color.zig      # Core Color struct (RGB, Oklab, HSL, lerp)
+│       │   ├── colormaps.zig  # Scientific color maps (viridis, turbo, …)
+│       │   ├── gradient.zig   # SVG gradient generation helpers
+│       │   └── palettes.zig   # Discrete palettes (Radix, vibrant, etc.)
 │       ├── unicode.zig        # Terminal output with box drawing
-│       ├── svg.zig            # SVG vector output with spline support
 │       ├── json.zig           # JSON IR export/import (for external tools)
-│       └── colors.zig         # Color palettes (Radix, vibrant, etc.)
+│       └── svg/               # SVG vector output (modular)
+│           ├── mod.zig        # render() entry point + re-exports
+│           ├── config.zig     # SvgConfig, style types, shape presets
+│           ├── defs.zig       # <marker> definitions helpers
+│           ├── helpers.zig    # Shared utilities (findNodeLabel, etc.)
+│           ├── nodes.zig      # Node shape rendering (shape-agnostic)
+│           ├── edges.zig      # Edge rendering + self-loops
+│           ├── splines.zig    # Stitched spline rendering
+│           ├── subgraphs.zig  # Subgraph box rendering (shape-agnostic)
+│           └── render_tests.zig # Integration tests
 │
 ├── examples/                  # Usage examples
 ├── docs/                      # Design documents and roadmaps
@@ -452,7 +480,7 @@ zigraph includes protections against resource exhaustion:
 | Max nodes | graph.zig | 100,000 (configurable) |
 | Max edges | graph.zig | 500,000 (configurable) |
 | Buffer overflow | unicode.zig | Checked w*h multiplication |
-| SVG dimensions | svg.zig | Checked arithmetic |
+| SVG dimensions | svg/mod.zig | Checked arithmetic |
 | Connection buffer | adjacent_exchange.zig | 256 per node pair |
 
 All limits return `error.OutOfMemory` when exceeded.

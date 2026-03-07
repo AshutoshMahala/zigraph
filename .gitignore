@@ -19,6 +19,7 @@ Thumbs.db
 
 # Personal dev notes (not for release)
 .dev/
+temp/
 
 # Auto-generated docs (WASM playground)
 docs/

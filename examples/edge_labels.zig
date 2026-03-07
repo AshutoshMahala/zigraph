@@ -41,7 +41,7 @@ pub fn main() !void {
         defer ir.deinit();
 
         const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
 
@@ -49,9 +49,7 @@ pub fn main() !void {
         std.debug.print("-----------------------\n{s}\n\n", .{output});
 
         // Export SVG to test label rendering (fixed-position labels)
-        const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
-        });
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
         const svg_file = try std.fs.cwd().createFile("edge_labels.svg", .{});
@@ -61,7 +59,6 @@ pub fn main() !void {
 
         // Export SVG with labels-on-path mode
         const svg_path_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
             .labels_on_path = true,
         });
         defer allocator.free(svg_path_output);
@@ -90,7 +87,7 @@ pub fn main() !void {
         defer ir.deinit();
 
         const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
 
@@ -121,7 +118,7 @@ pub fn main() !void {
         defer ir.deinit();
 
         const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
 

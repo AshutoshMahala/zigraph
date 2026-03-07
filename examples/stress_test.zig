@@ -102,7 +102,6 @@ pub fn main() !void {
                 .show_dummy_nodes = true, // TEMP: show dummy nodes as orange circles
                 .char_width = 12,
                 .line_height = 24,
-                .color_edges = true, // Use colored edges for visual clarity
             });
             defer allocator.free(svg_output);
 

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" 
+     width="180" height="960" 
+     viewBox="0 0 180 960">
+
+  <!-- Marker definitions -->
+  <defs>
+    <marker id="zg-m-0" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#89b4fa"/>
+    </marker>
+    <marker id="zg-m-1" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#a6e3a1"/>
+    </marker>
+    <marker id="zg-m-2" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#fab387"/>
+    </marker>
+    <marker id="zg-m-3" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#f38ba8"/>
+    </marker>
+    <marker id="zg-m-4" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#cba6f7"/>
+    </marker>
+    <style>
+  svg { background: #1e1e2e; }
+  rect[width="100%"] { fill: #1e1e2e; }
+</style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="white"/>
+  <!-- Subgraphs -->
+  <g id="subgraphs">
+    <g transform="translate(20,620)" fill="#45475a" fill-opacity="0.3" stroke="#a6adc8">
+      <rect x="0" y="0" width="140" height="320" rx="8" ry="8" stroke-dasharray="6,3"/>
+<text x="8" y="16" font-family="monospace" font-size="11" font-weight="bold" fill="#a6adc8" stroke="none">Backend</text>
+    </g>
+    <g transform="translate(20,20)" fill="#45475a" fill-opacity="0.3" stroke="#a6adc8">
+      <rect x="0" y="0" width="120" height="420" rx="8" ry="8" stroke-dasharray="6,3"/>
+<text x="8" y="16" font-family="monospace" font-size="11" font-weight="bold" fill="#a6adc8" stroke="none">Frontend</text>
+    </g>
+  </g>
+  <!-- Edges (rendered first, under nodes) -->
+  <g id="edges">
+    <line x1="80" y1="100" x2="80" y2="180" 
+          stroke="#89b4fa" stroke-width="2" data-type="edge" data-from="1" data-to="2" marker-end="url(#zg-m-0)"/>
+    <text x="80" y="140" font-family="monospace" font-size="11"
+          fill="#89b4fa" text-anchor="middle" dy="-6" dominant-baseline="auto">"tokenize"</text>
+    <line x1="80" y1="200" x2="80" y2="280" 
+          stroke="#a6e3a1" stroke-width="2" data-type="edge" data-from="2" data-to="3" marker-end="url(#zg-m-1)"/>
+    <text x="80" y="240" font-family="monospace" font-size="11"
+          fill="#a6e3a1" text-anchor="middle" dy="-6" dominant-baseline="auto">"tokens"</text>
+    <line x1="80" y1="300" x2="80" y2="380" 
+          stroke="#fab387" stroke-width="2" data-type="edge" data-from="3" data-to="4" marker-end="url(#zg-m-2)"/>
+    <line x1="80" y1="400" x2="70" y2="520" 
+          stroke="#f38ba8" stroke-width="2" data-type="edge" data-from="4" data-to="5" marker-end="url(#zg-m-3)"/>
+    <text x="75" y="460" font-family="monospace" font-size="11"
+          fill="#f38ba8" text-anchor="middle" dy="-6" dominant-baseline="auto">"check"</text>
+    <line x1="70" y1="540" x2="90" y2="680" 
+          stroke="#cba6f7" stroke-width="2" data-type="edge" data-from="5" data-to="6" marker-end="url(#zg-m-4)"/>
+    <line x1="90" y1="700" x2="90" y2="780" 
+          stroke="#89b4fa" stroke-width="2" data-type="edge" data-from="6" data-to="7" marker-end="url(#zg-m-0)"/>
+    <text x="90" y="740" font-family="monospace" font-size="11"
+          fill="#89b4fa" text-anchor="middle" dy="-6" dominant-baseline="auto">"passes"</text>
+    <line x1="90" y1="800" x2="90" y2="880" 
+          stroke="#a6e3a1" stroke-width="2" data-type="edge" data-from="7" data-to="8" marker-end="url(#zg-m-1)"/>
+    <text x="90" y="840" font-family="monospace" font-size="11"
+          fill="#a6e3a1" text-anchor="middle" dy="-6" dominant-baseline="auto">"emit"</text>
+  </g>
+
+  <!-- Nodes -->
+  <g id="nodes">
+    <g transform="translate(40,80)" fill="#313244" stroke="#45475a" data-type="node" data-id="1">
+      <rect x="0" y="0" width="80" height="20" rx="6" ry="6"/>
+<text x="40" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">Source</text>
+    </g>
+    <g transform="translate(50,180)" fill="#313244" stroke="#45475a" data-type="node" data-id="2">
+      <rect x="0" y="0" width="70" height="20" rx="6" ry="6"/>
+<text x="35" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">Lexer</text>
+    </g>
+    <g transform="translate(40,280)" fill="#313244" stroke="#45475a" data-type="node" data-id="3">
+      <rect x="0" y="0" width="80" height="20" rx="6" ry="6"/>
+<text x="40" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">Parser</text>
+    </g>
+    <g transform="translate(60,380)" fill="#313244" stroke="#45475a" data-type="node" data-id="4">
+      <rect x="0" y="0" width="50" height="20" rx="6" ry="6"/>
+<text x="25" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">AST</text>
+    </g>
+    <g transform="translate(40,520)" fill="#313244" stroke="#45475a" data-type="node" data-id="5">
+      <rect x="0" y="0" width="60" height="20" rx="6" ry="6"/>
+<text x="30" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">Sema</text>
+    </g>
+    <g transform="translate(70,680)" fill="#313244" stroke="#45475a" data-type="node" data-id="6">
+      <rect x="0" y="0" width="40" height="20" rx="6" ry="6"/>
+<text x="20" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">IR</text>
+    </g>
+    <g transform="translate(40,780)" fill="#313244" stroke="#45475a" data-type="node" data-id="7">
+      <rect x="0" y="0" width="100" height="20" rx="6" ry="6"/>
+<text x="50" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">Optimize</text>
+    </g>
+    <g transform="translate(50,880)" fill="#313244" stroke="#45475a" data-type="node" data-id="8">
+      <rect x="0" y="0" width="90" height="20" rx="6" ry="6"/>
+<text x="45" y="14" text-anchor="middle" font-family="monospace" font-size="12" fill="#cdd6f4" stroke="none">Codegen</text>
+    </g>
+  </g>
+</svg>

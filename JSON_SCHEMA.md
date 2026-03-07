@@ -13,9 +13,9 @@ The JSON IR (Intermediate Representation) is zigraph's output format for externa
   "height": 10,
   "level_count": 3,
   "nodes": [
-    {"id": 1, "label": "Start", "x": 5, "y": 0, "width": 7, "center_x": 8, "level": 0, "level_position": 0, "kind": "explicit", "edge_index": null},
-    {"id": 2, "label": "Process", "x": 3, "y": 3, "width": 9, "center_x": 7, "level": 1, "level_position": 0, "kind": "explicit", "edge_index": null},
-    {"id": 3, "label": "End", "x": 7, "y": 6, "width": 5, "center_x": 9, "level": 2, "level_position": 0, "kind": "explicit", "edge_index": null}
+    {"id": 1, "label": "Start", "x": 5, "y": 0, "width": 7, "height": 1, "center_x": 8, "center_y": 0, "level": 0, "level_position": 0, "kind": "explicit", "edge_index": null},
+    {"id": 2, "label": "Process", "x": 3, "y": 3, "width": 9, "height": 1, "center_x": 7, "center_y": 3, "level": 1, "level_position": 0, "kind": "explicit", "edge_index": null},
+    {"id": 3, "label": "End", "x": 7, "y": 6, "width": 5, "height": 1, "center_x": 9, "center_y": 6, "level": 2, "level_position": 0, "kind": "explicit", "edge_index": null}
   ],
   "edges": [
     {"from": 1, "to": 2, "from_x": 8, "from_y": 1, "to_x": 7, "to_y": 3, "path": {"type": "direct"}, "edge_index": 0, "directed": true},
@@ -54,7 +54,9 @@ Each node represents a positioned vertex in the layout.
 | `x` | integer | Left edge x-coordinate (0-indexed) |
 | `y` | integer | Top edge y-coordinate (0-indexed) |
 | `width` | integer | Width of node box (includes brackets: `[label]`) |
+| `height` | integer | Height in layout units (default 1 for text nodes) |
 | `center_x` | integer | Center x-coordinate (for edge connections) |
+| `center_y` | integer | Center y-coordinate (for edge connections) |
 | `level` | integer | Hierarchical level (0 = top) |
 | `level_position` | integer | Position within level (0 = leftmost) |
 | `kind` | string | `explicit`, `implicit`, or `dummy` |

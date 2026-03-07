@@ -101,7 +101,9 @@ fn serializeImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord),
         try writer.print("\"x\": {d}, ", .{node.x});
         try writer.print("\"y\": {d}, ", .{node.y});
         try writer.print("\"width\": {d}, ", .{node.width});
+        try writer.print("\"height\": {d}, ", .{node.height});
         try writer.print("\"center_x\": {d}, ", .{node.center_x});
+        try writer.print("\"center_y\": {d}, ", .{node.center_y});
         try writer.print("\"level\": {d}, ", .{node.level});
         try writer.print("\"level_position\": {d}, ", .{node.level_position});
         try writer.print("\"kind\": \"{s}\", ", .{kindToString(node.kind)});
@@ -289,7 +291,9 @@ fn deserializeImpl(comptime Coord: type, json_bytes: []const u8, allocator: Allo
         const x = try getInt(Coord, nobj, "x");
         const y = try getInt(Coord, nobj, "y");
         const width = try getInt(Coord, nobj, "width");
+        const height = getOptionalNumber(Coord, nobj.get("height")) orelse 1;
         const center_x = try getInt(Coord, nobj, "center_x");
+        const center_y = getOptionalNumber(Coord, nobj.get("center_y")) orelse 0;
         const level = try getInt(usize, nobj, "level");
         const level_position = try getInt(usize, nobj, "level_position");
         const kind = getKind(nobj.get("kind"));
@@ -301,7 +305,9 @@ fn deserializeImpl(comptime Coord: type, json_bytes: []const u8, allocator: Allo
             .x = x,
             .y = y,
             .width = width,
+            .height = height,
             .center_x = center_x,
+            .center_y = center_y,
             .level = level,
             .level_position = level_position,
             .kind = kind,

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" 
+     width="930" height="320" 
+     viewBox="0 0 930 320">
+
+  <!-- Marker definitions -->
+  <defs>
+    <marker id="zg-m-0" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#3e63dd"/>
+    </marker>
+    <marker id="zg-m-1" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#e54d2e"/>
+    </marker>
+    <marker id="zg-m-2" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#30a46c"/>
+    </marker>
+    <marker id="zg-m-3" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#f76b15"/>
+    </marker>
+    <marker id="zg-m-4" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#8e4ec6"/>
+    </marker>
+    <marker id="zg-m-5" markerWidth="8" markerHeight="8" 
+            refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 8 4, 0 8" fill="#12a594"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="white"/>
+  <!-- Edges (rendered first, under nodes) -->
+  <g id="edges">
+    <line x1="380" y1="60" x2="290" y2="180" 
+          stroke="#3e63dd" stroke-width="2" data-type="edge" data-from="1" data-to="2" marker-end="url(#zg-m-0)"/>
+    <path d="M 380 60 C 380 -35, 650 -35, 650 100"
+          fill="none" stroke="#e54d2e" stroke-width="2" data-type="edge" data-from="1" data-to="3" marker-end="url(#zg-m-1)"/>
+    <path d="M 360 180 C 360 156, 430 156, 430 180"
+          fill="none" stroke="#30a46c" stroke-width="2" data-type="edge" data-from="2" data-to="4" marker-end="url(#zg-m-2)"/>
+    <line x1="650" y1="100" x2="520" y2="180" 
+          stroke="#f76b15" stroke-width="2" data-type="edge" data-from="3" data-to="4" marker-end="url(#zg-m-3)"/>
+    <line x1="290" y1="180" x2="80" y2="260" 
+          stroke="#8e4ec6" stroke-width="2" data-type="edge" data-from="2" data-to="5" marker-end="url(#zg-m-4)"/>
+    <path d="M 720 100 C 720 69, 810 69, 810 100"
+          fill="none" stroke="#12a594" stroke-width="2" data-type="edge" data-from="3" data-to="6" marker-end="url(#zg-m-5)"/>
+  </g>
+
+  <!-- Nodes -->
+  <g id="nodes">
+    <g transform="translate(360,60)" fill="#dcfce7" stroke="#22c55e" data-type="node" data-id="1">
+      <rect x="0" y="0" width="50" height="20" rx="6" ry="6"/>
+<text x="25" y="10" text-anchor="middle" font-family="monospace" font-size="12" fill="#333" stroke="none">Hub</text>
+<text x="25" y="26" text-anchor="middle" font-family="monospace" font-size="9" fill="#999" stroke="none">50×20px</text>
+    </g>
+    <g transform="translate(220,180)" fill="#dcfce7" stroke="#22c55e" data-type="node" data-id="2">
+      <rect x="0" y="0" width="140" height="60" rx="6" ry="6"/>
+<text x="70" y="30" text-anchor="middle" font-family="monospace" font-size="12" fill="#333" stroke="none">Service A</text>
+<text x="70" y="46" text-anchor="middle" font-family="monospace" font-size="9" fill="#999" stroke="none">140×60px</text>
+    </g>
+    <g transform="translate(580,100)" fill="#dcfce7" stroke="#22c55e" data-type="node" data-id="3">
+      <rect x="0" y="0" width="140" height="60" rx="6" ry="6"/>
+<text x="70" y="30" text-anchor="middle" font-family="monospace" font-size="12" fill="#333" stroke="none">Service B</text>
+<text x="70" y="46" text-anchor="middle" font-family="monospace" font-size="9" fill="#999" stroke="none">140×60px</text>
+    </g>
+    <g transform="translate(430,180)" fill="#ffedd5" stroke="#f97316" data-type="node" data-id="4">
+      <rect x="0" y="0" width="180" height="80" rx="6" ry="6"/>
+<text x="90" y="40" text-anchor="middle" font-family="monospace" font-size="12" fill="#333" stroke="none">Database</text>
+<text x="90" y="56" text-anchor="middle" font-family="monospace" font-size="9" fill="#999" stroke="none">180×80px</text>
+    </g>
+    <g transform="translate(50,260)" fill="#dcfce7" stroke="#22c55e" data-type="node" data-id="5">
+      <rect x="0" y="0" width="70" height="20" rx="6" ry="6"/>
+<text x="35" y="10" text-anchor="middle" font-family="monospace" font-size="12" fill="#333" stroke="none">Cache</text>
+<text x="35" y="26" text-anchor="middle" font-family="monospace" font-size="9" fill="#999" stroke="none">70×20px</text>
+    </g>
+    <g transform="translate(810,100)" fill="#dcfce7" stroke="#22c55e" data-type="node" data-id="6">
+      <rect x="0" y="0" width="80" height="20" rx="6" ry="6"/>
+<text x="40" y="10" text-anchor="middle" font-family="monospace" font-size="12" fill="#333" stroke="none">Logger</text>
+<text x="40" y="26" text-anchor="middle" font-family="monospace" font-size="9" fill="#999" stroke="none">80×20px</text>
+    </g>
+  </g>
+</svg>

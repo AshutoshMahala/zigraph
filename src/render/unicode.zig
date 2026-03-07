@@ -19,7 +19,7 @@ const LayoutIR = ir_mod.LayoutIR(usize);
 const LayoutNode = ir_mod.LayoutNode(usize);
 const LayoutEdge = ir_mod.LayoutEdge(usize);
 const EdgePath = ir_mod.EdgePath(usize);
-const colors = @import("colors.zig");
+const colors = @import("color/mod.zig");
 
 // Box drawing characters as u21 codepoints (comptime decoded)
 const CP_V_LINE: u21 = '│';

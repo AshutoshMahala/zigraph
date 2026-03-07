@@ -145,15 +145,13 @@ pub fn main() !void {
 
         // Unicode to terminal (with colors!)
         const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi,
+            .edge_palette = &zigraph.color.ansi,
         });
         defer allocator.free(unicode);
         std.debug.print("{s}\n", .{unicode});
 
         // SVG to file
-        const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
-        });
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
         {
@@ -246,15 +244,13 @@ pub fn main() !void {
 
         // Unicode with colors
         const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi,
+            .edge_palette = &zigraph.color.ansi,
         });
         defer allocator.free(unicode);
         std.debug.print("{s}\n", .{unicode});
 
         // SVG
-        const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
-        });
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
         {
@@ -347,15 +343,13 @@ pub fn main() !void {
 
         // Unicode with colors
         const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi,
+            .edge_palette = &zigraph.color.ansi,
         });
         defer allocator.free(unicode);
         std.debug.print("{s}\n", .{unicode});
 
         // SVG
-        const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
-        });
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
         {

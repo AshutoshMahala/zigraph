@@ -71,7 +71,7 @@ const zigraph = @import("zigraph");
 
 // Render with ANSI colors (optional)
 const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
-    .edge_palette = &zigraph.colors.ansi_dark,
+    .edge_palette = &zigraph.color.ansi_dark,
     .show_dummy_nodes = false, 
 });
 defer allocator.free(output);
@@ -83,7 +83,7 @@ std.debug.print("{s}\n", .{output});
 ```zig
 // Render directly layout IR to SVG
 const svg = try zigraph.svg.render(&ir, allocator, .{
-    .edge_palette = &zigraph.colors.radix,
+    .edge_palette = &zigraph.color.radix,
     .color_edges = true,
     .stitch_splines = true, // Smooth curves
 });
@@ -343,7 +343,7 @@ var ir = try zigraph.layout(&graph, allocator, .{ .routing = .spline });
 defer ir.deinit();
 
 const svg = try zigraph.svg.render(&ir, allocator, .{
-    .edge_palette = &zigraph.colors.radix,  // Colored edges
+    .edge_palette = &zigraph.color.radix,  // Colored edges
     .stitch_splines = true,                  // Smooth curves (default)
     .labels_on_path = true,                  // Labels follow edge curves
     .show_control_points = true,             // Debug splines
@@ -449,44 +449,21 @@ Benchmarks on Apple M2 (zig build run-benchmark):
 
 ## Architecture
 
-zigraph implements two layout engines:
-
-1. **Sugiyama** (hierarchical layout for DAGs):
-   Layering → Crossing reduction → Positioning → Routing
-   With optional subgraph-aware pipeline: contiguous levels, block-based crossing, padding, bounding boxes
-
-2. **Fruchterman-Reingold** (force-directed for general graphs):
-   FR Standard (O(V²)) or FR-Fast with Barnes-Hut quadtree (O(V log V))
-   With optional subgraph cohesion force for cluster grouping
-
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│                          User API                               │
-│  zigraph.render() / zigraph.layout() / zigraph.exportJson()     │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────────────────┐  ┌─────────────────────────────┐  │
-│  │       Sugiyama           │  │   Force-Directed (FDG)      │  │
-│  │ ┌─────────┬──────────┐   │  │                             │  │
-│  │ │Layering │ Crossing │   │  │ FR Standard (O(V²))         │  │
-│  │ │ lp / ns │ med / ae │   │  │ FR-Fast (Barnes-Hut O(VlogV)│  │
-│  │ ├─────────┼──────────┤   │  │ Q16.16 fixed-point          │  │
-│  │ │Position │ Routing  │   │  │ Deterministic               │  │
-│  │ │ bk / s  │ dir / sp │   │  │                             │  │
-│  │ └─────────┴──────────┘   │  └─────────────────────────────┘  │
-│  └──────────────────────────┘                                   │
-├─────────────────────────────────────────────────────────────────┤
-│                        Layout IR                                │
-│  LayoutIR(usize) { nodes, edges, width, height }                │
-├─────────────────────────────────────────────────────────────────┤
-│                        Renderers                                │
-│  ┌──────────────┬──────────────────┬─────────────────────────┐  │
-│  │   Unicode    │      SVG         │         JSON            │  │
-│  │ (terminal)   │ (splines,colors) │ (for external tools)    │  │
-│  └──────────────┴──────────────────┴─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+  Graph API → Layout Engine → LayoutIR → Renderer → Output
+                  │                          │
+        ┌─────────┴──────────┐    ┌──────────┼──────────┐
+        Sugiyama       FDG        SVG    Unicode    JSON
+     (hierarchical) (force-dir)  (styled)  (ANSI)  (data)
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design decisions.
+- **Sugiyama pipeline**: Layering → Crossing reduction → Positioning → Routing (with optional subgraph-aware stages)
+- **Force-directed**: Fruchterman-Reingold with optional Barnes-Hut quadtree (O(V log V)), Q16.16 fixed-point arithmetic
+- **LayoutIR**: Stable contract between layout and rendering — nodes, edges, subgraphs, bounding boxes
+- **3 renderers**: SVG (full style API with 4 function hooks, `<defs>` injection, CSS/JS), Unicode (box-drawing + ANSI color), JSON (schema v1.2)
+- **Color module**: 4 color spaces (sRGB, Oklab, HSL, linear), 6 scientific colormaps, 10 palettes, SVG gradient generators
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design: pipeline diagrams, module map, file tree, error handling, and testing strategy.
 
 ## Use Cases
 
@@ -495,6 +472,41 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design decisions.
 - **Documentation** — Embedded diagrams
 - **Embedded systems** — Diagnostics on microcontrollers
 - **WASM dashboards** — Browser-based visualization
+
+## SVG Gallery
+
+The SVG renderer supports full style customization via function pointers. Each gallery example demonstrates a specific feature — run all at once with `zig build run-svg-gallery`, or individually.
+
+> See [SVG Customization Guide](docs/svg-customization.md) for the complete API reference.
+
+| 01 — Basic | 02 — Presets (Diamond) | 02 — Presets (Ellipse) |
+|:---:|:---:|:---:|
+| ![Basic](assets/gallery/01_basic.svg) | ![Diamond](assets/gallery/02_preset_diamond.svg) | ![Ellipse](assets/gallery/02_preset_ellipse.svg) |
+| Zero-config rendering | Built-in shape presets | One-liner shape swaps |
+
+| 03 — Flowchart | 04 — Clusters | 05 — Dark Theme |
+|:---:|:---:|:---:|
+| <img src="assets/gallery/03_flowchart.svg" width="280"> | <img src="assets/gallery/04_clusters.svg" width="280"> | <img src="assets/gallery/05_dark_theme.svg" width="280"> |
+| Conditional shapes + colored labels | Depth-aware subgraph styling | All 4 style fns + global CSS |
+
+| 06 — Interactive | 07 — Heatmap |
+|:---:|:---:|
+| ![Interactive](assets/gallery/06_interactive.svg) | <img src="assets/gallery/07_heatmap.svg" width="280"> |
+| CSS hover + JS click events | FEA stress viz with color spill |
+
+<details>
+<summary><strong>Run individual examples</strong></summary>
+
+```bash
+zig build run-svg-01       # Basic
+zig build run-svg-02       # Shape presets
+zig build run-svg-03       # Flowchart
+zig build run-svg-04       # Clusters
+zig build run-svg-05       # Dark theme
+zig build run-svg-06       # Interactive
+zig build run-svg-07       # Heatmap
+```
+</details>
 
 ## Examples
 
@@ -514,6 +526,7 @@ zig build run-fdg          # Force-directed layout (terminal + SVG)
 zig build run-fdg-bench    # FDG performance benchmarks
 zig build run-stress       # Stress test suite
 zig build run-benchmark    # Sugiyama benchmarks
+zig build run-svg-gallery  # All SVG gallery examples at once
 ```
 
 ## License

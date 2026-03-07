@@ -195,7 +195,7 @@ pub fn main() !void {
         // Unicode rendering (with subgraph boxes, colors, labels)
         const output = try zigraph.render(&graph, allocator, .{
             .algorithm = .{ .fruchterman_reingold = .{} },
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
         std.debug.print("{s}\n", .{output});
@@ -214,9 +214,7 @@ pub fn main() !void {
         }
 
         // SVG export
-        const svg_output = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
-        });
+        const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
         const cwd = std.fs.cwd();

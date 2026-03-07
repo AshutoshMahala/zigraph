@@ -216,6 +216,7 @@ pub fn extractDummyPositions(
     positions: *const VirtualPositions,
     edge_count: usize,
     level_spacing: usize,
+    level_y: ?[]const usize,
     allocator: Allocator,
 ) !DummyPositions {
     // Initialize empty waypoint lists for each edge
@@ -230,11 +231,14 @@ pub fn extractDummyPositions(
         for (level.items, 0..) |vnode, pos| {
             if (vnode.dummyEdge()) |edge_idx| {
                 if (edge_idx < waypoints.items.len and pos < positions.x.items[level_idx].items.len) {
-                    const x = positions.x.items[level_idx].items[pos];
-                    const y = level_idx * (1 + level_spacing);
+                    const x_val = positions.x.items[level_idx].items[pos];
+                    const y_val = if (level_y) |ly|
+                        (if (level_idx < ly.len) ly[level_idx] else level_idx * (1 + level_spacing))
+                    else
+                        level_idx * (1 + level_spacing);
                     try waypoints.items[edge_idx].append(allocator, .{
-                        .level = y,
-                        .x = x,
+                        .level = y_val,
+                        .x = x_val,
                     });
                 }
             }
@@ -459,10 +463,16 @@ pub const RealNodePositions = struct {
     y: []usize,
     /// Center X for each real node
     center_x: []usize,
+    /// Center Y for each real node
+    center_y: []usize,
+    /// Height for each real node (in layout units)
+    height: []usize,
     /// Level for each real node
     level: []usize,
     /// Position within level for each real node
     level_position: []usize,
+    /// Y coordinate of the top of each level (indexed by level_idx)
+    level_y: []usize,
     /// Total width
     total_width: usize,
     /// Total height
@@ -474,12 +484,19 @@ pub const RealNodePositions = struct {
         self.allocator.free(self.x);
         self.allocator.free(self.y);
         self.allocator.free(self.center_x);
+        self.allocator.free(self.center_y);
+        self.allocator.free(self.height);
         self.allocator.free(self.level);
         self.allocator.free(self.level_position);
+        self.allocator.free(self.level_y);
     }
 };
 
 /// Extract real node positions from virtual positions.
+///
+/// Computes per-level cumulative Y based on the tallest node in each level,
+/// enabling variable node heights. Dummy levels (with no real nodes) use
+/// height=1 as their contribution.
 pub fn extractRealNodePositions(
     g: *const Graph,
     virtual_levels: *const VirtualLevels,
@@ -488,6 +505,7 @@ pub fn extractRealNodePositions(
     allocator: Allocator,
 ) !RealNodePositions {
     const node_count = g.nodeCount();
+    const num_levels = virtual_levels.levels.items.len;
 
     const x = try allocator.alloc(usize, node_count);
     errdefer allocator.free(x);
@@ -495,18 +513,54 @@ pub fn extractRealNodePositions(
     errdefer allocator.free(y);
     const center_x = try allocator.alloc(usize, node_count);
     errdefer allocator.free(center_x);
-    const level = try allocator.alloc(usize, node_count);
-    errdefer allocator.free(level);
+    const center_y = try allocator.alloc(usize, node_count);
+    errdefer allocator.free(center_y);
+    const node_height = try allocator.alloc(usize, node_count);
+    errdefer allocator.free(node_height);
+    const level_arr = try allocator.alloc(usize, node_count);
+    errdefer allocator.free(level_arr);
     const level_position = try allocator.alloc(usize, node_count);
     errdefer allocator.free(level_position);
 
     @memset(x, 0);
     @memset(y, 0);
     @memset(center_x, 0);
-    @memset(level, 0);
+    @memset(center_y, 0);
+    @memset(node_height, 1);
+    @memset(level_arr, 0);
     @memset(level_position, 0);
 
-    // Extract positions for real nodes
+    // Phase 1: Find the max node height per level
+    const max_height_per_level = try allocator.alloc(usize, num_levels);
+    defer allocator.free(max_height_per_level);
+    @memset(max_height_per_level, 1); // Default: at least 1
+
+    for (virtual_levels.levels.items, 0..) |vlevel, level_idx| {
+        for (vlevel.items) |vnode| {
+            if (vnode.realIndex()) |node_idx| {
+                if (node_idx < node_count) {
+                    const nd = g.nodeAt(node_idx) orelse continue;
+                    if (nd.height > max_height_per_level[level_idx]) {
+                        max_height_per_level[level_idx] = nd.height;
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: Compute cumulative Y for each level
+    // level_y[i] = sum of (max_height[0..i] + spacing for each gap)
+    const level_y = try allocator.alloc(usize, num_levels);
+    errdefer allocator.free(level_y);
+
+    var cumulative: usize = 0;
+    for (0..num_levels) |lvl| {
+        level_y[lvl] = cumulative;
+        cumulative += max_height_per_level[lvl] + level_spacing;
+    }
+    const total_height = if (num_levels > 0) level_y[num_levels - 1] + max_height_per_level[num_levels - 1] else 0;
+
+    // Phase 3: Assign positions to each real node
     for (virtual_levels.levels.items, 0..) |vlevel, level_idx| {
         var real_pos: usize = 0;
         for (vlevel.items, 0..) |vnode, pos| {
@@ -514,11 +568,14 @@ pub fn extractRealNodePositions(
                 if (node_idx < node_count) {
                     const node_x = virtual_positions.x.items[level_idx].items[pos];
                     const width = vnode.width(g);
+                    const nd = g.nodeAt(node_idx) orelse continue;
 
                     x[node_idx] = node_x;
-                    y[node_idx] = level_idx * (1 + level_spacing);
+                    y[node_idx] = level_y[level_idx];
                     center_x[node_idx] = node_x + width / 2;
-                    level[node_idx] = level_idx;
+                    node_height[node_idx] = nd.height;
+                    center_y[node_idx] = level_y[level_idx] + nd.height / 2;
+                    level_arr[node_idx] = level_idx;
                     level_position[node_idx] = real_pos;
                     real_pos += 1;
                 }
@@ -530,10 +587,13 @@ pub fn extractRealNodePositions(
         .x = x,
         .y = y,
         .center_x = center_x,
-        .level = level,
+        .center_y = center_y,
+        .height = node_height,
+        .level = level_arr,
         .level_position = level_position,
+        .level_y = level_y,
         .total_width = virtual_positions.total_width,
-        .total_height = virtual_positions.total_height,
+        .total_height = @max(total_height, virtual_positions.total_height),
         .allocator = allocator,
     };
 }

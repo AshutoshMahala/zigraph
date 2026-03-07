@@ -75,7 +75,7 @@ pub fn main() !void {
         defer ir.deinit();
 
         const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
 
@@ -83,7 +83,6 @@ pub fn main() !void {
 
         // SVG export showing dashed reversed edges
         const svg = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
             .stitch_splines = true,
         });
         defer allocator.free(svg);
@@ -148,7 +147,6 @@ pub fn main() !void {
         std.debug.print("{s}\n", .{output});
 
         const svg = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
             .stitch_splines = true,
         });
         defer allocator.free(svg);
@@ -184,7 +182,6 @@ pub fn main() !void {
         std.debug.print("{s}\n", .{output});
 
         const svg = try zigraph.svg.render(&ir, allocator, .{
-            .color_edges = true,
             .stitch_splines = true,
         });
         defer allocator.free(svg);
@@ -218,7 +215,7 @@ pub fn main() !void {
 
         const output = try zigraph.render(&graph, allocator, .{
             .cycle_breaking = .depth_first,
-            .edge_palette = &zigraph.colors.ansi_dark,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
 
