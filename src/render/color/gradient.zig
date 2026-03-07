@@ -25,6 +25,34 @@ const Color = @import("Color.zig");
 const colormaps = @import("colormaps.zig");
 const ColorMap = colormaps.ColorMap;
 
+/// Validate and escape a gradient ID for safe SVG attribute interpolation.
+/// Only allows alphanumeric characters, hyphens, underscores, and dots.
+/// Returns the original string if valid, or a safe fallback if invalid.
+fn sanitizeId(allocator: Allocator, raw: []const u8) []const u8 {
+    for (raw) |c| {
+        switch (c) {
+            'a'...'z', 'A'...'Z', '0'...'9', '-', '_', '.' => {},
+            else => {
+                // Contains unsafe chars — allocate a filtered copy
+                var buf = allocator.alloc(u8, raw.len) catch return "grad";
+                var len: usize = 0;
+                for (raw) |ch| {
+                    switch (ch) {
+                        'a'...'z', 'A'...'Z', '0'...'9', '-', '_', '.' => {
+                            buf[len] = ch;
+                            len += 1;
+                        },
+                        else => {},
+                    }
+                }
+                if (len == 0) return "grad";
+                return buf[0..len];
+            },
+        }
+    }
+    return raw; // All chars safe — no allocation needed
+}
+
 /// Generate a `<linearGradient>` SVG element from a colormap.
 ///
 /// - `id`: gradient element id (referenced as `fill="url(#id)"`)
@@ -41,10 +69,11 @@ pub fn linearGradient(
     var buf: std.ArrayListUnmanaged(u8) = .{};
     const writer = buf.writer(allocator);
 
+    const safe_id = sanitizeId(allocator, id);
     const coords = direction.coords();
     try writer.print(
         \\<linearGradient id="{s}" x1="{s}" y1="{s}" x2="{s}" y2="{s}">
-    , .{ id, coords.x1, coords.y1, coords.x2, coords.y2 });
+    , .{ safe_id, coords.x1, coords.y1, coords.x2, coords.y2 });
 
     const actual_stops = @max(n_stops, 2);
     for (0..actual_stops) |i| {
@@ -106,12 +135,13 @@ pub fn radialGradientEx(
     inner_t: f32,
     cfg: RadialConfig,
 ) ![]const u8 {
+    const safe_id = sanitizeId(allocator, id);
     var buf: std.ArrayListUnmanaged(u8) = .{};
     const writer = buf.writer(allocator);
 
     try writer.print(
         \\<radialGradient id="{s}" cx="{s}" cy="{s}" r="{s}"
-    , .{ id, cfg.cx, cfg.cy, cfg.r });
+    , .{ safe_id, cfg.cx, cfg.cy, cfg.r });
     if (cfg.fx) |fx| try writer.print(" fx=\"{s}\"", .{fx});
     if (cfg.fy) |fy| try writer.print(" fy=\"{s}\"", .{fy});
     try writer.writeAll(">");
@@ -160,13 +190,14 @@ pub fn glowGradientEx(
     opacity: f32,
     cfg: RadialConfig,
 ) ![]const u8 {
+    const safe_id = sanitizeId(allocator, id);
     var buf: std.ArrayListUnmanaged(u8) = .{};
     const writer = buf.writer(allocator);
     const hex = center_color.toHex();
 
     try writer.print(
         \\<radialGradient id="{s}" cx="{s}" cy="{s}" r="{s}"
-    , .{ id, cfg.cx, cfg.cy, cfg.r });
+    , .{ safe_id, cfg.cx, cfg.cy, cfg.r });
     if (cfg.fx) |fx| try writer.print(" fx=\"{s}\"", .{fx});
     if (cfg.fy) |fy| try writer.print(" fy=\"{s}\"", .{fy});
     try writer.writeAll(">");
@@ -283,4 +314,30 @@ test "radialGradient default is centered" {
     try std.testing.expect(std.mem.indexOf(u8, svg, "r=\"50%\"") != null);
     // Should NOT have fx/fy when using defaults
     try std.testing.expect(std.mem.indexOf(u8, svg, "fx=") == null);
+}
+
+test "sanitizeId strips unsafe characters" {
+    var buf: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const alloc = fba.allocator();
+
+    // Safe id passes through unchanged
+    const safe = sanitizeId(alloc, "my-gradient_1");
+    try std.testing.expectEqualStrings("my-gradient_1", safe);
+
+    // Unsafe chars stripped
+    const cleaned = sanitizeId(alloc, "grad<script>");
+    try std.testing.expect(std.mem.indexOf(u8, cleaned, "<") == null);
+    try std.testing.expect(std.mem.indexOf(u8, cleaned, ">") == null);
+    try std.testing.expect(cleaned.len > 0);
+}
+
+test "linearGradient sanitizes id with special chars" {
+    var buf: [8192]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const alloc = fba.allocator();
+
+    const svg = try linearGradient(alloc, "test\"><script>", ColorMap.turbo, 4, .vertical);
+    // The output must NOT contain unescaped quotes or angle brackets in the id attribute
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<script>") == null);
 }

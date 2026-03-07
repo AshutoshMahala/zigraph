@@ -115,14 +115,12 @@ fn resolveDepth(
     idx: usize,
 ) usize {
     if (depths[idx] != std.math.maxInt(usize)) return depths[idx];
-    const parent_id = subgraphs[idx].parent_id orelse {
-        depths[idx] = 0;
-        return 0;
-    };
-    const parent_idx = id_map.get(parent_id) orelse {
-        depths[idx] = 0;
-        return 0;
-    };
+    // Mark as in-progress (0) BEFORE recursing to break cycles.
+    // If A→B→A, the second visit to A sees 0 instead of maxInt,
+    // preventing infinite recursion.
+    depths[idx] = 0;
+    const parent_id = subgraphs[idx].parent_id orelse return 0;
+    const parent_idx = id_map.get(parent_id) orelse return 0;
     depths[idx] = resolveDepth(subgraphs, depths, id_map, parent_idx) + 1;
     return depths[idx];
 }
@@ -140,4 +138,57 @@ pub fn writeXmlEscaped(writer: anytype, raw: []const u8) !void {
             else => try writer.writeByte(c),
         }
     }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────
+
+const testing = std.testing;
+
+test "xmlEscape escapes special XML characters" {
+    const result = xmlEscape(testing.allocator, "<b>A&B</b>");
+    defer testing.allocator.free(result);
+    try testing.expectEqualStrings("&lt;b&gt;A&amp;B&lt;/b&gt;", result);
+}
+
+test "xmlEscape returns original for safe strings" {
+    const safe = "hello world 123";
+    const result = xmlEscape(testing.allocator, safe);
+    // Should return the same pointer (no allocation) for safe input
+    try testing.expectEqual(safe.ptr, result.ptr);
+}
+
+test "computeSubgraphDepths handles cyclic parent chains" {
+    // Create a cycle: subgraph 0 (id=10) → parent_id=20
+    //                 subgraph 1 (id=20) → parent_id=10
+    const SubgraphInfo = ir_mod.SubgraphInfo(usize);
+    const subgraphs = [_]SubgraphInfo{
+        .{ .id = 10, .parent_id = 20, .label = "A", .x = 0, .y = 0, .width = 0, .height = 0 },
+        .{ .id = 20, .parent_id = 10, .label = "B", .x = 0, .y = 0, .width = 0, .height = 0 },
+    };
+    const depths = computeSubgraphDepths(&subgraphs, testing.allocator);
+    defer testing.allocator.free(depths);
+    // Cycle should not cause infinite recursion; depths should be finite.
+    try testing.expect(depths[0] < std.math.maxInt(usize));
+    try testing.expect(depths[1] < std.math.maxInt(usize));
+}
+
+test "computeSubgraphDepths correct for linear chain" {
+    const SubgraphInfo = ir_mod.SubgraphInfo(usize);
+    const subgraphs = [_]SubgraphInfo{
+        .{ .id = 1, .parent_id = null, .label = "root", .x = 0, .y = 0, .width = 0, .height = 0 },
+        .{ .id = 2, .parent_id = 1, .label = "child", .x = 0, .y = 0, .width = 0, .height = 0 },
+        .{ .id = 3, .parent_id = 2, .label = "grandchild", .x = 0, .y = 0, .width = 0, .height = 0 },
+    };
+    const depths = computeSubgraphDepths(&subgraphs, testing.allocator);
+    defer testing.allocator.free(depths);
+    try testing.expectEqual(@as(usize, 0), depths[0]);
+    try testing.expectEqual(@as(usize, 1), depths[1]);
+    try testing.expectEqual(@as(usize, 2), depths[2]);
+}
+
+test "writeXmlEscaped streams correctly" {
+    var buf: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    try writeXmlEscaped(stream.writer(), "a\"b'c");
+    try testing.expectEqualStrings("a&quot;b&apos;c", stream.getWritten());
 }

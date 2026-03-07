@@ -14,7 +14,7 @@
 //!   mod.zig          ← this file: render() entry point + re-exports
 //!   config.zig       ← SvgConfig, style types, presets
 //!   defs.zig         ← marker definitions (<defs> helpers)
-//!   helpers.zig      ← findNodeLabel, computeSubgraphDepth
+//!   helpers.zig      ← findNodeLabel, computeSubgraphDepths, xmlEscape, writeXmlEscaped
 //!   nodes.zig        ← renderNode, renderDummyNode
 //!   edges.zig        ← renderEdge, renderSelfLoop, renderBezierEdge
 //!   splines.zig      ← renderStitchedEdges, renderSplinePath

@@ -344,7 +344,7 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
         const dy = @abs(ty - fy);
         const dx = @abs(tx - fx);
         const is_horizontal = dy < 2.0 or (dx > 0 and dy / dx < 0.15);
-        // Cap: only dome for short edges (≤ ~4 node widths apart in pixels)
+        // Cap: only dome for short nearby edges (≤ ~2-3 node widths apart)
         const max_dome_dx: f64 = @floatFromInt(config.char_width * 24);
 
         if (is_horizontal and dx > 10.0 and dx <= max_dome_dx) {

@@ -68,6 +68,12 @@ pub fn rgb8(r: u8, g: u8, b: u8) Color {
 /// Parse a hex color string (`#rrggbb`, `#rrggbbaa`, or `#rgb`).
 /// Returns black on invalid input.
 pub fn fromHex(hex: []const u8) Color {
+    return parseHex(hex) orelse rgb(0, 0, 0);
+}
+
+/// Parse a hex color string, returning null on invalid input.
+/// Accepts `#rrggbb`, `#rrggbbaa`, or `#rgb`.
+pub fn parseHex(hex: []const u8) ?Color {
     if (hex.len == 9 and hex[0] == '#') {
         const r = parseHexPair(hex[1], hex[2]);
         const g = parseHexPair(hex[3], hex[4]);
@@ -89,7 +95,7 @@ pub fn fromHex(hex: []const u8) Color {
         const b = parseHexDigit(hex[3]);
         return rgb8(r | (r << 4), g | (g << 4), b | (b << 4));
     }
-    return rgb(0, 0, 0);
+    return null;
 }
 
 /// Create a color from HSL values.
@@ -517,5 +523,18 @@ test "rgb8 constructor" {
     const c = rgb8(255, 128, 0);
     try std.testing.expect(@abs(c.r - 1.0) < 0.005);
     try std.testing.expect(@abs(c.g - 0.502) < 0.005);
+    try std.testing.expect(@abs(c.b) < 0.005);
+}
+
+test "parseHex returns null for invalid input" {
+    try std.testing.expect(parseHex("invalid") == null);
+    try std.testing.expect(parseHex("") == null);
+    try std.testing.expect(parseHex("#gg0000") != null); // parseHexDigit returns 0 for invalid digits
+}
+
+test "parseHex returns color for valid input" {
+    const c = parseHex("#ff0000") orelse unreachable;
+    try std.testing.expect(@abs(c.r - 1.0) < 0.005);
+    try std.testing.expect(@abs(c.g) < 0.005);
     try std.testing.expect(@abs(c.b) < 0.005);
 }

@@ -187,7 +187,8 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                 }
 
                 // For reversed edges, offset label to the right of the bezier arc
-                const label_offset_x: f64 = if (is_reversed) 20.0 else 0.0;
+                const arrow_f: f64 = @floatFromInt(config.arrow_size);
+                const label_offset_x: f64 = if (is_reversed) arrow_f * 2.5 else 0.0;
 
                 try writer.print(
                     \\    <text x="{d:.0}" y="{d:.0}" font-family="{s}" font-size="{d}"

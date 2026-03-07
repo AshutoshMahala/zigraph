@@ -82,6 +82,9 @@ pub const ColorMap = struct {
     /// const hex: []const u8 = &lut[128]; // mid-viridis color
     /// ```
     pub fn quantize(self: ColorMap, comptime n: usize) [n][7]u8 {
+        comptime {
+            if (n > 4096) @compileError("quantize: n too large (max 4096)");
+        }
         @setEvalBranchQuota(n * 100000);
         var result: [n][7]u8 = undefined;
         for (0..n) |i| {

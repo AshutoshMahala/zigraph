@@ -10,6 +10,8 @@ const MarkerShape = types.MarkerShape;
 pub const MarkerDef = struct { color: []const u8, shape: MarkerShape };
 
 /// Find an existing (color, shape) marker or add a new one. Returns the index.
+/// If the marker table is full (128 cap), returns the index of the closest
+/// existing match by shape (falls back to 0 if no shape match).
 pub fn findOrAddMarker(
     markers: *[128]MarkerDef,
     count: *usize,
@@ -19,7 +21,13 @@ pub fn findOrAddMarker(
     for (markers[0..count.*], 0..) |m, i| {
         if (m.shape == shape and std.mem.eql(u8, m.color, color)) return i;
     }
-    if (count.* >= 128) return 0; // safety cap
+    if (count.* >= 128) {
+        // Table full — find best existing match (same shape, any color)
+        for (markers[0..count.*], 0..) |m, i| {
+            if (m.shape == shape) return i;
+        }
+        return 0; // ultimate fallback
+    }
     markers[count.*] = .{ .color = color, .shape = shape };
     count.* += 1;
     return count.* - 1;
