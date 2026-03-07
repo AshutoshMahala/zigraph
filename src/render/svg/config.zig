@@ -21,6 +21,7 @@
 const std = @import("std");
 const colors = @import("../color/mod.zig");
 const types = @import("../types.zig");
+const helpers = @import("helpers.zig");
 
 pub const MarkerShape = types.MarkerShape;
 pub const EdgeStyleContext = types.EdgeStyleContext;
@@ -160,57 +161,74 @@ pub const shapes = struct {
     /// Rounded rectangle (default) — `<rect>` with `rx="4"`.
     pub fn rounded_rectangle(ctx: NodeStyleContext) NodeStyle {
         const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
         return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
             \\<rect x="0" y="0" width="{d}" height="{d}" rx="4" ry="4"{s}/>
             \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
-        , .{ ctx.width, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+        , .{ ctx.width, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, label }) catch "" };
     }
 
     /// Sharp rectangle — `<rect>` with no corner rounding.
     pub fn rectangle(ctx: NodeStyleContext) NodeStyle {
         const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
         return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
             \\<rect x="0" y="0" width="{d}" height="{d}"{s}/>
             \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
-        , .{ ctx.width, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+        , .{ ctx.width, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, label }) catch "" };
     }
 
     /// Ellipse — `<ellipse>` filling the bounding box.
     pub fn ellipse(ctx: NodeStyleContext) NodeStyle {
         const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
         return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
             \\<ellipse cx="{d}" cy="{d}" rx="{d}" ry="{d}"{s}/>
             \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
-        , .{ ctx.width / 2, ctx.height / 2, ctx.width / 2, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+        , .{ ctx.width / 2, ctx.height / 2, ctx.width / 2, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, label }) catch "" };
     }
 
     /// Diamond — `<polygon>` rotated 45°. Good for decision nodes in flowcharts.
     pub fn diamond(ctx: NodeStyleContext) NodeStyle {
         const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
         return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
             \\<polygon points="{d},0 {d},{d} {d},{d} 0,{d}"{s}/>
             \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
-        , .{ ctx.width / 2, ctx.width, ctx.height / 2, ctx.width / 2, ctx.height, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+        , .{ ctx.width / 2, ctx.width, ctx.height / 2, ctx.width / 2, ctx.height, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, label }) catch "" };
     }
 
     /// Parallelogram — skewed rectangle. Good for I/O nodes in flowcharts.
     pub fn parallelogram(ctx: NodeStyleContext) NodeStyle {
         const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
         const skew = ctx.width / 5;
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
         return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
             \\<polygon points="{d},0 {d},0 {d},{d} 0,{d}"{s}/>
             \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
-        , .{ skew, ctx.width, ctx.width - skew, ctx.height, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+        , .{ skew, ctx.width, ctx.width - skew, ctx.height, ctx.height, dash, ctx.width / 2, ctx.height / 2 + 4, label }) catch "" };
     }
 
     /// Hexagon — six-sided polygon. Good for preparation/state nodes.
     pub fn hexagon(ctx: NodeStyleContext) NodeStyle {
         const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
         const inset = ctx.width / 4;
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
         return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
             \\<polygon points="{d},0 {d},0 {d},{d} {d},{d} {d},{d} 0,{d}"{s}/>
             \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
-        , .{ inset, ctx.width - inset, ctx.width, ctx.height / 2, ctx.width - inset, ctx.height, inset, ctx.height, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, ctx.label }) catch "" };
+        , .{ inset, ctx.width - inset, ctx.width, ctx.height / 2, ctx.width - inset, ctx.height, inset, ctx.height, ctx.height / 2, dash, ctx.width / 2, ctx.height / 2 + 4, label }) catch "" };
+    }
+
+    /// Circle — equal width/height circle. Centers within the bounding box.
+    pub fn circle(ctx: NodeStyleContext) NodeStyle {
+        const dash: []const u8 = if (ctx.is_implicit) " stroke-dasharray=\"4,2\"" else "";
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
+        const r = @min(ctx.width, ctx.height) / 2;
+        return .{ .shape_svg = std.fmt.allocPrint(ctx.arena,
+            \\<circle cx="{d}" cy="{d}" r="{d}"{s}/>
+            \\<text x="{d}" y="{d}" text-anchor="middle" font-family="monospace" font-size="12" fill="#333333" stroke="none">{s}</text>
+        , .{ ctx.width / 2, ctx.height / 2, r, dash, ctx.width / 2, ctx.height / 2 + 4, label }) catch "" };
     }
 };
 
@@ -250,10 +268,11 @@ pub const subgraph_presets = struct {
     /// Dashed rounded rectangle with bold label top-left (default).
     /// Reproduces the original hardcoded subgraph style.
     pub fn default(ctx: SubgraphStyleContext) SubgraphStyle {
+        const label = helpers.xmlEscape(ctx.arena, ctx.label);
         return .{ .box_svg = std.fmt.allocPrint(ctx.arena,
             \\<rect x="0" y="0" width="{d}" height="{d}" rx="6" ry="6" stroke-width="1" stroke-dasharray="4,2"/>
             \\<text x="6" y="13" font-family="monospace" font-size="11" font-weight="bold" fill="#4a90d9" stroke="none">{s}</text>
-        , .{ ctx.width, ctx.height, ctx.label }) catch "" };
+        , .{ ctx.width, ctx.height, label }) catch "" };
     }
 };
 

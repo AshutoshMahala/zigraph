@@ -275,9 +275,10 @@ fn renderEdgeInner(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: 
             try writer.print(
                 \\>
                 \\      <textPath href="#edgepath{d}" startOffset="{d}%"
-                \\              text-anchor="middle" dominant-baseline="auto">"{s}"</textPath></text>
-                \\
-            , .{ edge.edge_index, position, label });
+                \\              text-anchor="middle" dominant-baseline="auto">"
+            , .{ edge.edge_index, position });
+            try helpers.writeXmlEscaped(writer, label);
+            try writer.writeAll("\"</textPath></text>\n");
         } else {
             // Position label along the edge path at the given percentage
             const t_pos: f64 = @as(f64, @floatFromInt(position)) / 100.0;
@@ -292,7 +293,9 @@ fn renderEdgeInner(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: 
                 \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto"
             , .{ label_x, label_y, font_family, font_size, label_color });
             if (label_style.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
-            try writer.print(">\"{s}\"</text>\n", .{label});
+            try writer.writeAll(">\"");
+            try helpers.writeXmlEscaped(writer, label);
+            try writer.writeAll("\"</text>\n");
         }
     }
 }
@@ -455,7 +458,9 @@ fn renderSelfLoopInner(writer: anytype, edge: *const LayoutEdge, config: SvgConf
             \\          fill="{s}" text-anchor="start" dominant-baseline="auto"
         , .{ label_x, label_y, font_family, font_size, label_color });
         if (label_style.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
-        try writer.print(">\"" ++ "{s}" ++ "\"</text>\n", .{label});
+        try writer.writeAll(">\"");
+        try helpers.writeXmlEscaped(writer, label);
+        try writer.writeAll("\"</text>\n");
     }
 }
 

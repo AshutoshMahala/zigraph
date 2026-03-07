@@ -21,24 +21,24 @@ const helpers = @import("helpers.zig");
 /// Render edges by grouping segments with the same edge_index into smooth splines.
 /// This stitches multi-segment edges through dummy nodes into single curved paths.
 pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allocator, config: SvgConfig, resolved_styles: []const ResolvedEdgeStyle, label_styles: []const EdgeLabelStyle) !void {
-    // Group edges by edge_index
-    // Use a simple approach: find max edge_index, then collect segments for each
-    var max_edge_idx: usize = 0;
+    // Group edges by edge_index in a single O(E) pass
+    var groups = std.AutoHashMapUnmanaged(usize, std.ArrayListUnmanaged(LayoutEdge)){};
+    defer {
+        var it = groups.valueIterator();
+        while (it.next()) |list| list.deinit(allocator);
+        groups.deinit(allocator);
+    }
     for (layout.edges.items) |edge| {
-        if (edge.edge_index > max_edge_idx) max_edge_idx = edge.edge_index;
+        const gop = try groups.getOrPut(allocator, edge.edge_index);
+        if (!gop.found_existing) gop.value_ptr.* = .{};
+        try gop.value_ptr.append(allocator, edge);
     }
 
-    // For each original edge, collect all its segments
-    for (0..(max_edge_idx + 1)) |edge_idx| {
-        // Collect segments for this edge (order by from_y to get top-to-bottom)
-        var segments: std.ArrayListUnmanaged(LayoutEdge) = .{};
-        defer segments.deinit(allocator);
-
-        for (layout.edges.items) |edge| {
-            if (edge.edge_index == edge_idx) {
-                try segments.append(allocator, edge);
-            }
-        }
+    // Iterate over each group (order of iteration does not affect correctness)
+    var group_it = groups.iterator();
+    while (group_it.next()) |entry| {
+        const edge_idx = entry.key_ptr.*;
+        var segments = entry.value_ptr.*;
 
         if (segments.items.len == 0) continue;
 
@@ -118,7 +118,7 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
             try edge_render.renderSingleEdge(writer, points.items[0], points.items[1], edge_idx, config, style, has_label, is_directed, is_reversed, first_seg.from_id, last_seg.to_id);
         } else {
             // Multi-point: render as smooth spline
-            try renderSplinePath(writer, points.items, edge_idx, config, style, has_label, is_directed, is_reversed, first_seg.from_id, last_seg.to_id);
+            try renderSplinePath(writer, points.items, edge_idx, allocator, config, style, has_label, is_directed, is_reversed, first_seg.from_id, last_seg.to_id);
         }
 
         // Render edge label (if any segment carries one)
@@ -139,9 +139,10 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                 try writer.print(
                     \\>
                     \\      <textPath href="#edgepath{d}" startOffset="{d}%"
-                    \\              text-anchor="middle" dominant-baseline="auto">"{s}"</textPath></text>
-                    \\
-                , .{ edge_idx, position, label });
+                    \\              text-anchor="middle" dominant-baseline="auto">"
+                , .{ edge_idx, position });
+                try helpers.writeXmlEscaped(writer, label);
+                try writer.writeAll("\"</textPath></text>\n");
             } else {
                 // Position label along the actual edge path at the given percentage
                 const np = points.items.len;
@@ -149,17 +150,18 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                 const lh_f: f64 = @floatFromInt(config.line_height);
                 const pad_f: f64 = @floatFromInt(config.padding);
 
-                var ppx: [128]f64 = undefined;
-                var ppy: [128]f64 = undefined;
-                const pn = @min(np, 128);
-                for (points.items[0..pn], 0..) |p, idx| {
+                const ppx = try allocator.alloc(f64, np);
+                defer allocator.free(ppx);
+                const ppy = try allocator.alloc(f64, np);
+                defer allocator.free(ppy);
+                for (points.items[0..np], 0..) |p, idx| {
                     ppx[idx] = @as(f64, @floatFromInt(p.x)) * cw_f + pad_f;
                     ppy[idx] = @as(f64, @floatFromInt(p.y)) * lh_f + pad_f;
                 }
 
                 // Compute total polyline length
                 var total_len: f64 = 0;
-                for (1..pn) |idx| {
+                for (1..np) |idx| {
                     const ddx = ppx[idx] - ppx[idx - 1];
                     const ddy = ppy[idx] - ppy[idx - 1];
                     total_len += @sqrt(ddx * ddx + ddy * ddy);
@@ -171,7 +173,7 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                 var accum: f64 = 0;
                 var mx: f64 = ppx[0];
                 var my: f64 = ppy[0];
-                for (0..(pn - 1)) |idx| {
+                for (0..(np - 1)) |idx| {
                     const ddx = ppx[idx + 1] - ppx[idx];
                     const ddy = ppy[idx + 1] - ppy[idx];
                     const slen = @sqrt(ddx * ddx + ddy * ddy);
@@ -192,7 +194,9 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
                     \\          fill="{s}" text-anchor="middle" dy="-6" dominant-baseline="auto"
                 , .{ mx + label_offset_x, my, font_family, font_size, label_color });
                 if (ls.extra_attrs) |attrs| try writer.print(" {s}", .{attrs});
-                try writer.print(">\"" ++ "{s}" ++ "\"</text>\n", .{label});
+                try writer.writeAll(">\"");
+                try helpers.writeXmlEscaped(writer, label);
+                try writer.writeAll("\"</text>\n");
             }
         }
     }
@@ -200,12 +204,15 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
 
 /// Render a multi-point path as a smooth cubic bezier spline.
 /// Uses Catmull-Rom to Bezier conversion for smooth curves through all points.
-pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, config: SvgConfig, style: ResolvedEdgeStyle, has_label: bool, directed: bool, reversed: bool, from_id: usize, to_id: usize) !void {
+pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize, allocator: Allocator, config: SvgConfig, style: ResolvedEdgeStyle, has_label: bool, directed: bool, reversed: bool, from_id: usize, to_id: usize) !void {
     if (points.len < 2) return;
 
-    // Convert points to pixel coordinates
-    var px_points: [128]struct { x: f64, y: f64 } = undefined;
-    const n = @min(points.len, 128);
+    const n = points.len;
+
+    // Convert points to pixel coordinates (dynamically allocated)
+    const PixelPt = struct { x: f64, y: f64 };
+    const px_points = try allocator.alloc(PixelPt, n);
+    defer allocator.free(px_points);
 
     for (points[0..n], 0..) |p, i| {
         px_points[i] = .{
@@ -215,8 +222,9 @@ pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize,
     }
 
     // Store control points for debug rendering
-    var control_points: [256]struct { x: f64, y: f64, from_x: f64, from_y: f64 } = undefined;
-    var cp_count: usize = 0;
+    const CtrlPt = struct { x: f64, y: f64, from_x: f64, from_y: f64 };
+    var control_list: std.ArrayListUnmanaged(CtrlPt) = .{};
+    defer control_list.deinit(allocator);
 
     // Start the visible path (text path is separate for correct L→R orientation)
     try writer.print("    <path d=\"M {d:.0} {d:.0}", .{ px_points[0].x, px_points[0].y });
@@ -253,11 +261,9 @@ pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize,
             });
 
             // Store control points for debug rendering
-            if (config.show_control_points and cp_count + 2 < 256) {
-                control_points[cp_count] = .{ .x = cp1_x, .y = cp1_y, .from_x = p1.x, .from_y = p1.y };
-                cp_count += 1;
-                control_points[cp_count] = .{ .x = cp2_x, .y = cp2_y, .from_x = p2.x, .from_y = p2.y };
-                cp_count += 1;
+            if (config.show_control_points) {
+                try control_list.append(allocator, .{ .x = cp1_x, .y = cp1_y, .from_x = p1.x, .from_y = p1.y });
+                try control_list.append(allocator, .{ .x = cp2_x, .y = cp2_y, .from_x = p2.x, .from_y = p2.y });
             }
         }
         try writer.writeAll("\"");
@@ -289,8 +295,8 @@ pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize,
     try writer.writeAll("/>\n");
 
     // Render control points if debugging
-    if (config.show_control_points and cp_count > 0) {
-        for (control_points[0..cp_count]) |cp| {
+    if (config.show_control_points and control_list.items.len > 0) {
+        for (control_list.items) |cp| {
             // Control point circle
             try writer.print(
                 \\    <circle cx="{d:.0}" cy="{d:.0}" r="4" fill="{s}" opacity="0.7"/>
@@ -314,7 +320,8 @@ pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize,
     if (config.labels_on_path and has_label) {
         // Determine if path needs reversing (text should always read left-to-right)
         const needs_reverse = px_points[0].x > px_points[n - 1].x;
-        var text_pts: @TypeOf(px_points) = undefined;
+        const text_pts = try allocator.alloc(PixelPt, n);
+        defer allocator.free(text_pts);
         if (needs_reverse) {
             for (0..n) |i| {
                 text_pts[i] = px_points[n - 1 - i];

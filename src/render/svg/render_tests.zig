@@ -753,3 +753,118 @@ test "svg: edge label on_path override" {
     try std.testing.expect(std.mem.indexOf(u8, svg, "<textPath") != null);
     try std.testing.expect(std.mem.indexOf(u8, svg, "edgepath") != null);
 }
+
+// ─── XML escaping tests ─────────────────────────────────────────────────────
+
+const helpers = @import("helpers.zig");
+
+test "helpers: xmlEscape escapes all special characters" {
+    const allocator = std.testing.allocator;
+    const result = helpers.xmlEscape(allocator, "A<B>&C\"D'E");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("A&lt;B&gt;&amp;C&quot;D&apos;E", result);
+}
+
+test "helpers: xmlEscape returns original when no escaping needed" {
+    const allocator = std.testing.allocator;
+    const input = "Hello World";
+    const result = helpers.xmlEscape(allocator, input);
+    // Should return the same pointer (no allocation)
+    try std.testing.expectEqual(input.ptr, result.ptr);
+}
+
+test "helpers: writeXmlEscaped streams escaped output" {
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const writer = fbs.writer();
+    try helpers.writeXmlEscaped(writer, "<script>alert('xss')</script>");
+    const written = fbs.getWritten();
+    try std.testing.expectEqualStrings("&lt;script&gt;alert(&apos;xss&apos;)&lt;/script&gt;", written);
+}
+
+test "svg: node labels are XML-escaped" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1,
+        .label = "A<B>&C",
+        .x = 0,
+        .y = 0,
+        .width = 8,
+        .center_x = 4,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    layout.setDimensions(12, 5);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // The label should be escaped in the SVG output
+    try std.testing.expect(std.mem.indexOf(u8, svg, "A&lt;B&gt;&amp;C") != null);
+    // The raw unescaped form should NOT appear
+    try std.testing.expect(std.mem.indexOf(u8, svg, "A<B>&C") == null);
+}
+
+test "svg: edge labels are XML-escaped" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{ .id = 1, .label = "Src", .x = 0, .y = 0, .width = 5, .center_x = 2, .level = 0, .level_position = 0 });
+    try layout.addNode(.{ .id = 2, .label = "Dst", .x = 0, .y = 2, .width = 5, .center_x = 2, .level = 1, .level_position = 0 });
+    try layout.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 2,
+        .from_y = 1,
+        .to_x = 2,
+        .to_y = 2,
+        .label = "<danger>&\"alert\"",
+        .directed = true,
+        .edge_index = 0,
+        .reversed = false,
+        .path = .direct,
+    });
+
+    layout.setDimensions(8, 5);
+
+    const svg = try render(&layout, allocator, .{});
+    defer allocator.free(svg);
+
+    // The edge label should be escaped
+    try std.testing.expect(std.mem.indexOf(u8, svg, "&lt;danger&gt;&amp;&quot;alert&quot;") != null);
+}
+
+test "svg: circle shape preset" {
+    const allocator = std.testing.allocator;
+
+    var layout = LayoutIR.init(allocator);
+    defer layout.deinit();
+
+    try layout.addNode(.{
+        .id = 1,
+        .label = "O",
+        .x = 0,
+        .y = 0,
+        .width = 4,
+        .center_x = 2,
+        .level = 0,
+        .level_position = 0,
+    });
+
+    layout.setDimensions(8, 5);
+
+    const svg = try render(&layout, allocator, .{
+        .node_style_fn = &config_mod.shapes.circle,
+    });
+    defer allocator.free(svg);
+
+    // Should contain a <circle> element
+    try std.testing.expect(std.mem.indexOf(u8, svg, "<circle") != null);
+}

@@ -74,7 +74,8 @@ const MarkerDef = defs_mod.MarkerDef;
 const findOrAddMarker = defs_mod.findOrAddMarker;
 const writeMarkerDef = defs_mod.writeMarkerDef;
 const findNodeLabel = helpers_mod.findNodeLabel;
-const computeSubgraphDepth = helpers_mod.computeSubgraphDepth;
+const computeSubgraphDepths = helpers_mod.computeSubgraphDepths;
+const xmlEscape = helpers_mod.xmlEscape;
 
 // ── Force test inclusion for submodules ─────────────────────────────────────
 
@@ -138,8 +139,8 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
             .total_edges = num_edge_indices,
             .from_id = edge.from_id,
             .to_id = edge.to_id,
-            .from_label = findNodeLabel(layout.nodes.items, edge.from_id),
-            .to_label = findNodeLabel(layout.nodes.items, edge.to_id),
+            .from_label = findNodeLabel(layout.nodes.items, edge.from_id, layout.id_to_index),
+            .to_label = findNodeLabel(layout.nodes.items, edge.to_id, layout.id_to_index),
             .label = edge.label,
             .directed = edge.directed,
             .reversed = edge.reversed,
@@ -165,8 +166,8 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
                 .total_edges = num_edge_indices,
                 .from_id = edge.from_id,
                 .to_id = edge.to_id,
-                .from_label = findNodeLabel(layout.nodes.items, edge.from_id),
-                .to_label = findNodeLabel(layout.nodes.items, edge.to_id),
+                .from_label = findNodeLabel(layout.nodes.items, edge.from_id, layout.id_to_index),
+                .to_label = findNodeLabel(layout.nodes.items, edge.to_id, layout.id_to_index),
                 .label = edge.label,
                 .directed = edge.directed,
                 .reversed = edge.reversed,
@@ -252,13 +253,14 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     // ── Pre-compute subgraph styles ─────────────────────────────────────
 
     const sg_items = layout.subgraphs.items;
+    const sg_depths = computeSubgraphDepths(sg_items, arena_alloc);
     const subgraph_styles = try arena_alloc.alloc(SubgraphStyle, sg_items.len);
     for (sg_items, 0..) |sg, idx| {
         subgraph_styles[idx] = config.subgraph_style_fn(.{
             .subgraph_id = sg.id,
             .parent_id = sg.parent_id,
             .label = sg.label,
-            .depth = computeSubgraphDepth(sg_items, sg.parent_id),
+            .depth = if (idx < sg_depths.len) sg_depths[idx] else 0,
             .total_subgraphs = sg_items.len,
             .width = sg.width * config.char_width,
             .height = sg.height * config.line_height,
