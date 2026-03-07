@@ -332,9 +332,11 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
         try writeExtraAttrs(writer, style);
         try writer.writeAll("/>\n");
     } else {
-        // Check if the edge is nearly horizontal (same Y or very close).
-        // Horizontal straight lines overlap node borders and are hard to see,
-        // so render them as a dome-shaped curve instead.
+        // Check if the edge is nearly horizontal (same Y or very close)
+        // AND short enough that a straight line would overlap node borders.
+        // Long-distance same-level edges are fine as straight lines; the dome
+        // is only needed for nearby same-level nodes where the edge would be
+        // invisible against the node rectangles.
         const fx: f64 = @floatFromInt(from_x);
         const fy: f64 = @floatFromInt(from_y);
         const tx: f64 = @floatFromInt(to_x);
@@ -342,8 +344,10 @@ pub fn renderSingleEdge(writer: anytype, from: Point, to: Point, edge_idx: usize
         const dy = @abs(ty - fy);
         const dx = @abs(tx - fx);
         const is_horizontal = dy < 2.0 or (dx > 0 and dy / dx < 0.15);
+        // Cap: only dome for short edges (≤ ~4 node widths apart in pixels)
+        const max_dome_dx: f64 = @floatFromInt(config.char_width * 24);
 
-        if (is_horizontal and dx > 10.0) {
+        if (is_horizontal and dx > 10.0 and dx <= max_dome_dx) {
             // Dome curve: arc above the nodes so the edge is clearly visible.
             // Control points are offset upward by a fraction of the horizontal span.
             const bulge = @max(dx * 0.35, 20.0);
