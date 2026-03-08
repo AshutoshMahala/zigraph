@@ -171,6 +171,10 @@ pub const color = @import("render/color/mod.zig");
 
 /// Shared rendering types (MarkerShape, etc.)
 pub const render_types = @import("render/types.zig");
+
+/// Shared render helpers (subgraph depth computation, etc.)
+pub const render_helpers = @import("render/helpers.zig");
+
 pub const MarkerShape = render_types.MarkerShape;
 pub const EdgeStyleContext = render_types.EdgeStyleContext;
 pub const NodeStyleContext = render_types.NodeStyleContext;
@@ -181,6 +185,19 @@ pub const NodeStyle = svg.NodeStyle;
 pub const SubgraphStyle = svg.SubgraphStyle;
 pub const shapes = svg.shapes;
 pub const subgraph_presets = svg.subgraph_presets;
+
+// Terminal renderer types
+pub const TerminalEdgeStyle = unicode.TerminalEdgeStyle;
+pub const TerminalNodeStyle = unicode.TerminalNodeStyle;
+pub const TerminalEdgeLabelStyle = unicode.TerminalEdgeLabelStyle;
+pub const TerminalSubgraphStyle = unicode.TerminalSubgraphStyle;
+pub const LineWeight = unicode.LineWeight;
+pub const NodeBorder = unicode.NodeBorder;
+pub const LabelPlacement = unicode.LabelPlacement;
+pub const SubgraphBorder = unicode.SubgraphBorder;
+pub const LabelPosition = unicode.LabelPosition;
+pub const TextAttrs = unicode.TextAttrs;
+pub const terminal_subgraph_presets = unicode.subgraph_presets;
 
 // ============================================================================
 // Layout configuration

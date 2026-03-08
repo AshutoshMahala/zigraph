@@ -20,6 +20,8 @@ const LayoutNode = ir_mod.LayoutNode(usize);
 const LayoutEdge = ir_mod.LayoutEdge(usize);
 const EdgePath = ir_mod.EdgePath(usize);
 const colors = @import("color/mod.zig");
+const types = @import("types.zig");
+const render_helpers = @import("helpers.zig");
 
 // Box drawing characters as u21 codepoints (comptime decoded)
 const CP_V_LINE: u21 = '│';
@@ -63,6 +65,141 @@ const CP_MIX_T_DOWN_DH: u21 = '╤'; // single down from double horizontal
 const CP_MIX_T_UP_DH: u21 = '╧'; // single up from double horizontal
 const CP_MIX_T_RIGHT_DV: u21 = '╞'; // single right from double vertical
 const CP_MIX_T_LEFT_DV: u21 = '╡'; // single left from double vertical
+
+// ── Re-exports from shared types ────────────────────────────────────────────
+
+pub const MarkerShape = types.MarkerShape;
+pub const EdgeStyleContext = types.EdgeStyleContext;
+pub const NodeStyleContext = types.NodeStyleContext;
+pub const SubgraphStyleContext = types.SubgraphStyleContext;
+
+// ── Terminal style types ────────────────────────────────────────────────────
+
+/// Text attributes for terminal cells.
+pub const TextAttrs = packed struct {
+    bold: bool = false,
+    dim: bool = false,
+    italic: bool = false,
+    underline: bool = false,
+    _pad: u4 = 0,
+};
+
+/// Line weight for edge rendering (which box-drawing character set to use).
+pub const LineWeight = enum {
+    light, // ─ │ (default)
+    heavy, // ━ ┃
+    double, // ═ ║
+    dashed, // ┈ ┊ (reversed edges)
+};
+
+/// Node border style.
+pub const NodeBorder = enum {
+    // 1-row variants
+    bracket, // [label]  (explicit default)
+    angle, // <label>  (implicit default)
+    none, //  label
+
+    // 3-row variants
+    single_box, // ┌─┐ │ │ └─┘
+    heavy_box, // ┏━┓ ┃ ┃ ┗━┛
+    double_box, // ╔═╗ ║ ║ ╚═╝
+    rounded_box, // ╭─╮ │ │ ╰─╯
+    open_box, // ┌── │   ──┘
+
+    pub fn height(self: NodeBorder) u8 {
+        return switch (self) {
+            .bracket, .angle, .none => 1,
+            .single_box, .heavy_box, .double_box, .rounded_box, .open_box => 3,
+        };
+    }
+};
+
+/// Edge label placement strategy.
+pub const LabelPlacement = enum {
+    auto, // layout-computed position (default)
+    near_source, // close to source node
+    near_target, // close to target node
+    center, // center of horizontal segment
+};
+
+/// Subgraph border style.
+pub const SubgraphBorder = enum {
+    single, // ┌─┐ │ │ └─┘
+    double, // ╔═╗ ║ ║ ╚═╝ (default)
+    heavy, // ┏━┓ ┃ ┃ ┗━┛
+    dashed, // ┄ ┆ corners: ┌┐└┘
+    none, // no border
+};
+
+/// Subgraph label position.
+pub const LabelPosition = enum {
+    top_left, // label on top border, left-aligned
+    top_center, // label on top border, centered
+    inside, // one row below top border (legacy behavior)
+};
+
+/// Style returned by `edge_style_fn` for each edge.
+pub const TerminalEdgeStyle = struct {
+    color: u8 = 0, // ANSI 256 color (0 = use palette or default)
+    weight: LineWeight = .light,
+    marker_end: MarkerShape = .arrow,
+    marker_start: MarkerShape = .none,
+};
+
+/// Style returned by `node_style_fn` for each node.
+pub const TerminalNodeStyle = struct {
+    border: NodeBorder = .bracket,
+    fg_color: u8 = 0,
+    bg_color: u8 = 0,
+    attrs: TextAttrs = .{},
+};
+
+/// Style returned by `edge_label_style_fn` for each edge label.
+pub const TerminalEdgeLabelStyle = struct {
+    color: u8 = 0, // 0 = follow edge color
+    placement: LabelPlacement = .auto,
+    attrs: TextAttrs = .{},
+};
+
+/// Style returned by `subgraph_style_fn` for each subgraph.
+pub const TerminalSubgraphStyle = struct {
+    border: SubgraphBorder = .double,
+    color: u8 = 0,
+    label_pos: LabelPosition = .top_left,
+    label_attrs: TextAttrs = .{},
+};
+
+// ── Default style functions ─────────────────────────────────────────────────
+
+pub fn defaultEdgeStyle(ctx: EdgeStyleContext) TerminalEdgeStyle {
+    return .{ .weight = if (ctx.reversed) .dashed else .light };
+}
+
+pub fn defaultNodeStyle(ctx: NodeStyleContext) TerminalNodeStyle {
+    return .{ .border = if (ctx.is_implicit) .angle else .bracket };
+}
+
+pub fn defaultEdgeLabelStyle(_: EdgeStyleContext) TerminalEdgeLabelStyle {
+    return .{};
+}
+
+pub fn defaultSubgraphStyle(_: SubgraphStyleContext) TerminalSubgraphStyle {
+    return .{};
+}
+
+// ── Subgraph style presets ──────────────────────────────────────────────────
+
+pub const subgraph_presets = struct {
+    /// Cycle border style and color by nesting depth.
+    pub fn depthCycled(ctx: SubgraphStyleContext) TerminalSubgraphStyle {
+        const borders = [_]SubgraphBorder{ .double, .single, .heavy, .dashed };
+        const palette = [_]u8{ 33, 34, 35, 36 };
+        return .{
+            .border = borders[ctx.depth % borders.len],
+            .color = palette[ctx.depth % palette.len],
+        };
+    }
+};
 
 /// 2D buffer backed by a single flat allocation for cache efficiency.
 /// Includes optional color plane for ANSI edge coloring.
@@ -128,19 +265,30 @@ const Buffer2D = struct {
     }
 };
 
-/// Configuration for Unicode rendering.
+/// Configuration for terminal rendering.
 pub const Config = struct {
-    /// Show dummy nodes as 'O' (for debugging layout)
-    /// When false, dummy nodes are invisible (edges draw through them)
+    /// Show dummy nodes (for debugging layout)
     show_dummy_nodes: bool = false,
 
-    /// Edge color palette (ANSI 256-color codes)
-    /// When set, edges will be colored based on their edge_index
-    /// Use colors.ansi, colors.ansi_dark, or colors.ansi_light
+    /// Show subgraph bounding boxes
+    show_subgraphs: bool = true,
+
+    /// Edge color palette (ANSI 256-color codes) — backward-compatible convenience.
+    /// When set, provides default colors for edges. Overridden by edge_style_fn
+    /// returning a non-zero color.
     edge_palette: ?[]const u8 = null,
 
-    /// Show subgraph bounding boxes (when subgraphs exist in the IR)
-    show_subgraphs: bool = true,
+    /// Per-edge style function — returns line weight, color, markers.
+    edge_style_fn: *const fn (EdgeStyleContext) TerminalEdgeStyle = &defaultEdgeStyle,
+
+    /// Per-node style function — returns border, colors, text attributes.
+    node_style_fn: *const fn (NodeStyleContext) TerminalNodeStyle = &defaultNodeStyle,
+
+    /// Per-edge-label style function — returns color, placement, text attributes.
+    edge_label_style_fn: *const fn (EdgeStyleContext) TerminalEdgeLabelStyle = &defaultEdgeLabelStyle,
+
+    /// Per-subgraph style function — returns border, color, label position.
+    subgraph_style_fn: *const fn (SubgraphStyleContext) TerminalSubgraphStyle = &defaultSubgraphStyle,
 };
 
 /// Render any GenericLayoutIR to a Unicode string.
@@ -196,6 +344,14 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     var buffer = try Buffer2D.init(allocator, width, height);
     defer buffer.deinit(allocator);
 
+    // Arena for style function contexts (bulk-freed at end of render)
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const total_edges = layout_ir.getEdges().len;
+    const total_nodes = layout_ir.getNodes().len;
+
     // Paint subgraph boxes first (background layer)
     if (config.show_subgraphs) {
         paintSubgraphs(&buffer, layout_ir);
@@ -203,12 +359,32 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 
     // Paint all edges (so nodes overwrite them)
     for (layout_ir.getEdges()) |edge| {
-        // Get color for this edge if palette is set
-        const edge_color: u8 = if (config.edge_palette) |palette|
+        // Build edge style context
+        const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
+        const to_label = if (layout_ir.nodeById(edge.to_id)) |n| n.label else "";
+        const ctx = EdgeStyleContext{
+            .edge_index = edge.edge_index,
+            .total_edges = total_edges,
+            .from_id = edge.from_id,
+            .to_id = edge.to_id,
+            .from_label = from_label,
+            .to_label = to_label,
+            .label = edge.label,
+            .directed = edge.directed,
+            .reversed = edge.reversed,
+            .arena = arena,
+        };
+
+        // Call style function, resolve color (style > palette > none)
+        const style = config.edge_style_fn(ctx);
+        const edge_color: u8 = if (style.color != 0)
+            style.color
+        else if (config.edge_palette) |palette|
             colors.getAnsi(palette, edge.edge_index)
         else
             0;
-        paintEdge(&buffer, &edge, edge_color);
+
+        paintEdge(&buffer, &edge, edge_color, style.weight);
     }
 
     // For invisible dummy nodes, paint a vertical line at their position
@@ -257,7 +433,25 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             // Skip self-loop labels — handled after node painting with ↺ indicator
             if (edge.reversed and edge.from_id == edge.to_id) continue;
 
-            const edge_color: u8 = if (config.edge_palette) |palette|
+            // Resolve edge color via style function (same logic as paint loop)
+            const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
+            const to_label = if (layout_ir.nodeById(edge.to_id)) |n| n.label else "";
+            const ctx = EdgeStyleContext{
+                .edge_index = edge.edge_index,
+                .total_edges = total_edges,
+                .from_id = edge.from_id,
+                .to_id = edge.to_id,
+                .from_label = from_label,
+                .to_label = to_label,
+                .label = edge.label,
+                .directed = edge.directed,
+                .reversed = edge.reversed,
+                .arena = arena,
+            };
+            const style = config.edge_style_fn(ctx);
+            const edge_color: u8 = if (style.color != 0)
+                style.color
+            else if (config.edge_palette) |palette|
                 colors.getAnsi(palette, edge.edge_index)
             else
                 0;
@@ -293,7 +487,21 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 
     // Paint nodes (overwrite edges)
     for (layout_ir.getNodes()) |node| {
-        paintNode(&buffer, &node, config.show_dummy_nodes);
+        if (node.kind == .dummy) {
+            paintNode(&buffer, &node, config.show_dummy_nodes, .{});
+        } else {
+            const node_ctx = NodeStyleContext{
+                .node_id = node.id,
+                .label = node.label,
+                .total_nodes = total_nodes,
+                .width = node.width,
+                .height = 1,
+                .is_implicit = node.kind == .implicit,
+                .arena = arena,
+            };
+            const node_style = config.node_style_fn(node_ctx);
+            paintNode(&buffer, &node, config.show_dummy_nodes, node_style);
+        }
     }
 
     // Paint subgraph labels last so they're not overwritten by edges/nodes
@@ -304,7 +512,24 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     // Paint self-loop indicators (↺) after nodes, so they appear right after the node bracket
     for (layout_ir.getEdges()) |edge| {
         if (edge.reversed and edge.from_id == edge.to_id) {
-            const edge_color: u8 = if (config.edge_palette) |palette|
+            // Resolve color via style function
+            const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
+            const sl_ctx = EdgeStyleContext{
+                .edge_index = edge.edge_index,
+                .total_edges = total_edges,
+                .from_id = edge.from_id,
+                .to_id = edge.to_id,
+                .from_label = from_label,
+                .to_label = from_label,
+                .label = edge.label,
+                .directed = edge.directed,
+                .reversed = edge.reversed,
+                .arena = arena,
+            };
+            const sl_style = config.edge_style_fn(sl_ctx);
+            const edge_color: u8 = if (sl_style.color != 0)
+                sl_style.color
+            else if (config.edge_palette) |palette|
                 colors.getAnsi(palette, edge.edge_index)
             else
                 0;
@@ -322,11 +547,10 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     }
 
     // Convert to UTF-8 string with optional ANSI color escapes
-    // Pre-allocate: worst case is 4 bytes per char + 15 bytes for color escape + newline per row
-    const bytes_per_char: usize = if (config.edge_palette != null) 20 else 4;
+    // Colors may come from edge_palette or style functions, so always process.
     var output: std.ArrayListUnmanaged(u8) = .{};
     errdefer output.deinit(allocator);
-    try output.ensureTotalCapacity(allocator, height * (width * bytes_per_char + 1));
+    try output.ensureTotalCapacity(allocator, height * (width * 4 + 1));
 
     var last_color: u8 = 0;
 
@@ -343,17 +567,15 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         // Encode each character with optional color
         for (row[0..end], color_row[0..end]) |codepoint, cell_color| {
             // Handle color changes
-            if (config.edge_palette != null) {
-                if (cell_color != 0 and cell_color != last_color) {
-                    // Start new color
-                    const seq = colors.escape.fg256(cell_color);
-                    try output.appendSlice(allocator, &seq);
-                    last_color = cell_color;
-                } else if (cell_color == 0 and last_color != 0) {
-                    // Reset to default
-                    try output.appendSlice(allocator, colors.escape.reset);
-                    last_color = 0;
-                }
+            if (cell_color != 0 and cell_color != last_color) {
+                // Start new color
+                const seq = colors.escape.fg256(cell_color);
+                try output.appendSlice(allocator, &seq);
+                last_color = cell_color;
+            } else if (cell_color == 0 and last_color != 0) {
+                // Reset to default
+                try output.appendSlice(allocator, colors.escape.reset);
+                last_color = 0;
             }
 
             var buf: [4]u8 = undefined;
@@ -362,7 +584,7 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         }
 
         // Reset color at end of line if needed
-        if (config.edge_palette != null and last_color != 0) {
+        if (last_color != 0) {
             try output.appendSlice(allocator, colors.escape.reset);
             last_color = 0;
         }
@@ -380,8 +602,8 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             const from_label = if (layout_ir.nodeById(entry.from_id)) |n| n.label else "?";
             const to_label = if (layout_ir.nodeById(entry.to_id)) |n| n.label else "?";
 
-            // Emit colored label if palette is active
-            if (config.edge_palette != null and entry.color != 0) {
+            // Emit colored label if colors are active
+            if (entry.color != 0) {
                 const seq = colors.escape.fg256(entry.color);
                 try output.appendSlice(allocator, &seq);
             }
@@ -393,7 +615,7 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             try output.appendSlice(allocator, entry.label);
             try output.appendSlice(allocator, "\"");
 
-            if (config.edge_palette != null and entry.color != 0) {
+            if (entry.color != 0) {
                 try output.appendSlice(allocator, colors.escape.reset);
             }
             try output.append(allocator, '\n');
@@ -468,74 +690,86 @@ fn paintSubgraphBox(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: usize) v
 }
 
 /// Paint a node onto the buffer.
-/// Uses different brackets based on node kind:
-/// - explicit: [label]
-/// - implicit: <label>
-/// - dummy:    O (when show_dummy_nodes=true), invisible otherwise
-fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: bool) void {
+/// Uses the style's border field for bracket/box selection.
+/// Dummy nodes bypass the style system — they're layout artifacts.
+fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: bool, style: TerminalNodeStyle) void {
     const y = node.y;
     var x = node.x;
 
-    // Dummy nodes: show as 'O' if debugging, skip if not
+    // Dummy nodes: show as '◍' if debugging, skip if not
     if (node.kind == .dummy) {
         if (show_dummy_nodes) {
-            // Draw the label (e.g., 'O')
             for (node.label) |c| {
                 buffer.set(x, y, c);
                 x += 1;
             }
         }
-        // If not showing dummies, don't paint anything
-        // The edge lines will draw through this position
         return;
     }
 
-    // Choose brackets based on node kind
-    const open_bracket: u21 = switch (node.kind) {
-        .explicit => '[',
-        .implicit => '<',
-        .dummy => unreachable, // Handled above
-    };
-    const close_bracket: u21 = switch (node.kind) {
-        .explicit => ']',
-        .implicit => '>',
-        .dummy => unreachable,
-    };
-
-    // Draw opening bracket
-    buffer.set(x, y, open_bracket);
-    x += 1;
-
-    // Draw label
-    for (node.label) |c| {
-        buffer.set(x, y, c);
-        x += 1;
+    // 1-row borders
+    switch (style.border) {
+        .bracket => {
+            buffer.set(x, y, '[');
+            x += 1;
+            for (node.label) |c| {
+                buffer.set(x, y, c);
+                x += 1;
+            }
+            buffer.set(x, y, ']');
+        },
+        .angle => {
+            buffer.set(x, y, '<');
+            x += 1;
+            for (node.label) |c| {
+                buffer.set(x, y, c);
+                x += 1;
+            }
+            buffer.set(x, y, '>');
+        },
+        .none => {
+            for (node.label) |c| {
+                buffer.set(x, y, c);
+                x += 1;
+            }
+        },
+        // 3-row variants — deferred (requires Y-expansion infrastructure)
+        // For now, fall back to bracket for explicit, angle for implicit
+        .single_box, .heavy_box, .double_box, .rounded_box, .open_box => {
+            const open: u21 = if (node.kind == .implicit) '<' else '[';
+            const close: u21 = if (node.kind == .implicit) '>' else ']';
+            buffer.set(x, y, open);
+            x += 1;
+            for (node.label) |c| {
+                buffer.set(x, y, c);
+                x += 1;
+            }
+            buffer.set(x, y, close);
+        },
     }
-
-    // Draw closing bracket
-    buffer.set(x, y, close_bracket);
 }
 
 /// Draw a pure-vertical direct edge between y_from and y_to at column x.
 /// Draws in the range [min(y_from,y_to) .. max(y_from,y_to)), with an
 /// arrow one step before the target (only when directed).
-/// Reversed edges use dashed arrow characters (⇣/⇡).
-fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, directed: bool, reversed: bool) void {
+/// Dashed weight uses dashed arrow characters (⇣/⇡).
+fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, weight: LineWeight, directed: bool) void {
     if (y_from == y_to) return;
     const lo = @min(y_from, y_to);
     const hi = @max(y_from, y_to);
     const going_down = y_to > y_from;
     const arrow_y = if (going_down) hi - 1 else lo;
+    const dashed = weight == .dashed;
     const arrow_char: u21 = if (going_down)
-        (if (reversed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN)
+        (if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN)
     else
-        (if (reversed) CP_ARROW_UP_DASH else CP_ARROW_UP);
+        (if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP);
 
     var y = lo;
     while (y < hi) : (y += 1) {
         if (directed and y == arrow_y) {
             buffer.setWithColor(x, y, arrow_char, color);
-        } else if (reversed) {
+        } else if (dashed) {
             const cur = buffer.get(x, y);
             if (isSubgraphBorderChar(cur)) {
                 buffer.setWithColor(x, y, mergeWithDoubleLine(cur, true, true, false, false), color);
@@ -550,23 +784,24 @@ fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, c
 }
 
 /// Draw a pure-horizontal direct edge between x_from and x_to at row y.
-/// Reversed edges use dashed arrow and line characters (⇢/⇠, ┈).
-fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, directed: bool, reversed: bool) void {
+/// Dashed weight uses dashed arrow and line characters (⇢/⇠, ┈).
+fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, weight: LineWeight, directed: bool) void {
     if (x_from == x_to) return;
     const lo = @min(x_from, x_to);
     const hi = @max(x_from, x_to);
     const going_right = x_to > x_from;
     const arrow_x = if (going_right) hi - 1 else lo;
+    const dashed = weight == .dashed;
     const arrow_char: u21 = if (going_right)
-        (if (reversed) CP_ARROW_RIGHT_DASH else CP_ARROW_RIGHT)
+        (if (dashed) CP_ARROW_RIGHT_DASH else CP_ARROW_RIGHT)
     else
-        (if (reversed) CP_ARROW_LEFT_DASH else CP_ARROW_LEFT);
+        (if (dashed) CP_ARROW_LEFT_DASH else CP_ARROW_LEFT);
 
     var x = lo;
     while (x < hi) : (x += 1) {
         if (directed and x == arrow_x) {
             buffer.setWithColor(x, y, arrow_char, color);
-        } else if (reversed) {
+        } else if (dashed) {
             const cur = buffer.get(x, y);
             if (isSubgraphBorderChar(cur)) {
                 buffer.setWithColor(x, y, mergeWithDoubleLine(cur, false, false, true, true), color);
@@ -583,11 +818,12 @@ fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize,
 /// Draw a Manhattan Z-shaped route between (x0,y0) and (x1,y1).
 /// Route: (x0,y0) → (x0,mid_y) → (x1,mid_y) → (x1,y1)
 /// Uses box-drawing corners at the two bends for clean visual connections.
-/// Reversed edges use dashed line and arrow characters.
-fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, directed: bool, reversed: bool) void {
+/// Weight determines line character set; reversed determines arrow placement.
+fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, weight: LineWeight, directed: bool, reversed: bool) void {
     const lo_y = @min(y0, y1);
     const hi_y = @max(y0, y1);
     const mid_y = lo_y + (hi_y - lo_y) / 2;
+    const dashed = weight == .dashed;
 
     // --- Segment 1: vertical at x0 between y0 and mid_y (exclusive of both) ---
     {
@@ -596,7 +832,7 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
         if (seg_hi > seg_lo + 1) {
             var y = seg_lo + 1;
             while (y < seg_hi) : (y += 1) {
-                if (reversed) {
+                if (dashed) {
                     const cur = buffer.get(x0, y);
                     if (isSubgraphBorderChar(cur)) {
                         buffer.setWithColor(x0, y, mergeWithDoubleLine(cur, true, true, false, false), color);
@@ -627,7 +863,7 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
         if (hi_x > lo_x + 1) {
             var x = lo_x + 1;
             while (x < hi_x) : (x += 1) {
-                if (reversed) {
+                if (dashed) {
                     const cur = buffer.get(x, mid_y);
                     if (isSubgraphBorderChar(cur)) {
                         buffer.setWithColor(x, mid_y, mergeWithDoubleLine(cur, false, false, true, true), color);
@@ -658,7 +894,7 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
         if (seg_hi > seg_lo + 1) {
             var y = seg_lo + 1;
             while (y < seg_hi) : (y += 1) {
-                if (reversed) {
+                if (dashed) {
                     const cur = buffer.get(x1, y);
                     if (isSubgraphBorderChar(cur)) {
                         buffer.setWithColor(x1, y, mergeWithDoubleLine(cur, true, true, false, false), color);
@@ -681,18 +917,17 @@ fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: u
             if (y0 != mid_y) {
                 const going_up_s1 = y0 < mid_y;
                 if (going_up_s1) {
-                    // y0 is above mid_y, arrow at y0 pointing up
-                    buffer.setWithColor(x0, y0, CP_ARROW_UP_DASH, color);
+                    buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
                 } else {
-                    buffer.setWithColor(x0, y0, CP_ARROW_DOWN_DASH, color);
+                    buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
                 }
             } else {
                 // y0 == mid_y: arrow on horizontal approach at FROM end
                 const going_right = x1 > x0;
                 if (going_right) {
-                    buffer.setWithColor(x0, y0, CP_ARROW_LEFT_DASH, color);
+                    buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_LEFT_DASH else CP_ARROW_LEFT, color);
                 } else {
-                    buffer.setWithColor(x0, y0, CP_ARROW_RIGHT_DASH, color);
+                    buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_RIGHT_DASH else CP_ARROW_RIGHT, color);
                 }
             }
         } else {
@@ -900,13 +1135,12 @@ fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: u
 }
 
 /// Paint an edge onto the buffer.
-fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
+/// Color and weight come from the style function; reversed flag from the edge itself.
+fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, weight: LineWeight) void {
+    const dashed = weight == .dashed;
     switch (edge.path) {
         .direct => {
             // Orthogonal (Manhattan) routing from (from_x, from_y) to (to_x, to_y).
-            // For axis-aligned edges: pure vertical │ or horizontal ─.
-            // For other edges: Z-shaped route through a midpoint using
-            // box-drawing corners (└┐┌┘) that always connect cleanly.
             const x0 = edge.from_x;
             const y0 = edge.from_y;
             const x1 = edge.to_x;
@@ -915,11 +1149,11 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             if (x0 == x1 and y0 == y1) return; // degenerate
 
             if (x0 == x1) {
-                drawDirectVertical(buffer, x0, y0, y1, color, edge.directed, edge.reversed);
+                drawDirectVertical(buffer, x0, y0, y1, color, weight, edge.directed);
             } else if (y0 == y1) {
-                drawDirectHorizontal(buffer, y0, x0, x1, color, edge.directed, edge.reversed);
+                drawDirectHorizontal(buffer, y0, x0, x1, color, weight, edge.directed);
             } else {
-                drawDirectManhattan(buffer, x0, y0, x1, y1, color, edge.directed, edge.reversed);
+                drawDirectManhattan(buffer, x0, y0, x1, y1, color, weight, edge.directed, edge.reversed);
             }
         },
         .corner => |corner| {
@@ -929,15 +1163,12 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const min_x = @min(x1, x2);
             const max_x = @max(x1, x2);
 
-            // For reversed edges: arrow at FROM end (top) pointing UP
-            // For normal edges: arrow at TO end (bottom) pointing DOWN
-
             // Vertical from source to horizontal
             var y = edge.from_y;
             while (y < h_y) : (y += 1) {
                 if (edge.reversed and edge.directed and y == edge.from_y) {
-                    buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
-                } else if (edge.reversed) {
+                    buffer.setWithColor(x1, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
+                } else if (dashed) {
                     const current = buffer.get(x1, y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
@@ -950,11 +1181,11 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 }
             }
 
-            // Horizontal segment: merge with existing characters for proper crossings
+            // Horizontal segment
             var x = min_x;
             while (x <= max_x) : (x += 1) {
                 if (x != x1 and x != x2) {
-                    if (edge.reversed) {
+                    if (dashed) {
                         const current = buffer.get(x, h_y);
                         if (isSubgraphBorderChar(current)) {
                             buffer.setWithColor(x, h_y, mergeWithDoubleLine(current, false, false, true, true), color);
@@ -968,11 +1199,11 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                 }
             }
 
-            // Junction at source x (vertical from above meets horizontal)
+            // Junction at source x
             const current1 = buffer.get(x1, h_y);
             buffer.setWithColor(x1, h_y, mergeJunction(current1, true, false, x1 < x2, x1 > x2), color);
 
-            // Corner at target x (horizontal meets vertical going down)
+            // Corner at target x
             const current2 = buffer.get(x2, h_y);
             buffer.setWithColor(x2, h_y, mergeJunction(current2, false, true, x1 > x2, x1 < x2), color);
 
@@ -980,8 +1211,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             y = h_y + 1;
             while (y < edge.to_y) : (y += 1) {
                 if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-                    buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
-                } else if (edge.reversed) {
+                    buffer.setWithColor(x2, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
+                } else if (dashed) {
                     const current = buffer.get(x2, y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
@@ -999,16 +1230,13 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const x2 = edge.to_x;
             const ch_x = sc.channel_x;
 
-            // For reversed edges: arrow at FROM end (top) pointing UP, dashed body
-            // For normal edges: arrow at TO end (bottom) pointing DOWN
-
             // Vertical from source to start_y
             var y = edge.from_y + 1;
             const first_vert_start = edge.from_y + 1;
             while (y < sc.start_y) : (y += 1) {
                 if (edge.reversed and edge.directed and y == first_vert_start) {
-                    buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
-                } else if (edge.reversed) {
+                    buffer.setWithColor(x1, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
+                } else if (dashed) {
                     const current = buffer.get(x1, y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
@@ -1026,7 +1254,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const max_x1 = @max(x1, ch_x);
             var x = min_x1;
             while (x <= max_x1) : (x += 1) {
-                if (edge.reversed) {
+                if (dashed) {
                     const current = buffer.get(x, sc.start_y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x, sc.start_y, mergeWithDoubleLine(current, false, false, true, true), color);
@@ -1042,7 +1270,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             // Vertical in channel
             y = sc.start_y + 1;
             while (y < sc.end_y) : (y += 1) {
-                if (edge.reversed) {
+                if (dashed) {
                     const current = buffer.get(ch_x, y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(ch_x, y, mergeWithDoubleLine(current, true, true, false, false), color);
@@ -1060,7 +1288,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             const max_x2 = @max(ch_x, x2);
             x = min_x2;
             while (x <= max_x2) : (x += 1) {
-                if (edge.reversed) {
+                if (dashed) {
                     const current = buffer.get(x, sc.end_y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x, sc.end_y, mergeWithDoubleLine(current, false, false, true, true), color);
@@ -1077,8 +1305,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             y = sc.end_y + 1;
             while (y < edge.to_y) : (y += 1) {
                 if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-                    buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
-                } else if (edge.reversed) {
+                    buffer.setWithColor(x2, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
+                } else if (dashed) {
                     const current = buffer.get(x2, y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
@@ -1094,7 +1322,6 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
         .multi_segment => {
             // For multi-segment paths (skip-level edges through dummy nodes),
             // render the same as corner path for Unicode output.
-            // The multi-segment waypoints are used for SVG rendering.
             const x1 = edge.from_x;
             const x2 = edge.to_x;
             const h_y = edge.from_y + 1; // Horizontal line just below source
@@ -1105,8 +1332,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             var y = edge.from_y;
             while (y < h_y) : (y += 1) {
                 if (edge.reversed and edge.directed and y == edge.from_y) {
-                    buffer.setWithColor(x1, y, CP_ARROW_UP_DASH, color);
-                } else if (edge.reversed) {
+                    buffer.setWithColor(x1, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
+                } else if (dashed) {
                     const current = buffer.get(x1, y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
@@ -1127,7 +1354,7 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x, h_y, mergeJunction(current, false, false, true, true), color);
                     } else if (current == ' ') {
-                        if (edge.reversed) {
+                        if (dashed) {
                             buffer.setWithColor(x, h_y, CP_H_LINE_DASH, color);
                         } else {
                             buffer.setWithColor(x, h_y, CP_H_LINE, color);
@@ -1148,8 +1375,8 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
             y = h_y + 1;
             while (y < edge.to_y) : (y += 1) {
                 if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-                    buffer.setWithColor(x2, y, CP_ARROW_DOWN, color);
-                } else if (edge.reversed) {
+                    buffer.setWithColor(x2, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
+                } else if (dashed) {
                     const current = buffer.get(x2, y);
                     if (isSubgraphBorderChar(current)) {
                         buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
@@ -1164,17 +1391,14 @@ fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8) void {
         },
         .spline => {
             // For Unicode rendering, approximate spline as direct line
-            // (Unicode can't render curves, so we fall back to straight connection)
             const x = edge.from_x;
             var y = edge.from_y;
             while (y < edge.to_y) : (y += 1) {
                 if (edge.reversed and edge.directed and y == edge.from_y) {
-                    // Reversed: arrow at FROM end pointing UP
-                    buffer.setWithColor(x, y, CP_ARROW_UP_DASH, color);
+                    buffer.setWithColor(x, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
                 } else if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-                    // Normal: arrow at TO end pointing DOWN
-                    buffer.setWithColor(x, y, CP_ARROW_DOWN, color);
-                } else if (edge.reversed) {
+                    buffer.setWithColor(x, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
+                } else if (dashed) {
                     buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
                 } else {
                     const current = buffer.get(x, y);
