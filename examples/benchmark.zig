@@ -301,7 +301,7 @@ fn benchmarkGraph(allocator: std.mem.Allocator, node_count: usize, edge_count: u
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -334,7 +334,7 @@ fn benchmarkLinear(allocator: std.mem.Allocator, node_count: usize) !BenchmarkRe
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -370,7 +370,7 @@ fn benchmarkBinaryTree(allocator: std.mem.Allocator, node_count: usize) !Benchma
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -403,7 +403,7 @@ fn benchmarkWide(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResu
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -438,7 +438,7 @@ fn benchmarkDiamond(allocator: std.mem.Allocator, node_count: usize) !BenchmarkR
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -479,7 +479,7 @@ fn benchmarkRandomDAG(allocator: std.mem.Allocator, node_count: usize, edge_coun
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -701,7 +701,7 @@ fn benchmarkRenderers(allocator: std.mem.Allocator, node_count: usize) !Renderer
 
     // Unicode
     const unicode_start = std.time.nanoTimestamp();
-    const unicode_out = try zigraph.unicode.render(&ir, alloc);
+    const unicode_out = try zigraph.terminal.render(&ir, alloc);
     const unicode_end = std.time.nanoTimestamp();
 
     // SVG
@@ -760,7 +760,7 @@ fn benchmarkDiamondMesh(allocator: std.mem.Allocator, node_count: usize) !Benchm
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -793,7 +793,7 @@ fn benchmarkWideFan(allocator: std.mem.Allocator, node_count: usize) !BenchmarkR
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{
@@ -838,7 +838,7 @@ fn benchmarkNeuralNet(allocator: std.mem.Allocator, num_layers: usize, nodes_per
     const layout_end = std.time.nanoTimestamp();
 
     const render_start = std.time.nanoTimestamp();
-    _ = try zigraph.unicode.render(&ir, alloc);
+    _ = try zigraph.terminal.render(&ir, alloc);
     const render_end = std.time.nanoTimestamp();
 
     return .{

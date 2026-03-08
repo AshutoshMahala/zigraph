@@ -189,7 +189,7 @@ fn compareLayerings(
 
         if (show_render) {
             std.debug.print("\n--- {s} ---\n\n", .{layering_names[idx]});
-            const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
+            const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
                 .edge_palette = &zigraph.color.ansi_dark,
             });
             defer allocator.free(output);

@@ -10,7 +10,7 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 │                                                                         │
 │   var graph = Graph.init(allocator);                                    │
 │   const ir = try zigraph.layout(&graph, allocator, .{});                │
-│   const output = try zigraph.unicode.render(ir, allocator, .{});        │
+│   const output = try zigraph.terminal.render(ir, allocator, .{});       │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -58,14 +58,15 @@ This document describes the internal architecture of `zigraph`, a zero-dependenc
 │                                                                         │
 │ Renderer (type-erased interface — vtable pattern like std.mem.Allocator)│
 │    ├── initSvg(*SvgConfig) → Renderer                                   │
-│    ├── initUnicode(*Config) → Renderer                                  │
+│    ├── initTerminal(*Config) → Renderer                                 │
 │    ├── initJson() → Renderer                                            │
 │    └── init(anytype) → Renderer       // custom backends                │
 │                                                                         │
-│  ┌─── SVG ───────────┐  ┌─── Unicode ──┐  ┌─── JSON ──┐  ┌── Color ───┐ │
-│  │ mod.zig (entry)   │  │ unicode.zig  │  │ json.zig  │  │ color/     │ │
-│  │ config.zig        │  │ Config{3}    │  │ no config │  │ Color.zig  │ │
-│  │ nodes/edges/      │  └──────────────┘  └───────────┘  │ colormaps  │ │
+│  ┌─── SVG ───────────┐  ┌── Terminal ──┐  ┌─── JSON ──┐  ┌── Color ───┐ │
+│  │ mod.zig (entry)   │  │ terminal/    │  │ json.zig  │  │ color/     │ │
+│  │ config.zig        │  │ mod.zig      │  │ no config │  │ Color.zig  │ │
+│  │ nodes/edges/      │  │ config/      │  └───────────┘  │ colormaps  │ │
+│  │                   │  │ edges/nodes  │                 │            │ │
 │  │  splines/subgraphs│                                   │ gradient   │ │
 │  │ defs/helpers      │  Shared: types.zig (MarkerShape,  │ palettes   │ │
 │  │ 4 style fn ptrs   │         StyleContexts)            └────────────┘ │
@@ -138,7 +139,16 @@ zigraph/
 │       │   ├── colormaps.zig  # Scientific color maps (viridis, turbo, …)
 │       │   ├── gradient.zig   # SVG gradient generation helpers
 │       │   └── palettes.zig   # Discrete palettes (Radix, vibrant, etc.)
-│       ├── unicode.zig        # Terminal output with box drawing
+│       ├── terminal/          # Terminal output with box drawing (modular)
+│       │   ├── mod.zig        # render() entry point + re-exports
+│       │   ├── config.zig     # Config, Terminal*Style types, presets
+│       │   ├── buffer.zig     # Buffer2D (flat char+color grid)
+│       │   ├── junctions.zig  # Junction codepoints + merge logic
+│       │   ├── nodes.zig      # paintNode (box + label)
+│       │   ├── edges.zig      # paintEdge + routing helpers
+│       │   ├── labels.zig     # Edge label placement
+│       │   ├── subgraphs.zig  # Subgraph box + label rendering
+│       │   └── render_tests.zig # Integration tests
 │       ├── json.zig           # JSON IR export/import (for external tools)
 │       └── svg/               # SVG vector output (modular)
 │           ├── mod.zig        # render() entry point + re-exports
@@ -453,7 +463,7 @@ defer graph.deinit();
 const ir = try layout(&graph, allocator, .{});  // ir owns layout data
 defer ir.deinit();
 
-const output = try unicode.render(ir, allocator);  // caller owns output
+const output = try terminal.render(ir, allocator);  // caller owns output
 defer allocator.free(output);
 ```
 
@@ -479,7 +489,7 @@ zigraph includes protections against resource exhaustion:
 |------------|----------|-------|
 | Max nodes | graph.zig | 100,000 (configurable) |
 | Max edges | graph.zig | 500,000 (configurable) |
-| Buffer overflow | unicode.zig | Checked w*h multiplication |
+| Buffer overflow | terminal/buffer.zig | Checked w*h multiplication |
 | SVG dimensions | svg/mod.zig | Checked arithmetic |
 | Connection buffer | adjacent_exchange.zig | 256 per node pair |
 
@@ -511,7 +521,7 @@ All limits return `error.OutOfMemory` when exceeded.
 | Brandes-Kopf | O(V + E) | Two passes |
 | FR Standard | O(V² · iters) | 300 iterations default |
 | FR-Fast (Barnes-Hut) | O(V log V · iters) | θ=0.8, 300 iterations |
-| Unicode render | O(W * H) | Grid-based |
+| Terminal render | O(W * H) | Grid-based |
 | SVG render | O(V + E) | Path generation |
 
 ---

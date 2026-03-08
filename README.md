@@ -64,13 +64,13 @@ exe.root_module.addImport("zigraph", zigraph.module("zigraph"));
 
 ## API Usage
 
-### 1. Unicode Renderer (Terminal)
+### 1. Terminal Renderer (Box-Drawing)
 
 ```zig
 const zigraph = @import("zigraph");
 
 // Render with ANSI colors (optional)
-const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
+const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
     .edge_palette = &zigraph.color.ansi_dark,
     .show_dummy_nodes = false, 
 });

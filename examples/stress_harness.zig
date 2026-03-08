@@ -284,7 +284,7 @@ fn stressUnicodeRendering(allocator: std.mem.Allocator, duration_ns: u64) !usize
         defer result.deinit();
 
         // Render to Unicode
-        const output = zigraph.unicode.render(&result, allocator) catch {
+        const output = zigraph.terminal.render(&result, allocator) catch {
             iterations += 1;
             continue;
         };

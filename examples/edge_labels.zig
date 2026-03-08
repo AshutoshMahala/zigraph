@@ -40,7 +40,7 @@ pub fn main() !void {
         });
         defer ir.deinit();
 
-        const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
+        const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
             .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
@@ -86,7 +86,7 @@ pub fn main() !void {
         });
         defer ir.deinit();
 
-        const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
+        const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
             .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
@@ -117,7 +117,7 @@ pub fn main() !void {
         });
         defer ir.deinit();
 
-        const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
+        const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
             .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);

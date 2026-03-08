@@ -184,9 +184,9 @@ pub fn fuzzSvgRendering(data: []const u8) !void {
 // Fuzz Target: Unicode Rendering
 // ============================================================================
 
-/// Fuzz Unicode terminal rendering.
+/// Fuzz terminal rendering.
 pub fn fuzzUnicodeRendering(data: []const u8) !void {
-    const unicode = @import("render/unicode.zig");
+    const term = @import("render/terminal/mod.zig");
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -217,8 +217,8 @@ pub fn fuzzUnicodeRendering(data: []const u8) !void {
     var result = root.layout(&graph, allocator, .{}) catch return;
     defer result.deinit();
 
-    // Render to Unicode
-    const output = unicode.render(&result, allocator) catch return;
+    // Render to terminal
+    const output = term.render(&result, allocator) catch return;
     defer allocator.free(output);
 
     // Basic validation

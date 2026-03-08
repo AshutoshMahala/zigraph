@@ -33,7 +33,7 @@ pub fn main() !void {
     // Normal rendering: dummy nodes are invisible (edges draw through)
     std.debug.print("=== Normal Rendering (dummies invisible) ===\n\n", .{});
     {
-        const output = try zigraph.unicode.render(&ir, allocator);
+        const output = try zigraph.terminal.render(&ir, allocator);
         defer allocator.free(output);
         std.debug.print("{s}\n", .{output});
     }
@@ -41,7 +41,7 @@ pub fn main() !void {
     // Debug rendering: show dummy nodes as 'O'
     std.debug.print("=== Debug Rendering (dummies visible as O) ===\n\n", .{});
     {
-        const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
+        const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
             .show_dummy_nodes = true,
         });
         defer allocator.free(output);

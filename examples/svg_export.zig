@@ -93,13 +93,13 @@ pub fn main() !void {
         std.debug.print("Written to: graph_spline_debug.svg\n\n", .{});
     }
 
-    // Show Unicode preview (direct routing only — terminal can't render splines)
-    std.debug.print("=== Unicode Preview (Direct Routing) ===\n\n", .{});
+    // Show terminal preview (direct routing only — terminal can't render splines)
+    std.debug.print("=== Terminal Preview (Direct Routing) ===\n\n", .{});
 
-    const unicode_direct = try zigraph.unicode.render(&ir_direct, allocator);
-    defer allocator.free(unicode_direct);
+    const term_direct = try zigraph.terminal.render(&ir_direct, allocator);
+    defer allocator.free(term_direct);
 
-    std.debug.print("{s}\n", .{unicode_direct});
+    std.debug.print("{s}\n", .{term_direct});
 
     std.debug.print("=== Done ===\n", .{});
     std.debug.print("Open graph_spline_debug.svg in a browser to see bezier curves with control points!\n", .{});
