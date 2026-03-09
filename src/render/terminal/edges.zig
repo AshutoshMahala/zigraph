@@ -8,27 +8,26 @@ const LayoutEdge = ir_mod.LayoutEdge(usize);
 const Buffer2D = @import("buffer.zig").Buffer2D;
 const config_mod = @import("config.zig");
 const LineWeight = config_mod.LineWeight;
+const MarkerShape = config_mod.MarkerShape;
 const j = @import("junctions.zig");
 const mergeJunction = j.mergeJunction;
 const mergeWithDoubleLine = j.mergeWithDoubleLine;
 const isSubgraphBorderChar = j.isSubgraphBorderChar;
+const Direction = j.Direction;
+const markerChar = j.markerChar;
 const CP_V_LINE = j.CP_V_LINE;
 const CP_H_LINE = j.CP_H_LINE;
 const CP_V_LINE_DASH = j.CP_V_LINE_DASH;
 const CP_H_LINE_DASH = j.CP_H_LINE_DASH;
-const CP_ARROW_DOWN = j.CP_ARROW_DOWN;
-const CP_ARROW_UP = j.CP_ARROW_UP;
-const CP_ARROW_RIGHT = j.CP_ARROW_RIGHT;
-const CP_ARROW_LEFT = j.CP_ARROW_LEFT;
-const CP_ARROW_DOWN_DASH = j.CP_ARROW_DOWN_DASH;
-const CP_ARROW_UP_DASH = j.CP_ARROW_UP_DASH;
-const CP_ARROW_RIGHT_DASH = j.CP_ARROW_RIGHT_DASH;
-const CP_ARROW_LEFT_DASH = j.CP_ARROW_LEFT_DASH;
 
 /// Paint an edge onto the buffer.
-/// Color and weight come from the style function; reversed flag from the edge itself.
-pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, weight: LineWeight) void {
+/// Color, weight, and markers come from the style function.
+/// Note: `LineWeight.heavy` and `.double` are planned but not yet implemented;
+/// they currently render as `.light`.
+pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, weight: LineWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const dashed = weight == .dashed;
+    // For reversed edges, marker_start is at the FROM end (pointing away from target),
+    // marker_end is at the TO end. The caller (mod.zig) swaps them for reversed edges.
     switch (edge.path) {
         .direct => {
             const x0 = edge.from_x;
@@ -39,24 +38,24 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, weight: 
             if (x0 == x1 and y0 == y1) return; // degenerate
 
             if (x0 == x1) {
-                drawDirectVertical(buffer, x0, y0, y1, color, weight, edge.directed);
+                drawDirectVertical(buffer, x0, y0, y1, color, weight, edge.directed, marker_end);
             } else if (y0 == y1) {
-                drawDirectHorizontal(buffer, y0, x0, x1, color, weight, edge.directed);
+                drawDirectHorizontal(buffer, y0, x0, x1, color, weight, edge.directed, marker_end);
             } else {
-                drawDirectManhattan(buffer, x0, y0, x1, y1, color, weight, edge.directed, edge.reversed);
+                drawDirectManhattan(buffer, x0, y0, x1, y1, color, weight, edge.directed, edge.reversed, marker_end, marker_start);
             }
         },
         .corner => |corner| {
-            paintCornerEdge(buffer, edge, corner.horizontal_y, color, dashed);
+            paintCornerEdge(buffer, edge, corner.horizontal_y, color, dashed, marker_end, marker_start);
         },
         .side_channel => |sc| {
-            paintSideChannelEdge(buffer, edge, sc.channel_x, sc.start_y, sc.end_y, color, dashed);
+            paintSideChannelEdge(buffer, edge, sc.channel_x, sc.start_y, sc.end_y, color, dashed, marker_end, marker_start);
         },
         .multi_segment => {
-            paintMultiSegmentEdge(buffer, edge, color, dashed);
+            paintMultiSegmentEdge(buffer, edge, color, dashed, marker_end, marker_start);
         },
         .spline => {
-            paintSplineEdge(buffer, edge, color, dashed);
+            paintSplineEdge(buffer, edge, color, dashed, marker_end, marker_start);
         },
     }
 }
@@ -64,23 +63,22 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, weight: 
 // ── Directional draw helpers ────────────────────────────────────────────────
 
 /// Draw a pure-vertical direct edge between y_from and y_to at column x.
-/// Dashed weight uses dashed arrow characters (⇣/⇡).
-pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, weight: LineWeight, directed: bool) void {
+pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
     if (y_from == y_to) return;
     const lo = @min(y_from, y_to);
     const hi = @max(y_from, y_to);
     const going_down = y_to > y_from;
     const arrow_y = if (going_down) hi - 1 else lo;
     const dashed = weight == .dashed;
-    const arrow_char: u21 = if (going_down)
-        (if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN)
+    const arrow_ch: ?u21 = if (directed)
+        markerChar(marker_end, if (going_down) .down else .up)
     else
-        (if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP);
+        null;
 
     var y = lo;
     while (y < hi) : (y += 1) {
-        if (directed and y == arrow_y) {
-            buffer.setWithColor(x, y, arrow_char, color);
+        if (arrow_ch != null and y == arrow_y) {
+            buffer.setWithColor(x, y, arrow_ch.?, color);
         } else if (dashed) {
             const cur = buffer.get(x, y);
             if (isSubgraphBorderChar(cur)) {
@@ -96,23 +94,22 @@ pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usiz
 }
 
 /// Draw a pure-horizontal direct edge between x_from and x_to at row y.
-/// Dashed weight uses dashed arrow and line characters (⇢/⇠, ┈).
-pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, weight: LineWeight, directed: bool) void {
+pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
     if (x_from == x_to) return;
     const lo = @min(x_from, x_to);
     const hi = @max(x_from, x_to);
     const going_right = x_to > x_from;
     const arrow_x = if (going_right) hi - 1 else lo;
     const dashed = weight == .dashed;
-    const arrow_char: u21 = if (going_right)
-        (if (dashed) CP_ARROW_RIGHT_DASH else CP_ARROW_RIGHT)
+    const arrow_ch: ?u21 = if (directed)
+        markerChar(marker_end, if (going_right) .right else .left)
     else
-        (if (dashed) CP_ARROW_LEFT_DASH else CP_ARROW_LEFT);
+        null;
 
     var x = lo;
     while (x < hi) : (x += 1) {
-        if (directed and x == arrow_x) {
-            buffer.setWithColor(x, y, arrow_char, color);
+        if (arrow_ch != null and x == arrow_x) {
+            buffer.setWithColor(x, y, arrow_ch.?, color);
         } else if (dashed) {
             const cur = buffer.get(x, y);
             if (isSubgraphBorderChar(cur)) {
@@ -129,7 +126,7 @@ pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: us
 
 /// Draw a Manhattan Z-shaped route between (x0,y0) and (x1,y1).
 /// Route: (x0,y0) → (x0,mid_y) → (x1,mid_y) → (x1,y1)
-pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, weight: LineWeight, directed: bool, reversed: bool) void {
+pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, weight: LineWeight, directed: bool, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const lo_y = @min(y0, y1);
     const hi_y = @max(y0, y1);
     const mid_y = lo_y + (hi_y - lo_y) / 2;
@@ -177,33 +174,30 @@ pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y
 
     // --- Arrow ---
     if (directed) {
-        drawManhattanArrow(buffer, x0, y0, x1, y1, mid_y, color, dashed, reversed);
+        drawManhattanArrow(buffer, x0, y0, x1, y1, mid_y, color, reversed, marker_end, marker_start);
     }
 }
 
 // ── Private path-type helpers ───────────────────────────────────────────────
 
-fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color: u8, dashed: bool) void {
+fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color: u8, dashed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
     const min_x = @min(x1, x2);
     const max_x = @max(x1, x2);
 
     // Vertical from source to horizontal
+    // Assumes top-down layout: reversed marker points upward.
     var y = edge.from_y;
     while (y < h_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == edge.from_y) {
-            buffer.setWithColor(x1, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
-        } else if (dashed) {
-            const current = buffer.get(x1, y);
-            if (isSubgraphBorderChar(current)) {
-                buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
+            if (markerChar(marker_start, .up)) |ch| {
+                buffer.setWithColor(x1, y, ch, color);
             } else {
-                buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                drawLineCell(buffer, x1, y, true, color, dashed);
             }
         } else {
-            const current = buffer.get(x1, y);
-            buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+            drawLineCell(buffer, x1, y, true, color, dashed);
         }
     }
 
@@ -211,17 +205,7 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color
     var x = min_x;
     while (x <= max_x) : (x += 1) {
         if (x != x1 and x != x2) {
-            if (dashed) {
-                const current = buffer.get(x, h_y);
-                if (isSubgraphBorderChar(current)) {
-                    buffer.setWithColor(x, h_y, mergeWithDoubleLine(current, false, false, true, true), color);
-                } else {
-                    buffer.setWithColor(x, h_y, CP_H_LINE_DASH, color);
-                }
-            } else {
-                const current = buffer.get(x, h_y);
-                buffer.setWithColor(x, h_y, mergeJunction(current, false, false, true, true), color);
-            }
+            drawLineCell(buffer, x, h_y, false, color, dashed);
         }
     }
 
@@ -237,41 +221,34 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color
     y = h_y + 1;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            buffer.setWithColor(x2, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
-        } else if (dashed) {
-            const current = buffer.get(x2, y);
-            if (isSubgraphBorderChar(current)) {
-                buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
+            if (markerChar(marker_end, .down)) |ch| {
+                buffer.setWithColor(x2, y, ch, color);
             } else {
-                buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                drawLineCell(buffer, x2, y, true, color, dashed);
             }
         } else {
-            const current = buffer.get(x2, y);
-            buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
+            drawLineCell(buffer, x2, y, true, color, dashed);
         }
     }
 }
 
-fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize, start_y: usize, end_y: usize, color: u8, dashed: bool) void {
+fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize, start_y: usize, end_y: usize, color: u8, dashed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
 
     // Vertical from source to start_y
+    // Assumes top-down layout: reversed marker points upward.
     var y = edge.from_y + 1;
     const first_vert_start = edge.from_y + 1;
     while (y < start_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == first_vert_start) {
-            buffer.setWithColor(x1, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
-        } else if (dashed) {
-            const current = buffer.get(x1, y);
-            if (isSubgraphBorderChar(current)) {
-                buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
+            if (markerChar(marker_start, .up)) |ch| {
+                buffer.setWithColor(x1, y, ch, color);
             } else {
-                buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                drawLineCell(buffer, x1, y, true, color, dashed);
             }
         } else {
-            const current = buffer.get(x1, y);
-            buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+            drawLineCell(buffer, x1, y, true, color, dashed);
         }
     }
 
@@ -281,34 +258,14 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
         const max_x1 = @max(x1, ch_x);
         var x = min_x1;
         while (x <= max_x1) : (x += 1) {
-            if (dashed) {
-                const current = buffer.get(x, start_y);
-                if (isSubgraphBorderChar(current)) {
-                    buffer.setWithColor(x, start_y, mergeWithDoubleLine(current, false, false, true, true), color);
-                } else {
-                    buffer.setWithColor(x, start_y, CP_H_LINE_DASH, color);
-                }
-            } else {
-                const current = buffer.get(x, start_y);
-                buffer.setWithColor(x, start_y, mergeJunction(current, false, false, true, true), color);
-            }
+            drawLineCell(buffer, x, start_y, false, color, dashed);
         }
     }
 
     // Vertical in channel
     y = start_y + 1;
     while (y < end_y) : (y += 1) {
-        if (dashed) {
-            const current = buffer.get(ch_x, y);
-            if (isSubgraphBorderChar(current)) {
-                buffer.setWithColor(ch_x, y, mergeWithDoubleLine(current, true, true, false, false), color);
-            } else {
-                buffer.setWithColor(ch_x, y, CP_V_LINE_DASH, color);
-            }
-        } else {
-            const current = buffer.get(ch_x, y);
-            buffer.setWithColor(ch_x, y, mergeJunction(current, true, true, false, false), color);
-        }
+        drawLineCell(buffer, ch_x, y, true, color, dashed);
     }
 
     // Horizontal at end_y
@@ -317,17 +274,7 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
         const max_x2 = @max(ch_x, x2);
         var x = min_x2;
         while (x <= max_x2) : (x += 1) {
-            if (dashed) {
-                const current = buffer.get(x, end_y);
-                if (isSubgraphBorderChar(current)) {
-                    buffer.setWithColor(x, end_y, mergeWithDoubleLine(current, false, false, true, true), color);
-                } else {
-                    buffer.setWithColor(x, end_y, CP_H_LINE_DASH, color);
-                }
-            } else {
-                const current = buffer.get(x, end_y);
-                buffer.setWithColor(x, end_y, mergeJunction(current, false, false, true, true), color);
-            }
+            drawLineCell(buffer, x, end_y, false, color, dashed);
         }
     }
 
@@ -335,22 +282,18 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
     y = end_y + 1;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            buffer.setWithColor(x2, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
-        } else if (dashed) {
-            const current = buffer.get(x2, y);
-            if (isSubgraphBorderChar(current)) {
-                buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
+            if (markerChar(marker_end, .down)) |ch| {
+                buffer.setWithColor(x2, y, ch, color);
             } else {
-                buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                drawLineCell(buffer, x2, y, true, color, dashed);
             }
         } else {
-            const current = buffer.get(x2, y);
-            buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
+            drawLineCell(buffer, x2, y, true, color, dashed);
         }
     }
 }
 
-fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, dashed: bool) void {
+fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, dashed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
     const h_y = edge.from_y + 1;
@@ -358,20 +301,17 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, 
     const max_x = @max(x1, x2);
 
     // Vertical from source to horizontal
+    // Assumes top-down layout: reversed marker points upward.
     var y = edge.from_y;
     while (y < h_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == edge.from_y) {
-            buffer.setWithColor(x1, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
-        } else if (dashed) {
-            const current = buffer.get(x1, y);
-            if (isSubgraphBorderChar(current)) {
-                buffer.setWithColor(x1, y, mergeWithDoubleLine(current, true, true, false, false), color);
+            if (markerChar(marker_start, .up)) |ch| {
+                buffer.setWithColor(x1, y, ch, color);
             } else {
-                buffer.setWithColor(x1, y, CP_V_LINE_DASH, color);
+                drawLineCell(buffer, x1, y, true, color, dashed);
             }
         } else {
-            const current = buffer.get(x1, y);
-            buffer.setWithColor(x1, y, mergeJunction(current, true, true, false, false), color);
+            drawLineCell(buffer, x1, y, true, color, dashed);
         }
     }
 
@@ -404,34 +344,36 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, 
     y = h_y + 1;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            buffer.setWithColor(x2, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
-        } else if (dashed) {
-            const current = buffer.get(x2, y);
-            if (isSubgraphBorderChar(current)) {
-                buffer.setWithColor(x2, y, mergeWithDoubleLine(current, true, true, false, false), color);
+            if (markerChar(marker_end, .down)) |ch| {
+                buffer.setWithColor(x2, y, ch, color);
             } else {
-                buffer.setWithColor(x2, y, CP_V_LINE_DASH, color);
+                drawLineCell(buffer, x2, y, true, color, dashed);
             }
         } else {
-            const current = buffer.get(x2, y);
-            buffer.setWithColor(x2, y, mergeJunction(current, true, true, false, false), color);
+            drawLineCell(buffer, x2, y, true, color, dashed);
         }
     }
 }
 
-fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, dashed: bool) void {
+fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, dashed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x = edge.from_x;
+    // Assumes top-down layout: reversed marker points upward.
     var y = edge.from_y;
     while (y < edge.to_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == edge.from_y) {
-            buffer.setWithColor(x, y, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
+            if (markerChar(marker_start, .up)) |ch| {
+                buffer.setWithColor(x, y, ch, color);
+            } else {
+                drawLineCell(buffer, x, y, true, color, dashed);
+            }
         } else if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            buffer.setWithColor(x, y, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
-        } else if (dashed) {
-            buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
+            if (markerChar(marker_end, .down)) |ch| {
+                buffer.setWithColor(x, y, ch, color);
+            } else {
+                drawLineCell(buffer, x, y, true, color, dashed);
+            }
         } else {
-            const current = buffer.get(x, y);
-            buffer.setWithColor(x, y, mergeJunction(current, true, true, false, false), color);
+            drawLineCell(buffer, x, y, true, color, dashed);
         }
     }
     // Handle horizontal offset with corner if needed
@@ -442,7 +384,11 @@ fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, dashed
         var hx = min_x;
         while (hx <= max_x) : (hx += 1) {
             if (buffer.get(hx, mid_y) == ' ') {
-                buffer.setWithColor(hx, mid_y, CP_H_LINE, color);
+                if (dashed) {
+                    buffer.setWithColor(hx, mid_y, CP_H_LINE_DASH, color);
+                } else {
+                    buffer.setWithColor(hx, mid_y, CP_H_LINE, color);
+                }
             }
         }
     }
@@ -450,58 +396,72 @@ fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, dashed
 
 // ── Shared internal helpers ─────────────────────────────────────────────────
 
+/// Draw a single line cell (vertical or horizontal), handling dashed weight
+/// and subgraph border crossings.
+fn drawLineCell(buffer: *Buffer2D, x: usize, y: usize, vertical: bool, color: u8, dashed: bool) void {
+    if (dashed) {
+        const cur = buffer.get(x, y);
+        if (isSubgraphBorderChar(cur)) {
+            buffer.setWithColor(x, y, mergeWithDoubleLine(cur, vertical, vertical, !vertical, !vertical), color);
+        } else if (vertical) {
+            buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
+        } else {
+            buffer.setWithColor(x, y, CP_H_LINE_DASH, color);
+        }
+    } else {
+        const cur = buffer.get(x, y);
+        buffer.setWithColor(x, y, mergeJunction(cur, vertical, vertical, !vertical, !vertical), color);
+    }
+}
+
 /// Draw a vertical segment between (x, lo+1) and (x, hi-1) — exclusive of both endpoints.
 fn drawVerticalSegment(buffer: *Buffer2D, x: usize, lo: usize, hi: usize, color: u8, dashed: bool) void {
     if (hi > lo + 1) {
         var y = lo + 1;
         while (y < hi) : (y += 1) {
-            if (dashed) {
-                const cur = buffer.get(x, y);
-                if (isSubgraphBorderChar(cur)) {
-                    buffer.setWithColor(x, y, mergeWithDoubleLine(cur, true, true, false, false), color);
-                } else {
-                    buffer.setWithColor(x, y, CP_V_LINE_DASH, color);
-                }
-            } else {
-                const cur = buffer.get(x, y);
-                buffer.setWithColor(x, y, mergeJunction(cur, true, true, false, false), color);
-            }
+            drawLineCell(buffer, x, y, true, color, dashed);
         }
     }
 }
 
 /// Draw the arrow for a Manhattan route.
-fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, mid_y: usize, color: u8, dashed: bool, reversed: bool) void {
+fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, mid_y: usize, color: u8, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     if (reversed) {
-        // Reversed: arrow at FROM end (y0) pointing upward
+        // Reversed: marker_start at FROM end, pointing away from target
+        const shape = marker_start;
         if (y0 != mid_y) {
-            const going_up_s1 = y0 < mid_y;
-            if (going_up_s1) {
-                buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_UP_DASH else CP_ARROW_UP, color);
-            } else {
-                buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_DOWN_DASH else CP_ARROW_DOWN, color);
+            const dir: Direction = if (y0 < mid_y) .up else .down;
+            if (markerChar(shape, dir)) |ch| {
+                buffer.setWithColor(x0, y0, ch, color);
             }
         } else {
-            const going_right = x1 > x0;
-            if (going_right) {
-                buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_LEFT_DASH else CP_ARROW_LEFT, color);
-            } else {
-                buffer.setWithColor(x0, y0, if (dashed) CP_ARROW_RIGHT_DASH else CP_ARROW_RIGHT, color);
+            const dir: Direction = if (x1 > x0) .left else .right;
+            if (markerChar(shape, dir)) |ch| {
+                buffer.setWithColor(x0, y0, ch, color);
             }
         }
     } else {
-        // Normal: arrow one cell before target at TO end
+        // Normal: marker_end one cell before target at TO end
+        const shape = marker_end;
         if (y1 != mid_y) {
             const going_down_s3 = y1 > mid_y;
+            if (going_down_s3 and y1 == 0) return;
+            if (!going_down_s3 and y1 >= buffer.height) return;
             const arrow_y = if (going_down_s3) y1 - 1 else y1 + 1;
-            const arrow_char: u21 = if (going_down_s3) CP_ARROW_DOWN else CP_ARROW_UP;
-            buffer.setWithColor(x1, arrow_y, arrow_char, color);
+            const dir: Direction = if (going_down_s3) .down else .up;
+            if (markerChar(shape, dir)) |ch| {
+                buffer.setWithColor(x1, arrow_y, ch, color);
+            }
         } else {
             const going_right = x1 > x0;
+            if (going_right and x1 == 0) return;
+            if (!going_right and x1 >= buffer.width) return;
             const arrow_x = if (going_right) x1 - 1 else x1 + 1;
-            const arrow_char: u21 = if (going_right) CP_ARROW_RIGHT else CP_ARROW_LEFT;
-            if (arrow_x < buffer.width) {
-                buffer.setWithColor(arrow_x, y1, arrow_char, color);
+            const dir: Direction = if (going_right) .right else .left;
+            if (markerChar(shape, dir)) |ch| {
+                if (arrow_x < buffer.width) {
+                    buffer.setWithColor(arrow_x, y1, ch, color);
+                }
             }
         }
     }

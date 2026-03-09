@@ -6,11 +6,12 @@
 //!
 //! - `│` vertical line
 //! - `─` horizontal line
-//! - `↓` arrow down
 //! - `└` corner down-right
 //! - `┘` corner down-left
 //! - `┌` corner up-right
 //! - `┐` corner up-left
+//!
+//! Arrow markers are configurable via `MarkerShape` (default: `↓↑→←`).
 //!
 //! ## Module structure
 //!
@@ -74,6 +75,7 @@ pub const LegendEntry = label_render.LegendEntry;
 pub const mergeJunction = junction_mod.mergeJunction;
 pub const mergeWithDoubleLine = junction_mod.mergeWithDoubleLine;
 pub const isSubgraphBorderChar = junction_mod.isSubgraphBorderChar;
+pub const isMarkerChar = junction_mod.isMarkerChar;
 // Codepoint constants
 pub const CP_V_LINE = junction_mod.CP_V_LINE;
 pub const CP_H_LINE = junction_mod.CP_H_LINE;
@@ -229,11 +231,11 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         else
             0;
 
-        edge_render.paintEdge(&buffer, &edge, edge_color, style.weight);
+        edge_render.paintEdge(&buffer, &edge, edge_color, style.weight, style.marker_end, style.marker_start);
     }
 
     // For invisible dummy nodes, paint a vertical line at their position
-    // and clean up any arrows to make a continuous line.
+    // and clean up any marker characters to make a continuous line.
     if (!config.show_dummy_nodes) {
         for (layout_ir.getNodes()) |node| {
             if (node.kind == .dummy) {
@@ -246,17 +248,13 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 
                 if (y > 0) {
                     const above = buffer.get(x, y - 1);
-                    if (above == CP_ARROW_DOWN or above == CP_ARROW_DOWN_DASH) {
+                    if (junction_mod.isMarkerChar(above)) {
                         buffer.set(x, y - 1, CP_V_LINE);
-                    } else if (above == CP_ARROW_UP_DASH) {
-                        buffer.set(x, y - 1, CP_V_LINE_DASH);
                     }
                 }
                 const below = buffer.get(x, y + 1);
-                if (below == CP_ARROW_DOWN or below == CP_ARROW_DOWN_DASH) {
+                if (junction_mod.isMarkerChar(below)) {
                     buffer.set(x, y + 1, CP_V_LINE);
-                } else if (below == CP_ARROW_UP_DASH) {
-                    buffer.set(x, y + 1, CP_V_LINE_DASH);
                 }
             }
         }

@@ -24,10 +24,12 @@ pub const TextAttrs = packed struct {
 };
 
 /// Line weight for edge rendering (which box-drawing character set to use).
+/// Note: `.heavy` and `.double` are defined but not yet implemented in the
+/// renderer — they currently render identically to `.light`.
 pub const LineWeight = enum {
     light, // ─ │ (default)
-    heavy, // ━ ┃
-    double, // ═ ║
+    heavy, // ━ ┃ (planned)
+    double, // ═ ║ (planned)
     dashed, // ┈ ┊ (reversed edges)
 };
 

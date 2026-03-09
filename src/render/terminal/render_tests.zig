@@ -16,7 +16,7 @@ const CP_MIX_T_UP_DH = mod.CP_MIX_T_UP_DH;
 const CP_MIX_T_RIGHT_DV = mod.CP_MIX_T_RIGHT_DV;
 const CP_MIX_T_LEFT_DV = mod.CP_MIX_T_LEFT_DV;
 
-test "unicode render: simple chain" {
+test "terminal render: simple chain" {
     const allocator = std.testing.allocator;
 
     var layout_ir = LayoutIR.init(allocator);
@@ -69,7 +69,7 @@ test "unicode render: simple chain" {
     try std.testing.expect(std.mem.indexOf(u8, output, "↓") != null);
 }
 
-test "unicode render: empty graph" {
+test "terminal render: empty graph" {
     const allocator = std.testing.allocator;
 
     var layout_ir = LayoutIR.init(allocator);
@@ -81,7 +81,7 @@ test "unicode render: empty graph" {
     try std.testing.expectEqual(@as(usize, 0), output.len);
 }
 
-test "unicode render: subgraph box" {
+test "terminal render: subgraph box" {
     const allocator = std.testing.allocator;
 
     var layout_ir = LayoutIR.init(allocator);
@@ -124,7 +124,7 @@ test "unicode render: subgraph box" {
     try std.testing.expect(std.mem.indexOf(u8, output, "[A]") != null);
 }
 
-test "unicode render: subgraph disabled" {
+test "terminal render: subgraph disabled" {
     const allocator = std.testing.allocator;
 
     var layout_ir = LayoutIR.init(allocator);
@@ -200,7 +200,7 @@ test "mergeJunction: double vertical border without perpendicular stays" {
     try std.testing.expectEqual(CP_SG_V, mergeJunction(CP_SG_V, true, true, false, false));
 }
 
-test "unicode render: edge crosses subgraph border cleanly" {
+test "terminal render: edge crosses subgraph border cleanly" {
     const allocator = std.testing.allocator;
 
     var layout_ir = LayoutIR.init(allocator);

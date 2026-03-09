@@ -38,7 +38,7 @@ pub fn writeMarkerDef(writer: anytype, id: usize, shape: MarkerShape, color: []c
     const half = size / 2;
     switch (shape) {
         .none => {},
-        .arrow => {
+        .arrow, .filled_arrow => {
             try writer.print(
                 \\    <marker id="zg-m-{d}" markerWidth="{d}" markerHeight="{d}" 
                 \\            refX="{d}" refY="{d}" orient="auto" markerUnits="userSpaceOnUse">

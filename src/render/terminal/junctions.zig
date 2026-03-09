@@ -11,6 +11,7 @@ const std = @import("std");
 
 pub const CP_V_LINE: u21 = '│';
 pub const CP_H_LINE: u21 = '─';
+// Legacy arrow constants — kept for mergeJunction decomposition of existing cells.
 pub const CP_ARROW_DOWN: u21 = '↓';
 pub const CP_ARROW_UP: u21 = '↑';
 pub const CP_ARROW_RIGHT: u21 = '→';
@@ -197,4 +198,75 @@ pub fn mergeJunction(current: u21, from_above: bool, to_below: bool, to_right: b
     if (up or down) return CP_V_LINE;
     if (left or right) return CP_H_LINE;
     return current;
+}
+
+// ── Marker character lookup ─────────────────────────────────────────────────
+
+const MarkerShape = @import("config.zig").MarkerShape;
+
+/// Cardinal direction for marker/arrow placement.
+pub const Direction = enum { down, up, right, left };
+
+/// Check if a character is any marker/arrow output (from any MarkerShape).
+/// Used by dummy node cleanup to recognize and replace marker chars with lines.
+pub fn isMarkerChar(ch: u21) bool {
+    return switch (ch) {
+        // .arrow (thin)
+        '↓',
+        '↑',
+        '→',
+        '←',
+        // .arrow dashed (legacy)
+        '⇣',
+        '⇡',
+        '⇢',
+        '⇠',
+        // .filled_arrow
+        '▼',
+        '▲',
+        '▶',
+        '◀',
+        // .open_arrow
+        '▽',
+        '△',
+        '▷',
+        '◁',
+        // .diamond / .open_diamond / .circle / .open_circle
+        '◆',
+        '◇',
+        '●',
+        '○',
+        => true,
+        else => false,
+    };
+}
+
+/// Map a `MarkerShape` + direction to a terminal codepoint.
+/// Returns `null` for `.none` (no marker to paint).
+pub fn markerChar(shape: MarkerShape, dir: Direction) ?u21 {
+    return switch (shape) {
+        .none => null,
+        .arrow => switch (dir) {
+            .down => '↓',
+            .up => '↑',
+            .right => '→',
+            .left => '←',
+        },
+        .filled_arrow => switch (dir) {
+            .down => '▼',
+            .up => '▲',
+            .right => '▶',
+            .left => '◀',
+        },
+        .open_arrow => switch (dir) {
+            .down => '▽',
+            .up => '△',
+            .right => '▷',
+            .left => '◁',
+        },
+        .diamond => '◆',
+        .open_diamond => '◇',
+        .circle => '●',
+        .open_circle => '○',
+    };
 }
