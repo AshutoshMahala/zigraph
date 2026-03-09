@@ -264,3 +264,150 @@ test "terminal render: edge crosses subgraph border cleanly" {
     try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") != null); // ╔
     try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x97") != null); // ╗
 }
+
+// ── Weight-aware junction tests ─────────────────────────────────────────────
+
+const mergeJunctionWeighted = mod.mergeJunctionWeighted;
+const ArmWeight = mod.ArmWeight;
+const DirWeights = mod.DirWeights;
+const decomposeChar = mod.decomposeChar;
+const lookupChar = mod.lookupChar;
+const CP_HV_V_LINE = mod.CP_HV_V_LINE;
+const CP_HV_H_LINE = mod.CP_HV_H_LINE;
+const CP_HV_CORNER_UR = mod.CP_HV_CORNER_UR;
+const CP_HV_CROSS = mod.CP_HV_CROSS;
+const CP_DB_V_LINE = mod.CP_DB_V_LINE;
+const CP_DB_H_LINE = mod.CP_DB_H_LINE;
+
+test "decomposeChar: light lines" {
+    const v = decomposeChar('│');
+    try std.testing.expectEqual(ArmWeight.light, v.up);
+    try std.testing.expectEqual(ArmWeight.light, v.down);
+    try std.testing.expectEqual(ArmWeight.none, v.left);
+    try std.testing.expectEqual(ArmWeight.none, v.right);
+
+    const h = decomposeChar('─');
+    try std.testing.expectEqual(ArmWeight.none, h.up);
+    try std.testing.expectEqual(ArmWeight.none, h.down);
+    try std.testing.expectEqual(ArmWeight.light, h.left);
+    try std.testing.expectEqual(ArmWeight.light, h.right);
+}
+
+test "decomposeChar: heavy lines" {
+    const v = decomposeChar('┃');
+    try std.testing.expectEqual(ArmWeight.heavy, v.up);
+    try std.testing.expectEqual(ArmWeight.heavy, v.down);
+
+    const h = decomposeChar('━');
+    try std.testing.expectEqual(ArmWeight.heavy, h.left);
+    try std.testing.expectEqual(ArmWeight.heavy, h.right);
+}
+
+test "decomposeChar: double lines" {
+    const v = decomposeChar('║');
+    try std.testing.expectEqual(ArmWeight.double, v.up);
+    try std.testing.expectEqual(ArmWeight.double, v.down);
+
+    const h = decomposeChar('═');
+    try std.testing.expectEqual(ArmWeight.double, h.left);
+    try std.testing.expectEqual(ArmWeight.double, h.right);
+}
+
+test "decomposeChar: dashed lines" {
+    // Dashed chars decompose as light (dashed is a visual variant, not a junction weight)
+    const v = decomposeChar('┊');
+    try std.testing.expectEqual(ArmWeight.light, v.up);
+    try std.testing.expectEqual(ArmWeight.light, v.down);
+
+    const h = decomposeChar('┈');
+    try std.testing.expectEqual(ArmWeight.light, h.left);
+    try std.testing.expectEqual(ArmWeight.light, h.right);
+}
+
+test "decomposeChar: space returns all none" {
+    const s = decomposeChar(' ');
+    try std.testing.expectEqual(ArmWeight.none, s.up);
+    try std.testing.expectEqual(ArmWeight.none, s.down);
+    try std.testing.expectEqual(ArmWeight.none, s.left);
+    try std.testing.expectEqual(ArmWeight.none, s.right);
+}
+
+test "lookupChar: heavy vertical" {
+    try std.testing.expectEqual(CP_HV_V_LINE, lookupChar(.{ .up = .heavy, .down = .heavy }));
+}
+
+test "lookupChar: heavy horizontal" {
+    try std.testing.expectEqual(CP_HV_H_LINE, lookupChar(.{ .left = .heavy, .right = .heavy }));
+}
+
+test "lookupChar: double vertical" {
+    try std.testing.expectEqual(CP_DB_V_LINE, lookupChar(.{ .up = .double, .down = .double }));
+}
+
+test "lookupChar: double horizontal" {
+    try std.testing.expectEqual(CP_DB_H_LINE, lookupChar(.{ .left = .double, .right = .double }));
+}
+
+test "lookupChar: heavy corner (└ variant)" {
+    // up + right → └-like corner (CP_HV_CORNER_DR in naming convention)
+    try std.testing.expectEqual(mod.CP_HV_CORNER_DR, lookupChar(.{ .up = .heavy, .right = .heavy }));
+}
+
+test "lookupChar: heavy crossing" {
+    try std.testing.expectEqual(CP_HV_CROSS, lookupChar(.{ .up = .heavy, .down = .heavy, .left = .heavy, .right = .heavy }));
+}
+
+test "lookupChar: dashed → light for junction resolution" {
+    // Dashed effective weight is light, so junctions use light chars
+    const result = lookupChar(.{ .up = .dashed, .down = .dashed });
+    try std.testing.expectEqual(@as(u21, '│'), result);
+}
+
+test "mergeJunctionWeighted: heavy vertical crossing light horizontal" {
+    // Heavy │ + light ─ → mixed crossing
+    const result = mergeJunctionWeighted('┃', .{ .left = .light, .right = .light });
+    const dw = decomposeChar(result);
+    try std.testing.expectEqual(ArmWeight.heavy, dw.up);
+    try std.testing.expectEqual(ArmWeight.heavy, dw.down);
+    try std.testing.expectEqual(ArmWeight.light, dw.left);
+    try std.testing.expectEqual(ArmWeight.light, dw.right);
+}
+
+test "mergeJunctionWeighted: light vertical crossing heavy horizontal" {
+    const result = mergeJunctionWeighted('│', .{ .left = .heavy, .right = .heavy });
+    const dw = decomposeChar(result);
+    try std.testing.expectEqual(ArmWeight.light, dw.up);
+    try std.testing.expectEqual(ArmWeight.light, dw.down);
+    try std.testing.expectEqual(ArmWeight.heavy, dw.left);
+    try std.testing.expectEqual(ArmWeight.heavy, dw.right);
+}
+
+test "mergeJunctionWeighted: marker chars are protected" {
+    // Arrow char should not be overwritten
+    try std.testing.expectEqual(@as(u21, '↓'), mergeJunctionWeighted('↓', .{ .left = .heavy, .right = .heavy }));
+    try std.testing.expectEqual(@as(u21, '↑'), mergeJunctionWeighted('↑', .{ .up = .light, .down = .light }));
+}
+
+test "mergeJunctionWeighted: space + heavy vertical" {
+    try std.testing.expectEqual(CP_HV_V_LINE, mergeJunctionWeighted(' ', .{ .up = .heavy, .down = .heavy }));
+}
+
+test "mergeJunctionWeighted: double horiz + light down = ╤" {
+    // This is the key subgraph border crossing case
+    try std.testing.expectEqual(CP_MIX_T_DOWN_DH, mergeJunctionWeighted(CP_SG_H, .{ .down = .light }));
+}
+
+test "ArmWeight.merge: heavier weight wins" {
+    try std.testing.expectEqual(ArmWeight.heavy, ArmWeight.merge(.light, .heavy));
+    try std.testing.expectEqual(ArmWeight.heavy, ArmWeight.merge(.heavy, .none));
+    try std.testing.expectEqual(ArmWeight.double, ArmWeight.merge(.double, .light));
+    try std.testing.expectEqual(ArmWeight.light, ArmWeight.merge(.light, .none));
+}
+
+test "ArmWeight.fromLineWeight roundtrip" {
+    const lw = @import("config.zig").LineWeight;
+    try std.testing.expectEqual(ArmWeight.light, ArmWeight.fromLineWeight(lw.light));
+    try std.testing.expectEqual(ArmWeight.heavy, ArmWeight.fromLineWeight(lw.heavy));
+    try std.testing.expectEqual(ArmWeight.double, ArmWeight.fromLineWeight(lw.double));
+    try std.testing.expectEqual(ArmWeight.dashed, ArmWeight.fromLineWeight(lw.dashed));
+}

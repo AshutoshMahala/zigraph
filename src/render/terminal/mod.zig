@@ -73,9 +73,14 @@ pub const LegendEntry = label_render.LegendEntry;
 
 // Junction constants + functions (used by tests and advanced consumers)
 pub const mergeJunction = junction_mod.mergeJunction;
+pub const mergeJunctionWeighted = junction_mod.mergeJunctionWeighted;
 pub const mergeWithDoubleLine = junction_mod.mergeWithDoubleLine;
 pub const isSubgraphBorderChar = junction_mod.isSubgraphBorderChar;
 pub const isMarkerChar = junction_mod.isMarkerChar;
+pub const ArmWeight = junction_mod.ArmWeight;
+pub const DirWeights = junction_mod.DirWeights;
+pub const decomposeChar = junction_mod.decomposeChar;
+pub const lookupChar = junction_mod.lookupChar;
 // Codepoint constants
 pub const CP_V_LINE = junction_mod.CP_V_LINE;
 pub const CP_H_LINE = junction_mod.CP_H_LINE;
@@ -110,6 +115,17 @@ pub const CP_MIX_T_DOWN_DH = junction_mod.CP_MIX_T_DOWN_DH;
 pub const CP_MIX_T_UP_DH = junction_mod.CP_MIX_T_UP_DH;
 pub const CP_MIX_T_RIGHT_DV = junction_mod.CP_MIX_T_RIGHT_DV;
 pub const CP_MIX_T_LEFT_DV = junction_mod.CP_MIX_T_LEFT_DV;
+// Heavy codepoints
+pub const CP_HV_V_LINE = junction_mod.CP_HV_V_LINE;
+pub const CP_HV_H_LINE = junction_mod.CP_HV_H_LINE;
+pub const CP_HV_CORNER_UR = junction_mod.CP_HV_CORNER_UR;
+pub const CP_HV_CORNER_UL = junction_mod.CP_HV_CORNER_UL;
+pub const CP_HV_CORNER_DR = junction_mod.CP_HV_CORNER_DR;
+pub const CP_HV_CORNER_DL = junction_mod.CP_HV_CORNER_DL;
+pub const CP_HV_CROSS = junction_mod.CP_HV_CROSS;
+// Double codepoints
+pub const CP_DB_V_LINE = junction_mod.CP_DB_V_LINE;
+pub const CP_DB_H_LINE = junction_mod.CP_DB_H_LINE;
 
 // Paint functions (public for advanced usage / tests)
 pub const paintEdge = edge_render.paintEdge;
