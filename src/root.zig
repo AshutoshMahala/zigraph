@@ -197,6 +197,9 @@ pub const LabelPlacement = terminal.LabelPlacement;
 pub const SubgraphBorder = terminal.SubgraphBorder;
 pub const LabelPosition = terminal.LabelPosition;
 pub const TextAttrs = terminal.TextAttrs;
+pub const TerminalColor = terminal.Color;
+pub const TerminalColorMode = terminal.ColorMode;
+pub const TerminalCellColor = terminal.CellColor;
 pub const terminal_subgraph_presets = terminal.subgraph_presets;
 
 // ============================================================================

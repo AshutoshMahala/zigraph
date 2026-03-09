@@ -38,6 +38,8 @@ pub const getAnsi = palettes.getAnsi;
 pub const isValidHex = palettes.isValidHex;
 pub const hexToAnsi256 = palettes.hexToAnsi256;
 pub const escape = palettes.escape;
+pub const ansi256ToRgb = palettes.ansi256ToRgb;
+pub const rgbToAnsi256 = palettes.rgbToAnsi256;
 
 // Re-export all palette arrays at module level.
 pub const radix = palettes.radix;

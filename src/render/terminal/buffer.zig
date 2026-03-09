@@ -1,15 +1,17 @@
 //! 2D character buffer backed by a single flat allocation.
 //!
-//! Includes an optional color plane for ANSI edge colouring.
+//! Includes a per-cell color plane using `CellColor` (packed u32) that can
+//! represent default, ANSI 256, or 24-bit RGB colors.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const CellColor = @import("config.zig").CellColor;
 
 /// 2D buffer backed by a single flat allocation for cache efficiency.
-/// Includes optional color plane for ANSI edge coloring.
+/// Includes per-cell color plane for ANSI/truecolor rendering.
 pub const Buffer2D = struct {
     data: []u21,
-    colors: []u8, // ANSI color code per cell (0 = no color)
+    colors: []CellColor,
     width: usize,
     height: usize,
 
@@ -23,8 +25,8 @@ pub const Buffer2D = struct {
         const data = try allocator.alloc(u21, size);
         @memset(data, ' ');
 
-        const color_plane = try allocator.alloc(u8, size);
-        @memset(color_plane, 0); // 0 = no color
+        const color_plane = try allocator.alloc(CellColor, size);
+        @memset(color_plane, CellColor.none);
 
         return .{ .data = data, .colors = color_plane, .width = w, .height = h };
     }
@@ -39,8 +41,8 @@ pub const Buffer2D = struct {
         return self.data[y * self.width + x];
     }
 
-    pub inline fn getColor(self: *const Buffer2D, x: usize, y: usize) u8 {
-        if (x >= self.width or y >= self.height) return 0;
+    pub inline fn getColor(self: *const Buffer2D, x: usize, y: usize) CellColor {
+        if (x >= self.width or y >= self.height) return CellColor.none;
         return self.colors[y * self.width + x];
     }
 
@@ -49,7 +51,7 @@ pub const Buffer2D = struct {
         self.data[y * self.width + x] = val;
     }
 
-    pub inline fn setWithColor(self: *Buffer2D, x: usize, y: usize, val: u21, color: u8) void {
+    pub inline fn setWithColor(self: *Buffer2D, x: usize, y: usize, val: u21, color: CellColor) void {
         if (x >= self.width or y >= self.height) return;
         const idx = y * self.width + x;
         self.data[idx] = val;
@@ -62,7 +64,7 @@ pub const Buffer2D = struct {
         return self.data[start .. start + self.width];
     }
 
-    pub fn getColorRow(self: *const Buffer2D, y: usize) []const u8 {
+    pub fn getColorRow(self: *const Buffer2D, y: usize) []const CellColor {
         if (y >= self.height) return &.{};
         const start = y * self.width;
         return self.colors[start .. start + self.width];

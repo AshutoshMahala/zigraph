@@ -58,6 +58,10 @@ pub const NodeBorder = config_mod.NodeBorder;
 pub const LabelPlacement = config_mod.LabelPlacement;
 pub const SubgraphBorder = config_mod.SubgraphBorder;
 pub const LabelPosition = config_mod.LabelPosition;
+pub const Color = config_mod.Color;
+pub const ColorMode = config_mod.ColorMode;
+pub const CellColor = config_mod.CellColor;
+pub const resolveColor = config_mod.resolveColor;
 pub const TerminalEdgeStyle = config_mod.TerminalEdgeStyle;
 pub const TerminalNodeStyle = config_mod.TerminalNodeStyle;
 pub const TerminalEdgeLabelStyle = config_mod.TerminalEdgeLabelStyle;
@@ -240,12 +244,12 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 
         // Call style function, resolve color (style > palette > none)
         const style = config.edge_style_fn(ctx);
-        const edge_color: u8 = if (style.color != 0)
-            style.color
+        const edge_color: CellColor = if (style.color != .default)
+            resolveColor(style.color)
         else if (config.edge_palette) |palette|
-            colors.getAnsi(palette, edge.edge_index)
+            CellColor.ansi256(colors.getAnsi(palette, edge.edge_index))
         else
-            0;
+            CellColor.none;
 
         edge_render.paintEdge(&buffer, &edge, edge_color, style.weight, style.marker_end, style.marker_start);
     }
@@ -301,12 +305,12 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                 .arena = arena,
             };
             const style = config.edge_style_fn(ctx);
-            const edge_color: u8 = if (style.color != 0)
-                style.color
+            const edge_color: CellColor = if (style.color != .default)
+                resolveColor(style.color)
             else if (config.edge_palette) |palette|
-                colors.getAnsi(palette, edge.edge_index)
+                CellColor.ansi256(colors.getAnsi(palette, edge.edge_index))
             else
-                0;
+                CellColor.none;
 
             if (label_render.canPlaceLabel(&buffer, label, edge.label_x, edge.label_y)) {
                 label_render.paintLabel(&buffer, label, edge.label_x, edge.label_y, edge_color);
@@ -378,12 +382,12 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                 .arena = arena,
             };
             const sl_style = config.edge_style_fn(sl_ctx);
-            const edge_color: u8 = if (sl_style.color != 0)
-                sl_style.color
+            const edge_color: CellColor = if (sl_style.color != .default)
+                resolveColor(sl_style.color)
             else if (config.edge_palette) |palette|
-                colors.getAnsi(palette, edge.edge_index)
+                CellColor.ansi256(colors.getAnsi(palette, edge.edge_index))
             else
-                0;
+                CellColor.none;
 
             if (layout_ir.nodeById(edge.from_id)) |node| {
                 const loop_x = node.x + node.width; // right after ']'
@@ -401,7 +405,7 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     errdefer output.deinit(allocator);
     try output.ensureTotalCapacity(allocator, height * (width * 4 + 1));
 
-    var last_color: u8 = 0;
+    var last_color: CellColor = CellColor.none;
 
     for (0..height) |y| {
         const row = buffer.getRow(y);
@@ -415,13 +419,12 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 
         // Encode each character with optional color
         for (row[0..end], color_row[0..end]) |codepoint, cell_color| {
-            if (cell_color != 0 and cell_color != last_color) {
-                const seq = colors.escape.fg256(cell_color);
-                try output.appendSlice(allocator, &seq);
+            if (cell_color.isSet() and !cellColorEql(cell_color, last_color)) {
+                try emitFgEscape(&output, allocator, cell_color, config.color_mode);
                 last_color = cell_color;
-            } else if (cell_color == 0 and last_color != 0) {
+            } else if (!cell_color.isSet() and last_color.isSet()) {
                 try output.appendSlice(allocator, colors.escape.reset);
-                last_color = 0;
+                last_color = CellColor.none;
             }
 
             var buf: [4]u8 = undefined;
@@ -429,9 +432,9 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             try output.appendSlice(allocator, buf[0..len]);
         }
 
-        if (last_color != 0) {
+        if (last_color.isSet()) {
             try output.appendSlice(allocator, colors.escape.reset);
-            last_color = 0;
+            last_color = CellColor.none;
         }
 
         try output.append(allocator, '\n');
@@ -446,9 +449,8 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             const from_label = if (layout_ir.nodeById(entry.from_id)) |n| n.label else "?";
             const to_label = if (layout_ir.nodeById(entry.to_id)) |n| n.label else "?";
 
-            if (entry.color != 0) {
-                const seq = colors.escape.fg256(entry.color);
-                try output.appendSlice(allocator, &seq);
+            if (entry.color.isSet()) {
+                try emitFgEscape(&output, allocator, entry.color, config.color_mode);
             }
 
             try output.appendSlice(allocator, from_label);
@@ -458,7 +460,7 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             try output.appendSlice(allocator, entry.label);
             try output.appendSlice(allocator, "\"");
 
-            if (entry.color != 0) {
+            if (entry.color.isSet()) {
                 try output.appendSlice(allocator, colors.escape.reset);
             }
             try output.append(allocator, '\n');
@@ -466,4 +468,44 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     }
 
     return output.toOwnedSlice(allocator);
+}
+
+// ── Color serialization helpers ─────────────────────────────────────────────
+
+fn cellColorEql(a: CellColor, b: CellColor) bool {
+    return @as(u32, @bitCast(a)) == @as(u32, @bitCast(b));
+}
+
+/// Emit a foreground color escape sequence, adapting between ANSI 256 and
+/// truecolor as needed. In `.none` mode this is a no-op.
+fn emitFgEscape(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor, mode: ColorMode) !void {
+    switch (mode) {
+        .none => {},
+        .ansi256 => switch (cc.tag) {
+            .ansi => {
+                const seq = colors.escape.fg256(cc.ansiIndex());
+                try output.appendSlice(allocator, &seq);
+            },
+            .rgb => {
+                // Quantize RGB → nearest ANSI 256 index
+                const idx = colors.rgbToAnsi256(cc.r(), cc.g(), cc.b());
+                const seq = colors.escape.fg256(idx);
+                try output.appendSlice(allocator, &seq);
+            },
+            else => {},
+        },
+        .truecolor => switch (cc.tag) {
+            .rgb => {
+                const seq = colors.escape.fgRgb(cc.r(), cc.g(), cc.b());
+                try output.appendSlice(allocator, &seq);
+            },
+            .ansi => {
+                // Expand ANSI 256 → RGB for truecolor output
+                const rgb_val = colors.ansi256ToRgb(cc.ansiIndex());
+                const seq = colors.escape.fgRgb(rgb_val.r, rgb_val.g, rgb_val.b);
+                try output.appendSlice(allocator, &seq);
+            },
+            else => {},
+        },
+    }
 }

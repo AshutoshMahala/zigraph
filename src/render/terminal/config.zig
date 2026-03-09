@@ -2,8 +2,21 @@
 //!
 //! Defines all style structs, enums, default style functions, presets,
 //! and the `Config` struct that controls terminal rendering behaviour.
+//!
+//! ## Color architecture
+//!
+//! Three layers separate user intent from buffer storage from output encoding:
+//!
+//! - `Color` (user API) — tagged union returned by style functions
+//! - `CellColor` (buffer storage) — packed u32 per cell, holds tag + ANSI/RGB payload
+//! - `ColorMode` (output encoding) — determines ANSI escape format at serialization
+//!
+//! Style functions return `Color`. The renderer resolves it to `CellColor` via
+//! `resolveColor()` and stores it in the buffer. At serialization time, `ColorMode`
+//! determines whether to emit ANSI 256 or truecolor escape sequences.
 
 const types = @import("../types.zig");
+const colormaps = @import("../color/colormaps.zig");
 
 // ── Re-exports from shared types ────────────────────────────────────────────
 
@@ -11,6 +24,95 @@ pub const MarkerShape = types.MarkerShape;
 pub const EdgeStyleContext = types.EdgeStyleContext;
 pub const NodeStyleContext = types.NodeStyleContext;
 pub const SubgraphStyleContext = types.SubgraphStyleContext;
+
+// ── Color system ────────────────────────────────────────────────────────────
+
+/// Output color encoding mode. Determines which ANSI escape sequences the
+/// serializer emits. Does not affect buffer storage (always `CellColor`).
+pub const ColorMode = enum {
+    none, // no color output (piping, CI logs, plain text)
+    ansi256, // \e[38;5;{n}m — broad terminal compatibility
+    truecolor, // \e[38;2;R;G;Bm — modern terminals
+};
+
+/// User-facing color specification returned by style functions.
+/// Converted to `CellColor` at buffer-write time via `resolveColor()`.
+pub const Color = union(enum) {
+    default, // terminal default (no escape emitted)
+    ansi256: u8, // ANSI 256 index (0-255)
+    rgb: Rgb, // 24-bit true color
+    gradient: GradientSpec, // per-cell color from a colormap (resolved in Topic 9)
+
+    pub const Rgb = struct { r: u8, g: u8, b: u8 };
+};
+
+/// Gradient specification — references a colormap and a range within it.
+/// Actual per-cell sampling is deferred to the plan+single-pass pipeline (Topic 9).
+/// Currently resolves to `.default` (no color).
+pub const GradientSpec = struct {
+    map: *const colormaps.ColorMap,
+    from: f32 = 0.0,
+    to: f32 = 1.0,
+};
+
+/// Compact per-cell color storage. Packed into 4 bytes.
+///
+/// The tag distinguishes default (no color), ANSI 256 index, or 24-bit RGB.
+/// Painters pass this value opaquely to `Buffer2D.setWithColor()`.
+pub const CellColor = packed struct(u32) {
+    payload: u24 = 0,
+    tag: Tag = .default,
+    _pad: u6 = 0,
+
+    pub const Tag = enum(u2) { default = 0, ansi = 1, rgb = 2, _reserved = 3 };
+
+    /// No color (terminal default foreground).
+    pub const none: CellColor = .{};
+
+    /// Construct from an ANSI 256 palette index.
+    pub fn ansi256(index: u8) CellColor {
+        return .{ .payload = @as(u24, index), .tag = .ansi };
+    }
+
+    /// Construct from 24-bit RGB.
+    pub fn rgb(r_val: u8, g_val: u8, b_val: u8) CellColor {
+        return .{ .payload = @as(u24, r_val) | (@as(u24, g_val) << 8) | (@as(u24, b_val) << 16), .tag = .rgb };
+    }
+
+    pub fn isSet(self: CellColor) bool {
+        return self.tag != .default;
+    }
+
+    /// Extract ANSI 256 index (valid when tag == .ansi).
+    pub fn ansiIndex(self: CellColor) u8 {
+        return @truncate(self.payload);
+    }
+
+    /// Extract red channel (valid when tag == .rgb).
+    pub fn r(self: CellColor) u8 {
+        return @truncate(self.payload);
+    }
+
+    /// Extract green channel (valid when tag == .rgb).
+    pub fn g(self: CellColor) u8 {
+        return @truncate(self.payload >> 8);
+    }
+
+    /// Extract blue channel (valid when tag == .rgb).
+    pub fn b(self: CellColor) u8 {
+        return @truncate(self.payload >> 16);
+    }
+};
+
+/// Convert a user-facing `Color` to compact `CellColor` for buffer storage.
+pub fn resolveColor(color: Color) CellColor {
+    return switch (color) {
+        .default => CellColor.none,
+        .ansi256 => |v| CellColor.ansi256(v),
+        .rgb => |v| CellColor.rgb(v.r, v.g, v.b),
+        .gradient => CellColor.none, // per-cell gradient deferred to plan+single-pass (Topic 9)
+    };
+}
 
 // ── Terminal style types ────────────────────────────────────────────────────
 
@@ -81,7 +183,7 @@ pub const LabelPosition = enum {
 
 /// Style returned by `edge_style_fn` for each edge.
 pub const TerminalEdgeStyle = struct {
-    color: u8 = 0, // ANSI 256 color (0 = use palette or default)
+    color: Color = .default,
     weight: LineWeight = .light,
     marker_end: MarkerShape = .arrow,
     marker_start: MarkerShape = .none,
@@ -90,14 +192,14 @@ pub const TerminalEdgeStyle = struct {
 /// Style returned by `node_style_fn` for each node.
 pub const TerminalNodeStyle = struct {
     border: NodeBorder = .bracket,
-    fg_color: u8 = 0,
-    bg_color: u8 = 0,
+    fg_color: Color = .default,
+    bg_color: Color = .default,
     attrs: TextAttrs = .{},
 };
 
 /// Style returned by `edge_label_style_fn` for each edge label.
 pub const TerminalEdgeLabelStyle = struct {
-    color: u8 = 0, // 0 = follow edge color
+    color: Color = .default, // .default = follow edge color
     placement: LabelPlacement = .auto,
     attrs: TextAttrs = .{},
 };
@@ -105,7 +207,7 @@ pub const TerminalEdgeLabelStyle = struct {
 /// Style returned by `subgraph_style_fn` for each subgraph.
 pub const TerminalSubgraphStyle = struct {
     border: SubgraphBorder = .double,
-    color: u8 = 0,
+    color: Color = .default,
     label_pos: LabelPosition = .top_left,
     label_attrs: TextAttrs = .{},
 };
@@ -137,7 +239,7 @@ pub const subgraph_presets = struct {
         const palette = [_]u8{ 33, 34, 35, 36 };
         return .{
             .border = borders[ctx.depth % borders.len],
-            .color = palette[ctx.depth % palette.len],
+            .color = .{ .ansi256 = palette[ctx.depth % palette.len] },
         };
     }
 };
@@ -154,8 +256,11 @@ pub const Config = struct {
 
     /// Edge color palette (ANSI 256-color codes) — backward-compatible convenience.
     /// When set, provides default colors for edges. Overridden by edge_style_fn
-    /// returning a non-zero color.
+    /// returning a non-default color.
     edge_palette: ?[]const u8 = null,
+
+    /// Output color encoding mode.
+    color_mode: ColorMode = .ansi256,
 
     /// Per-edge style function — returns line weight, color, markers.
     edge_style_fn: *const fn (EdgeStyleContext) TerminalEdgeStyle = &defaultEdgeStyle,

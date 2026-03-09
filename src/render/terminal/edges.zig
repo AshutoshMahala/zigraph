@@ -13,6 +13,7 @@ const Buffer2D = @import("buffer.zig").Buffer2D;
 const config_mod = @import("config.zig");
 const LineWeight = config_mod.LineWeight;
 const MarkerShape = config_mod.MarkerShape;
+const CellColor = config_mod.CellColor;
 const j = @import("junctions.zig");
 const mergeJunctionWeighted = j.mergeJunctionWeighted;
 const ArmWeight = j.ArmWeight;
@@ -22,7 +23,7 @@ const markerChar = j.markerChar;
 
 /// Paint an edge onto the buffer.
 /// Color, weight, and markers come from the style function.
-pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, weight: LineWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: CellColor, weight: LineWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const arm = ArmWeight.fromLineWeight(weight);
     switch (edge.path) {
         .direct => {
@@ -59,7 +60,7 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, weight: 
 // ── Directional draw helpers ────────────────────────────────────────────────
 
 /// Draw a pure-vertical direct edge between y_from and y_to at column x.
-pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: u8, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
+pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, color: CellColor, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
     if (y_from == y_to) return;
     const lo = @min(y_from, y_to);
     const hi = @max(y_from, y_to);
@@ -82,7 +83,7 @@ pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usiz
 }
 
 /// Draw a pure-horizontal direct edge between x_from and x_to at row y.
-pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: u8, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
+pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, color: CellColor, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
     if (x_from == x_to) return;
     const lo = @min(x_from, x_to);
     const hi = @max(x_from, x_to);
@@ -106,7 +107,7 @@ pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: us
 
 /// Draw a Manhattan Z-shaped route between (x0,y0) and (x1,y1).
 /// Route: (x0,y0) → (x0,mid_y) → (x1,mid_y) → (x1,y1)
-pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: u8, weight: LineWeight, directed: bool, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
+pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, color: CellColor, weight: LineWeight, directed: bool, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const lo_y = @min(y0, y1);
     const hi_y = @max(y0, y1);
     const mid_y = lo_y + (hi_y - lo_y) / 2;
@@ -160,7 +161,7 @@ pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y
 
 // ── Private path-type helpers ───────────────────────────────────────────────
 
-fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color: u8, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color: CellColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
     const min_x = @min(x1, x2);
@@ -220,7 +221,7 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color
     }
 }
 
-fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize, start_y: usize, end_y: usize, color: u8, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize, start_y: usize, end_y: usize, color: CellColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
 
@@ -281,7 +282,7 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
     }
 }
 
-fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: CellColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
     const h_y = edge.from_y + 1;
@@ -342,7 +343,7 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, 
     }
 }
 
-fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: CellColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x = edge.from_x;
     // Assumes top-down layout: reversed marker points upward.
     var y = edge.from_y;
@@ -379,7 +380,7 @@ fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: u8, arm: A
 
 /// Draw a single line cell (vertical or horizontal), handling weight variants
 /// and subgraph border crossings via weight-aware junction merging.
-fn drawLineCell(buffer: *Buffer2D, x: usize, y: usize, vertical: bool, color: u8, arm: ArmWeight) void {
+fn drawLineCell(buffer: *Buffer2D, x: usize, y: usize, vertical: bool, color: CellColor, arm: ArmWeight) void {
     const new_dirs = DirWeights{
         .up = if (vertical) arm else .none,
         .down = if (vertical) arm else .none,
@@ -391,7 +392,7 @@ fn drawLineCell(buffer: *Buffer2D, x: usize, y: usize, vertical: bool, color: u8
 }
 
 /// Draw a vertical segment between (x, lo+1) and (x, hi-1) — exclusive of both endpoints.
-fn drawVerticalSegment(buffer: *Buffer2D, x: usize, lo: usize, hi: usize, color: u8, arm: ArmWeight) void {
+fn drawVerticalSegment(buffer: *Buffer2D, x: usize, lo: usize, hi: usize, color: CellColor, arm: ArmWeight) void {
     if (hi > lo + 1) {
         var y = lo + 1;
         while (y < hi) : (y += 1) {
@@ -401,7 +402,7 @@ fn drawVerticalSegment(buffer: *Buffer2D, x: usize, lo: usize, hi: usize, color:
 }
 
 /// Draw the arrow for a Manhattan route.
-fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, mid_y: usize, color: u8, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, mid_y: usize, color: CellColor, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
     if (reversed) {
         // Reversed: marker_start at FROM end, pointing away from target
         const shape = marker_start;

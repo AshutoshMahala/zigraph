@@ -1,6 +1,7 @@
 //! Edge label painting and legend support for the terminal renderer.
 
 const Buffer2D = @import("buffer.zig").Buffer2D;
+const CellColor = @import("config.zig").CellColor;
 const j = @import("junctions.zig");
 
 /// Entry for the legend (labels that couldn't be placed inline).
@@ -8,7 +9,7 @@ pub const LegendEntry = struct {
     from_id: usize,
     to_id: usize,
     label: []const u8,
-    color: u8,
+    color: CellColor,
 };
 
 /// Check whether a label can be placed without overlapping anything except spaces and vertical lines.
@@ -24,8 +25,8 @@ pub fn canPlaceLabel(buffer: *const Buffer2D, label: []const u8, x: usize, y: us
     return true;
 }
 
-/// Paint a label as `"text"` at the given position with optional ANSI color.
-pub fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: u8) void {
+/// Paint a label as `"text"` at the given position with optional color.
+pub fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: CellColor) void {
     var px = x;
     buffer.setWithColor(px, y, '"', color);
     px += 1;
