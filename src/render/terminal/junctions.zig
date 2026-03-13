@@ -230,8 +230,11 @@ pub const CP_MIX_T_LEFT_DV: u21 = CP_MD_T_LEFT_DV; // ╡
 
 // ── Character decomposition and lookup ───────────────────────────────────────
 
-/// Check if a character is a double-line subgraph border or mixed crossing character.
-pub fn isSubgraphBorderChar(ch: u21) bool {
+/// Check if a character has any double-weight arm (pure double or mixed light↔double).
+/// NOTE: only detects double-line characters. For other border weights (single,
+/// heavy, dashed), a broader predicate will be introduced with the scanline
+/// renderer. Renamed from `isSubgraphBorderChar` for clarity.
+pub fn isDoubleBorderChar(ch: u21) bool {
     const dw = decomposeChar(ch);
     return dw.left == .double or dw.right == .double or dw.up == .double or dw.down == .double;
 }

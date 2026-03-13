@@ -231,6 +231,8 @@ pub const SubgraphBorder = enum {
 };
 
 /// Subgraph label position.
+/// When `border = .none`, `.top_left` and `.top_center` paint at the top row
+/// of the subgraph bounding box (the border row that is otherwise invisible).
 pub const LabelPosition = enum {
     top_left, // label on top border, left-aligned
     top_center, // label on top border, centered
@@ -269,9 +271,14 @@ pub const TerminalEdgeLabelStyle = struct {
 /// Style returned by `subgraph_style_fn` for each subgraph.
 pub const TerminalSubgraphStyle = struct {
     border: SubgraphBorder = .double,
+    /// Subgraph border and label color. Supports `.default`, ANSI-256, and
+    /// truecolor values. `.gradient` is not yet supported in the terminal
+    /// renderer and silently falls back to no color.
     color: Color = .default,
     label_pos: LabelPosition = .top_left,
-    label_attrs: TextAttrs = .{},
+    // TODO: label text attributes (bold, dim, italic, underline) — requires
+    // ANSI text-attribute escape sequence support, which is not yet implemented
+    // for any terminal text output (nodes, edges, or subgraphs).
 };
 
 // ── Default style functions ─────────────────────────────────────────────────

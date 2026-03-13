@@ -415,6 +415,25 @@ pub fn build(b: *std.Build) void {
     const run_terminal_node_control_step = b.step("run-terminal-node-control", "Run terminal node control example");
     run_terminal_node_control_step.dependOn(&run_terminal_node_control.step);
 
+    // Terminal subgraph styles example
+    const terminal_subgraph_styles_mod = b.addModule("terminal_subgraph_styles", .{
+        .root_source_file = b.path("examples/terminal/subgraph_styles.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_subgraph_styles_exe = b.addExecutable(.{
+        .name = "terminal_subgraph_styles",
+        .root_module = terminal_subgraph_styles_mod,
+    });
+    b.installArtifact(terminal_subgraph_styles_exe);
+
+    const run_terminal_subgraph_styles = b.addRunArtifact(terminal_subgraph_styles_exe);
+    const run_terminal_subgraph_styles_step = b.step("run-terminal-subgraph-styles", "Run terminal subgraph styles example");
+    run_terminal_subgraph_styles_step.dependOn(&run_terminal_subgraph_styles.step);
+
     // Generate README assets (all hero formats)
     const generate_assets_example = b.addModule("generate_assets_example", .{
         .root_source_file = b.path("examples/generate_assets.zig"),

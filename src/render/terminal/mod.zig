@@ -20,11 +20,11 @@
 //!   mod.zig          ← this file: render() entry point + re-exports
 //!   config.zig       ← Config, style types, presets, defaults
 //!   buffer.zig       ← Buffer2D (flat 2D character + color buffer)
-//!   junctions.zig    ← CP_* codepoints, mergeJunction, isSubgraphBorderChar
+//!   junctions.zig    ← CP_* codepoints, mergeJunction, isDoubleBorderChar
 //!   nodes.zig        ← paintNode
 //!   edges.zig        ← paintEdge, drawDirectVertical/Horizontal/Manhattan
 //!   labels.zig       ← LegendEntry, canPlaceLabel, paintLabel
-//!   subgraphs.zig    ← paintSubgraphs, paintSubgraphLabels, paintSubgraphBox
+//!   subgraphs.zig    ← paintSubgraphBox, paintSubgraphLabel
 //!   render_tests.zig ← integration tests
 //! ```
 
@@ -34,6 +34,7 @@ const ir_mod = @import("../../core/ir.zig");
 const LayoutIR = ir_mod.LayoutIR(usize);
 const colors = @import("../color/mod.zig");
 const types = @import("../types.zig");
+const shared_helpers = @import("../helpers.zig");
 
 // ── Submodule imports ───────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ pub const LegendEntry = label_render.LegendEntry;
 pub const mergeJunction = junction_mod.mergeJunction;
 pub const mergeJunctionWeighted = junction_mod.mergeJunctionWeighted;
 pub const mergeWithDoubleLine = junction_mod.mergeWithDoubleLine;
-pub const isSubgraphBorderChar = junction_mod.isSubgraphBorderChar;
+pub const isDoubleBorderChar = junction_mod.isDoubleBorderChar;
 pub const isMarkerChar = junction_mod.isMarkerChar;
 pub const ArmWeight = junction_mod.ArmWeight;
 pub const DirWeights = junction_mod.DirWeights;
@@ -136,9 +137,8 @@ pub const CP_DB_H_LINE = junction_mod.CP_DB_H_LINE;
 // Paint functions (public for advanced usage / tests)
 pub const paintEdge = edge_render.paintEdge;
 pub const paintNode = node_render.paintNode;
-pub const paintSubgraphs = subgraph_render.paintSubgraphs;
-pub const paintSubgraphLabels = subgraph_render.paintSubgraphLabels;
 pub const paintSubgraphBox = subgraph_render.paintSubgraphBox;
+pub const paintSubgraphLabel = subgraph_render.paintSubgraphLabel;
 pub const canPlaceLabel = label_render.canPlaceLabel;
 pub const paintLabel = label_render.paintLabel;
 pub const drawDirectVertical = edge_render.drawDirectVertical;
@@ -263,22 +263,45 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     defer buffer.deinit(allocator);
 
     // ── Paint subgraph boxes first (background layer) ───────────────────
+    const sg_depths: []const usize = if (config.show_subgraphs and layout_ir.subgraphs.items.len > 0)
+        shared_helpers.computeSubgraphDepths(layout_ir.subgraphs.items, arena)
+    else
+        &.{};
+
+    // Pre-compute styles once per subgraph (avoids calling style_fn twice per SG).
+    const sg_styles: []const config_mod.TerminalSubgraphStyle = if (config.show_subgraphs and layout_ir.subgraphs.items.len > 0) blk: {
+        const sgs = layout_ir.subgraphs.items;
+        const styles = arena.alloc(config_mod.TerminalSubgraphStyle, sgs.len) catch break :blk &.{};
+        for (sgs, 0..) |sg, idx| {
+            styles[idx] = config.subgraph_style_fn(.{
+                .subgraph_id = sg.id,
+                .parent_id = sg.parent_id,
+                .label = sg.label,
+                .depth = if (idx < sg_depths.len) sg_depths[idx] else 0,
+                .total_subgraphs = sgs.len,
+                .width = sg.width,
+                .height = sg.height,
+                .arena = arena,
+            });
+        }
+        break :blk styles;
+    } else &.{};
+
     if (config.show_subgraphs) {
-        if (total_extra == 0) {
-            subgraph_render.paintSubgraphs(&buffer, layout_ir);
-        } else {
-            // Transform subgraph Y coordinates for expansion
-            const sgs = layout_ir.subgraphs.items;
-            if (sgs.len > 0) {
-                var idx: usize = sgs.len;
-                while (idx > 0) {
-                    idx -= 1;
-                    const sg = sgs[idx];
-                    const new_y = yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra);
+        const sgs = layout_ir.subgraphs.items;
+        if (sgs.len > 0) {
+            // Render in reverse order: parents first (they appear last in the array)
+            var idx: usize = sgs.len;
+            while (idx > 0) {
+                idx -= 1;
+                const sg = sgs[idx];
+                const sg_style = if (idx < sg_styles.len) sg_styles[idx] else config_mod.TerminalSubgraphStyle{};
+                const new_y = if (total_extra == 0) sg.y else yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra);
+                const new_h = if (total_extra == 0) sg.height else blk: {
                     const new_bottom = yTransform(sg.y + sg.height -| 1, num_levels, level_ir_ys, cumulative_extra);
-                    const new_h = new_bottom - new_y + 1;
-                    subgraph_render.paintSubgraphBox(&buffer, sg.x, new_y, sg.width, new_h);
-                }
+                    break :blk new_bottom - new_y + 1;
+                };
+                subgraph_render.paintSubgraphBox(&buffer, sg.x, new_y, sg.width, new_h, sg_style);
             }
         }
     }
@@ -443,21 +466,15 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 
     // Paint subgraph labels last so they're not overwritten by edges/nodes
     if (config.show_subgraphs) {
-        if (total_extra == 0) {
-            subgraph_render.paintSubgraphLabels(&buffer, layout_ir);
-        } else {
-            for (layout_ir.subgraphs.items) |sg| {
-                if (sg.label.len == 0) continue;
-                if (sg.width < 4 or sg.height < 3) continue;
-                const max_label_len = sg.width - 4;
-                const display_len = @min(sg.label.len, max_label_len);
-                if (display_len == 0) continue;
-                const label_start = sg.x + 2;
-                const label_y = yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra) + 1;
-                for (sg.label[0..display_len], 0..) |ch, i| {
-                    buffer.set(label_start + i, label_y, @as(u21, ch));
-                }
-            }
+        const sgs = layout_ir.subgraphs.items;
+        for (sgs, 0..) |sg, idx| {
+            const sg_style = if (idx < sg_styles.len) sg_styles[idx] else config_mod.TerminalSubgraphStyle{};
+            const new_y = if (total_extra == 0) sg.y else yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra);
+            const new_h = if (total_extra == 0) sg.height else blk: {
+                const new_bottom = yTransform(sg.y + sg.height -| 1, num_levels, level_ir_ys, cumulative_extra);
+                break :blk new_bottom - new_y + 1;
+            };
+            subgraph_render.paintSubgraphLabel(&buffer, sg.x, new_y, sg.width, new_h, sg.label, sg_style);
         }
     }
 

@@ -1,6 +1,7 @@
 //! Integration tests for the terminal renderer.
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const ir_mod = @import("../../core/ir.zig");
 const LayoutIR = ir_mod.LayoutIR(usize);
 const mod = @import("mod.zig");
@@ -13,6 +14,9 @@ const CellColor = mod.CellColor;
 const resolveColorAt = mod.resolveColorAt;
 const Buffer2D = mod.Buffer2D;
 const TerminalNodeStyle = mod.TerminalNodeStyle;
+const TerminalSubgraphStyle = mod.TerminalSubgraphStyle;
+const SubgraphStyleContext = mod.SubgraphStyleContext;
+const config_mod = @import("config.zig");
 const colormaps = @import("../color/colormaps.zig");
 const NodeStyleContext = @import("../../render/types.zig").NodeStyleContext;
 const NodeBorder = @import("config.zig").NodeBorder;
@@ -243,7 +247,7 @@ test "terminal render: edge crosses subgraph border cleanly" {
     try layout_ir.subgraphs.append(allocator, .{
         .id = 0,
         .parent_id = null,
-        .label = "SG",
+        .label = "S",
         .x = 1,
         .y = 2,
         .width = 8,
@@ -1024,4 +1028,219 @@ test "serialization omits bg escape when no bg_color set" {
 
     // Must NOT contain \x1b[48; (no bg escape)
     try std.testing.expect(std.mem.indexOf(u8, result, "\x1b[48;") == null);
+}
+
+// ── Subgraph style tests ────────────────────────────────────────────────────
+
+fn makeSubgraphTestIR(allocator: Allocator) !LayoutIR {
+    var layout_ir = LayoutIR.init(allocator);
+    errdefer layout_ir.deinit();
+
+    try layout_ir.addNode(.{ .id = 1, .label = "A", .x = 3, .y = 1, .width = 3, .center_x = 4, .level = 0, .level_position = 0 });
+    try layout_ir.subgraphs.append(allocator, .{ .id = 10, .parent_id = null, .label = "Sub", .x = 1, .y = 0, .width = 10, .height = 4 });
+    layout_ir.setDimensions(12, 5);
+    return layout_ir;
+}
+
+test "subgraph: default border is double" {
+    const allocator = std.testing.allocator;
+    var layout_ir = try makeSubgraphTestIR(allocator);
+    defer layout_ir.deinit();
+
+    const output = try render(&layout_ir, allocator);
+    defer allocator.free(output);
+
+    // Double corners
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") != null); // ╔
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x97") != null); // ╗
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x9a") != null); // ╚
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x9d") != null); // ╝
+}
+
+test "subgraph: single border style" {
+    const allocator = std.testing.allocator;
+    var layout_ir = try makeSubgraphTestIR(allocator);
+    defer layout_ir.deinit();
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn f(_: SubgraphStyleContext) TerminalSubgraphStyle {
+                return .{ .border = .single };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // Single corners: ┌ ┐ └ ┘
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x8c") != null); // ┌
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x90") != null); // ┐
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x94") != null); // └
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x98") != null); // ┘
+    // Should NOT have double corners
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") == null); // no ╔
+}
+
+test "subgraph: heavy border style" {
+    const allocator = std.testing.allocator;
+    var layout_ir = try makeSubgraphTestIR(allocator);
+    defer layout_ir.deinit();
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn f(_: SubgraphStyleContext) TerminalSubgraphStyle {
+                return .{ .border = .heavy };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // Heavy corners: ┏ ┓ ┗ ┛
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x8f") != null); // ┏
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x93") != null); // ┓
+}
+
+test "subgraph: none border hides box" {
+    const allocator = std.testing.allocator;
+    var layout_ir = try makeSubgraphTestIR(allocator);
+    defer layout_ir.deinit();
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn f(_: SubgraphStyleContext) TerminalSubgraphStyle {
+                return .{ .border = .none };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // No double corners
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") == null); // no ╔
+    // No single corners either
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x8c") == null); // no ┌
+}
+
+test "subgraph: border color is applied" {
+    const allocator = std.testing.allocator;
+    var layout_ir = try makeSubgraphTestIR(allocator);
+    defer layout_ir.deinit();
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .ansi256,
+        .subgraph_style_fn = &struct {
+            fn f(_: SubgraphStyleContext) TerminalSubgraphStyle {
+                return .{ .color = .{ .ansi256 = 33 } };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // ANSI 256 foreground escape for color 33: \x1b[38;5;033m
+    try std.testing.expect(std.mem.indexOf(u8, output, "\x1b[38;5;033m") != null);
+}
+
+test "subgraph: label_pos inside places label below border" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{ .id = 1, .label = "X", .x = 3, .y = 2, .width = 3, .center_x = 4, .level = 0, .level_position = 0 });
+    try layout_ir.subgraphs.append(allocator, .{ .id = 10, .parent_id = null, .label = "MyLabel", .x = 1, .y = 0, .width = 12, .height = 5 });
+    layout_ir.setDimensions(14, 6);
+
+    // With .inside, label at y+1 — the top border row (y=0) should be pure border chars
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn f(_: SubgraphStyleContext) TerminalSubgraphStyle {
+                return .{ .label_pos = .inside };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "MyLabel") != null);
+}
+
+test "subgraph: label_pos top_center centers label" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{ .id = 1, .label = "X", .x = 5, .y = 2, .width = 3, .center_x = 6, .level = 0, .level_position = 0 });
+    try layout_ir.subgraphs.append(allocator, .{ .id = 10, .parent_id = null, .label = "Hi", .x = 0, .y = 0, .width = 14, .height = 5 });
+    layout_ir.setDimensions(15, 6);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn f(_: SubgraphStyleContext) TerminalSubgraphStyle {
+                return .{ .border = .single, .label_pos = .top_center };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "Hi") != null);
+}
+
+test "subgraph: depthCycled preset varies by depth" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{ .id = 1, .label = "X", .x = 5, .y = 3, .width = 3, .center_x = 6, .level = 0, .level_position = 0 });
+    // Child subgraph first (array convention: deepest first)
+    try layout_ir.subgraphs.append(allocator, .{ .id = 20, .parent_id = 10, .label = "Inner", .x = 2, .y = 1, .width = 12, .height = 6 });
+    // Parent subgraph last
+    try layout_ir.subgraphs.append(allocator, .{ .id = 10, .parent_id = null, .label = "Outer", .x = 0, .y = 0, .width = 16, .height = 8 });
+    layout_ir.setDimensions(17, 9);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .ansi256,
+        .subgraph_style_fn = &config_mod.subgraph_presets.depthCycled,
+    });
+    defer allocator.free(output);
+
+    // Double corners from depth-0 parent (╔)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95\x94") != null);
+    // Single corners from depth-1 child (┌)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x8c") != null);
+    // ANSI 256 colors should be present (depth 0 = 33, depth 1 = 34)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\x1b[38;5;033m") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\x1b[38;5;034m") != null);
+}
+
+test "subgraph: edge crosses single-border subgraph" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{ .id = 1, .label = "A", .x = 3, .y = 0, .width = 3, .center_x = 4, .level = 0, .level_position = 0 });
+    try layout_ir.addNode(.{ .id = 2, .label = "B", .x = 3, .y = 4, .width = 3, .center_x = 4, .level = 1, .level_position = 0 });
+    try layout_ir.subgraphs.append(allocator, .{ .id = 10, .parent_id = null, .label = "", .x = 1, .y = 2, .width = 8, .height = 5 });
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 4,
+        .from_y = 1,
+        .to_x = 4,
+        .to_y = 4,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+    });
+    layout_ir.setDimensions(12, 8);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .subgraph_style_fn = &struct {
+            fn f(_: SubgraphStyleContext) TerminalSubgraphStyle {
+                return .{ .border = .single };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // Edge crosses single border → standard junction ┼ (U+253C)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\xbc") != null);
 }
