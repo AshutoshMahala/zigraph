@@ -62,6 +62,7 @@ pub const Color = config_mod.Color;
 pub const ColorMode = config_mod.ColorMode;
 pub const CellColor = config_mod.CellColor;
 pub const resolveColor = config_mod.resolveColor;
+pub const resolveColorAt = config_mod.resolveColorAt;
 pub const TerminalEdgeStyle = config_mod.TerminalEdgeStyle;
 pub const TerminalNodeStyle = config_mod.TerminalNodeStyle;
 pub const TerminalEdgeLabelStyle = config_mod.TerminalEdgeLabelStyle;
@@ -71,6 +72,7 @@ pub const defaultNodeStyle = config_mod.defaultNodeStyle;
 pub const defaultEdgeLabelStyle = config_mod.defaultEdgeLabelStyle;
 pub const defaultSubgraphStyle = config_mod.defaultSubgraphStyle;
 pub const subgraph_presets = config_mod.subgraph_presets;
+pub const node_presets = config_mod.node_presets;
 
 pub const Buffer2D = buffer_mod.Buffer2D;
 pub const LegendEntry = label_render.LegendEntry;
@@ -182,12 +184,61 @@ pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {
 /// Render a LayoutIR to a Unicode string with configuration.
 pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config: Config) ![]u8 {
     const base_width = layout_ir.getWidth();
-    const height = layout_ir.getHeight();
+    const ir_height = layout_ir.getHeight();
 
-    if (base_width == 0 or height == 0) {
+    if (base_width == 0 or ir_height == 0) {
         const result = try allocator.alloc(u8, 0);
         return result;
     }
+
+    // Arena for style function contexts and coordinate tables (bulk-freed at end)
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const total_edges = layout_ir.getEdges().len;
+    const total_nodes = layout_ir.getNodes().len;
+
+    // ── Y-expansion: compute per-level max rendered height ──────────────
+
+    // Find max level index and collect per-level info
+    var max_level: usize = 0;
+    for (layout_ir.getNodes()) |node| {
+        if (node.level > max_level) max_level = node.level;
+    }
+    const num_levels = max_level + 1;
+
+    const level_ir_ys = try arena.alloc(usize, num_levels);
+    const level_max_height = try arena.alloc(usize, num_levels);
+    @memset(level_ir_ys, 0);
+    @memset(level_max_height, 1);
+
+    // Pass 1: collect level Y positions and max rendered heights
+    for (layout_ir.getNodes()) |node| {
+        level_ir_ys[node.level] = node.y;
+        if (node.kind == .dummy) continue;
+        const node_ctx = NodeStyleContext{
+            .node_id = node.id,
+            .label = node.label,
+            .total_nodes = total_nodes,
+            .width = node.width,
+            .height = 1,
+            .is_implicit = node.kind == .implicit,
+            .arena = arena,
+        };
+        const ns = config.node_style_fn(node_ctx);
+        const h: usize = ns.border.height();
+        if (h > level_max_height[node.level]) level_max_height[node.level] = h;
+    }
+
+    // Build cumulative extra rows: cumulative_extra[L] = total extra rows from levels 0..L-1
+    const cumulative_extra = try arena.alloc(usize, num_levels + 1);
+    cumulative_extra[0] = 0;
+    for (0..num_levels) |l| {
+        cumulative_extra[l + 1] = cumulative_extra[l] + (level_max_height[l] -| 1);
+    }
+    const total_extra = cumulative_extra[num_levels];
+    const height = ir_height + total_extra;
 
     // Check if extra width is needed for self-loop indicators (↺ + label)
     var extra_width: usize = 0;
@@ -211,20 +262,28 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     var buffer = try Buffer2D.init(allocator, width, height);
     defer buffer.deinit(allocator);
 
-    // Arena for style function contexts (bulk-freed at end of render)
-    var arena_state = std.heap.ArenaAllocator.init(allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-
-    const total_edges = layout_ir.getEdges().len;
-    const total_nodes = layout_ir.getNodes().len;
-
-    // Paint subgraph boxes first (background layer)
+    // ── Paint subgraph boxes first (background layer) ───────────────────
     if (config.show_subgraphs) {
-        subgraph_render.paintSubgraphs(&buffer, layout_ir);
+        if (total_extra == 0) {
+            subgraph_render.paintSubgraphs(&buffer, layout_ir);
+        } else {
+            // Transform subgraph Y coordinates for expansion
+            const sgs = layout_ir.subgraphs.items;
+            if (sgs.len > 0) {
+                var idx: usize = sgs.len;
+                while (idx > 0) {
+                    idx -= 1;
+                    const sg = sgs[idx];
+                    const new_y = yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra);
+                    const new_bottom = yTransform(sg.y + sg.height -| 1, num_levels, level_ir_ys, cumulative_extra);
+                    const new_h = new_bottom - new_y + 1;
+                    subgraph_render.paintSubgraphBox(&buffer, sg.x, new_y, sg.width, new_h);
+                }
+            }
+        }
     }
 
-    // Paint all edges (so nodes overwrite them)
+    // ── Paint all edges (so nodes overwrite them) ───────────────────────
     for (layout_ir.getEdges()) |edge| {
         // Build edge style context
         const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
@@ -251,20 +310,34 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         else
             CellColor.none;
 
-        edge_render.paintEdge(&buffer, &edge, edge_color, style.weight, style.marker_end, style.marker_start);
+        if (total_extra == 0) {
+            edge_render.paintEdge(&buffer, &edge, edge_color, style.weight, style.marker_end, style.marker_start);
+        } else {
+            var te = try transformEdge(edge, num_levels, level_ir_ys, cumulative_extra, arena);
+            edge_render.paintEdge(&buffer, &te, edge_color, style.weight, style.marker_end, style.marker_start);
+        }
     }
 
     // For invisible dummy nodes, paint a vertical line at their position
     // and clean up any marker characters to make a continuous line.
+    // When Y-expansion is active, fill the entire level band with verticals.
     if (!config.show_dummy_nodes) {
         for (layout_ir.getNodes()) |node| {
             if (node.kind == .dummy) {
                 const x = node.center_x;
-                const y = node.y;
+                const y = yTransform(node.y, num_levels, level_ir_ys, cumulative_extra);
+                const lh = level_max_height[node.level];
 
-                const current = buffer.get(x, y);
-                const merged = junction_mod.mergeJunction(current, true, true, false, false);
-                buffer.set(x, y, merged);
+                // Fill the entire level band with vertical lines
+                var dy: usize = 0;
+                while (dy < lh) : (dy += 1) {
+                    const row = y + dy;
+                    if (row < height) {
+                        const current = buffer.get(x, row);
+                        const merged = junction_mod.mergeJunction(current, true, true, false, false);
+                        buffer.set(x, row, merged);
+                    }
+                }
 
                 if (y > 0) {
                     const above = buffer.get(x, y - 1);
@@ -272,15 +345,18 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                         buffer.set(x, y - 1, CP_V_LINE);
                     }
                 }
-                const below = buffer.get(x, y + 1);
-                if (junction_mod.isMarkerChar(below)) {
-                    buffer.set(x, y + 1, CP_V_LINE);
+                const band_bottom = y + lh;
+                if (band_bottom < height) {
+                    const below = buffer.get(x, band_bottom);
+                    if (junction_mod.isMarkerChar(below)) {
+                        buffer.set(x, band_bottom, CP_V_LINE);
+                    }
                 }
             }
         }
     }
 
-    // Paint edge labels (between edges and nodes)
+    // ── Paint edge labels (between edges and nodes) ─────────────────────
     var legend_edges: std.ArrayListUnmanaged(LegendEntry) = .{};
     defer legend_edges.deinit(allocator);
 
@@ -312,16 +388,19 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             else
                 CellColor.none;
 
-            if (label_render.canPlaceLabel(&buffer, label, edge.label_x, edge.label_y)) {
-                label_render.paintLabel(&buffer, label, edge.label_x, edge.label_y, edge_color);
+            const lbl_y = yTransform(edge.label_y, num_levels, level_ir_ys, cumulative_extra);
+            if (label_render.canPlaceLabel(&buffer, label, edge.label_x, lbl_y)) {
+                label_render.paintLabel(&buffer, label, edge.label_x, lbl_y, edge_color);
             } else {
                 // Couldn't place — try sliding Y within the edge's vertical span
                 var placed = false;
-                const min_y = edge.from_y + 1;
-                const max_y = if (edge.to_y > 1) edge.to_y - 1 else edge.to_y;
+                const t_from_y = yTransform(edge.from_y, num_levels, level_ir_ys, cumulative_extra);
+                const t_to_y = yTransform(edge.to_y, num_levels, level_ir_ys, cumulative_extra);
+                const min_y = t_from_y + 1;
+                const max_y = if (t_to_y > 1) t_to_y - 1 else t_to_y;
                 var try_y = min_y;
                 while (try_y <= max_y) : (try_y += 1) {
-                    if (try_y == edge.label_y) continue; // Already tried
+                    if (try_y == lbl_y) continue; // Already tried
                     if (label_render.canPlaceLabel(&buffer, label, edge.label_x, try_y)) {
                         label_render.paintLabel(&buffer, label, edge.label_x, try_y, edge_color);
                         placed = true;
@@ -341,10 +420,12 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         }
     }
 
-    // Paint nodes (overwrite edges)
+    // ── Paint nodes (overwrite edges) ───────────────────────────────────
     for (layout_ir.getNodes()) |node| {
+        const rendered_y = yTransform(node.y, num_levels, level_ir_ys, cumulative_extra);
+        const lh = level_max_height[node.level];
         if (node.kind == .dummy) {
-            node_render.paintNode(&buffer, &node, config.show_dummy_nodes, .{});
+            node_render.paintNode(&buffer, &node, config.show_dummy_nodes, .{}, rendered_y, lh);
         } else {
             const node_ctx = NodeStyleContext{
                 .node_id = node.id,
@@ -356,16 +437,31 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                 .arena = arena,
             };
             const node_style = config.node_style_fn(node_ctx);
-            node_render.paintNode(&buffer, &node, config.show_dummy_nodes, node_style);
+            node_render.paintNode(&buffer, &node, config.show_dummy_nodes, node_style, rendered_y, lh);
         }
     }
 
     // Paint subgraph labels last so they're not overwritten by edges/nodes
     if (config.show_subgraphs) {
-        subgraph_render.paintSubgraphLabels(&buffer, layout_ir);
+        if (total_extra == 0) {
+            subgraph_render.paintSubgraphLabels(&buffer, layout_ir);
+        } else {
+            for (layout_ir.subgraphs.items) |sg| {
+                if (sg.label.len == 0) continue;
+                if (sg.width < 4 or sg.height < 3) continue;
+                const max_label_len = sg.width - 4;
+                const display_len = @min(sg.label.len, max_label_len);
+                if (display_len == 0) continue;
+                const label_start = sg.x + 2;
+                const label_y = yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra) + 1;
+                for (sg.label[0..display_len], 0..) |ch, i| {
+                    buffer.set(label_start + i, label_y, @as(u21, ch));
+                }
+            }
+        }
     }
 
-    // Paint self-loop indicators (↺) after nodes
+    // ── Paint self-loop indicators (↺) after nodes ──────────────────────
     for (layout_ir.getEdges()) |edge| {
         if (edge.reversed and edge.from_id == edge.to_id) {
             const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
@@ -391,10 +487,22 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 
             if (layout_ir.nodeById(edge.from_id)) |node| {
                 const loop_x = node.x + node.width; // right after ']'
-                const loop_y = node.y;
-                buffer.setWithColor(loop_x, loop_y, 0x21BA, edge_color); // ↺
-                if (edge.label) |label| {
-                    label_render.paintLabel(&buffer, label, loop_x + 1, loop_y, edge_color);
+                const loop_y = yTransform(node.y, num_levels, level_ir_ys, cumulative_extra);
+                // For 3-row nodes, place ↺ on the label row (middle)
+                const node_ctx = NodeStyleContext{
+                    .node_id = node.id,
+                    .label = node.label,
+                    .total_nodes = total_nodes,
+                    .width = node.width,
+                    .height = 1,
+                    .is_implicit = node.kind == .implicit,
+                    .arena = arena,
+                };
+                const ns = config.node_style_fn(node_ctx);
+                const label_row = if (ns.border.height() == 3) loop_y + 1 else loop_y;
+                buffer.setWithColor(loop_x, label_row, 0x21BA, edge_color); // ↺
+                if (edge.label) |elabel| {
+                    label_render.paintLabel(&buffer, elabel, loop_x + 1, label_row, edge_color);
                 }
             }
         }
@@ -405,11 +513,14 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     errdefer output.deinit(allocator);
     try output.ensureTotalCapacity(allocator, height * (width * 4 + 1));
 
-    var last_color: CellColor = CellColor.none;
+    var last_fg: CellColor = CellColor.none;
+    var last_bg: CellColor = CellColor.none;
+    const has_bg = buffer.hasBgPlane();
 
     for (0..height) |y| {
         const row = buffer.getRow(y);
         const color_row = buffer.getColorRow(y);
+        const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
 
         // Trim trailing spaces
         var end: usize = row.len;
@@ -417,14 +528,33 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             end -= 1;
         }
 
-        // Encode each character with optional color
-        for (row[0..end], color_row[0..end]) |codepoint, cell_color| {
-            if (cell_color.isSet() and !cellColorEql(cell_color, last_color)) {
-                try emitFgEscape(&output, allocator, cell_color, config.color_mode);
-                last_color = cell_color;
-            } else if (!cell_color.isSet() and last_color.isSet()) {
-                try output.appendSlice(allocator, colors.escape.reset);
-                last_color = CellColor.none;
+        // Encode each character with optional fg + bg color
+        for (0..end) |xi| {
+            const codepoint = row[xi];
+
+            if (config.color_mode != .none) {
+                const cell_fg = color_row[xi];
+                const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
+
+                // Foreground escape
+                if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
+                    try emitFgEscape(&output, allocator, cell_fg, config.color_mode);
+                    last_fg = cell_fg;
+                } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                    try output.appendSlice(allocator, colors.escape.reset);
+                    last_fg = CellColor.none;
+                    last_bg = CellColor.none; // reset clears both
+                }
+
+                // Background escape
+                if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
+                    try emitBgEscape(&output, allocator, cell_bg, config.color_mode);
+                    last_bg = cell_bg;
+                } else if (!cell_bg.isSet() and last_bg.isSet()) {
+                    // Need to clear bg without resetting fg — use bg default
+                    try output.appendSlice(allocator, "\x1b[49m");
+                    last_bg = CellColor.none;
+                }
             }
 
             var buf: [4]u8 = undefined;
@@ -432,9 +562,10 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             try output.appendSlice(allocator, buf[0..len]);
         }
 
-        if (last_color.isSet()) {
+        if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet())) {
             try output.appendSlice(allocator, colors.escape.reset);
-            last_color = CellColor.none;
+            last_fg = CellColor.none;
+            last_bg = CellColor.none;
         }
 
         try output.append(allocator, '\n');
@@ -449,7 +580,7 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             const from_label = if (layout_ir.nodeById(entry.from_id)) |n| n.label else "?";
             const to_label = if (layout_ir.nodeById(entry.to_id)) |n| n.label else "?";
 
-            if (entry.color.isSet()) {
+            if (config.color_mode != .none and entry.color.isSet()) {
                 try emitFgEscape(&output, allocator, entry.color, config.color_mode);
             }
 
@@ -460,7 +591,7 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             try output.appendSlice(allocator, entry.label);
             try output.appendSlice(allocator, "\"");
 
-            if (entry.color.isSet()) {
+            if (config.color_mode != .none and entry.color.isSet()) {
                 try output.appendSlice(allocator, colors.escape.reset);
             }
             try output.append(allocator, '\n');
@@ -473,6 +604,7 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
 // ── Color serialization helpers ─────────────────────────────────────────────
 
 fn cellColorEql(a: CellColor, b: CellColor) bool {
+    // Compare packed u32 representation directly for identity check
     return @as(u32, @bitCast(a)) == @as(u32, @bitCast(b));
 }
 
@@ -508,4 +640,100 @@ fn emitFgEscape(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: C
             else => {},
         },
     }
+}
+
+/// Emit a background color escape sequence, mirroring `emitFgEscape`.
+fn emitBgEscape(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor, mode: ColorMode) !void {
+    switch (mode) {
+        .none => {},
+        .ansi256 => switch (cc.tag) {
+            .ansi => {
+                const seq = colors.escape.bg256(cc.ansiIndex());
+                try output.appendSlice(allocator, &seq);
+            },
+            .rgb => {
+                const idx = colors.rgbToAnsi256(cc.r(), cc.g(), cc.b());
+                const seq = colors.escape.bg256(idx);
+                try output.appendSlice(allocator, &seq);
+            },
+            else => {},
+        },
+        .truecolor => switch (cc.tag) {
+            .rgb => {
+                const seq = colors.escape.bgRgb(cc.r(), cc.g(), cc.b());
+                try output.appendSlice(allocator, &seq);
+            },
+            .ansi => {
+                const rgb_val = colors.ansi256ToRgb(cc.ansiIndex());
+                const seq = colors.escape.bgRgb(rgb_val.r, rgb_val.g, rgb_val.b);
+                try output.appendSlice(allocator, &seq);
+            },
+            else => {},
+        },
+    }
+}
+
+// ── Y-expansion helpers ─────────────────────────────────────────────────────
+
+const EdgePath = ir_mod.EdgePath(usize);
+const LayoutEdge = ir_mod.LayoutEdge(usize);
+
+/// Map an IR Y coordinate to the rendered Y coordinate, accounting for
+/// level expansion from 3-row node borders.
+///
+/// For a Y that sits exactly at a level's IR position, the offset is the
+/// cumulative expansion from all *previous* levels. For a Y in a gap between
+/// levels, the offset includes the expansion from the level above the gap.
+fn yTransform(ir_y: usize, num_levels: usize, level_ir_ys: []const usize, cumulative_extra: []const usize) usize {
+    // Find the last level whose Y <= ir_y
+    var l: usize = 0;
+    while (l < num_levels and level_ir_ys[l] <= ir_y) : (l += 1) {}
+    // l = first level with Y > ir_y (or num_levels)
+    if (l == 0) return ir_y; // Before the first level — no expansion
+    l -= 1;
+    if (ir_y == level_ir_ys[l]) {
+        // Exactly at this level
+        return ir_y + cumulative_extra[l];
+    } else {
+        // In the gap after level l — include l's expansion
+        return ir_y + cumulative_extra[l + 1];
+    }
+}
+
+/// Create a stack copy of an edge with all Y coordinates transformed.
+/// The path union is copied by value (slices point at original data).
+/// For multi_segment paths, waypoints are cloned with transformed Y values.
+fn transformEdge(edge: LayoutEdge, num_levels: usize, level_ir_ys: []const usize, cumulative_extra: []const usize, arena: Allocator) !LayoutEdge {
+    var e = edge;
+    e.from_y = yTransform(edge.from_y, num_levels, level_ir_ys, cumulative_extra);
+    e.to_y = yTransform(edge.to_y, num_levels, level_ir_ys, cumulative_extra);
+    e.label_y = yTransform(edge.label_y, num_levels, level_ir_ys, cumulative_extra);
+    switch (e.path) {
+        .direct => {},
+        .corner => |*c| {
+            c.horizontal_y = yTransform(c.horizontal_y, num_levels, level_ir_ys, cumulative_extra);
+        },
+        .side_channel => |*sc| {
+            sc.start_y = yTransform(sc.start_y, num_levels, level_ir_ys, cumulative_extra);
+            sc.end_y = yTransform(sc.end_y, num_levels, level_ir_ys, cumulative_extra);
+        },
+        .multi_segment => |ms| {
+            const wp = try arena.alloc(EdgePath.Waypoint, ms.waypoints.items.len);
+            for (ms.waypoints.items, 0..) |pt, i| {
+                wp[i] = .{ .x = pt.x, .y = yTransform(pt.y, num_levels, level_ir_ys, cumulative_extra) };
+            }
+            // Replace the waypoints slice in the copy with the transformed version.
+            // We can't directly reassign the ArrayListUnmanaged, so we overwrite
+            // items pointer and len via the underlying structure.
+            e.path = .{ .multi_segment = .{
+                .waypoints = .{ .items = wp, .capacity = wp.len },
+                .allocator = ms.allocator,
+            } };
+        },
+        .spline => |*sp| {
+            sp.cp1_y = yTransform(sp.cp1_y, num_levels, level_ir_ys, cumulative_extra);
+            sp.cp2_y = yTransform(sp.cp2_y, num_levels, level_ir_ys, cumulative_extra);
+        },
+    }
+    return e;
 }

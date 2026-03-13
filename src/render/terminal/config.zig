@@ -15,6 +15,7 @@
 //! `resolveColor()` and stores it in the buffer. At serialization time, `ColorMode`
 //! determines whether to emit ANSI 256 or truecolor escape sequences.
 
+const std = @import("std");
 const types = @import("../types.zig");
 const colormaps = @import("../color/colormaps.zig");
 
@@ -41,14 +42,13 @@ pub const Color = union(enum) {
     default, // terminal default (no escape emitted)
     ansi256: u8, // ANSI 256 index (0-255)
     rgb: Rgb, // 24-bit true color
-    gradient: GradientSpec, // per-cell color from a colormap (resolved in Topic 9)
+    gradient: GradientSpec, // per-cell color from a colormap
 
     pub const Rgb = struct { r: u8, g: u8, b: u8 };
 };
 
-/// Gradient specification — references a colormap and a range within it.
-/// Actual per-cell sampling is deferred to the plan+single-pass pipeline (Topic 9).
-/// Currently resolves to `.default` (no color).
+/// Gradient specification — references a colormap and a [from, to] range.
+/// Resolved per-cell via `resolveColorAt()` during node/edge painting.
 pub const GradientSpec = struct {
     map: *const colormaps.ColorMap,
     from: f32 = 0.0,
@@ -105,12 +105,31 @@ pub const CellColor = packed struct(u32) {
 };
 
 /// Convert a user-facing `Color` to compact `CellColor` for buffer storage.
+/// For gradients this returns `.none` — use `resolveColorAt` with a position instead.
 pub fn resolveColor(color: Color) CellColor {
     return switch (color) {
         .default => CellColor.none,
         .ansi256 => |v| CellColor.ansi256(v),
         .rgb => |v| CellColor.rgb(v.r, v.g, v.b),
-        .gradient => CellColor.none, // per-cell gradient deferred to plan+single-pass (Topic 9)
+        .gradient => CellColor.none,
+    };
+}
+
+/// Resolve a `Color` at a normalized position `t` (0.0–1.0) within a span.
+/// Flat colors ignore `t`. Gradients sample the colormap at the mapped position.
+pub fn resolveColorAt(color: Color, t: f32) CellColor {
+    return switch (color) {
+        .default => CellColor.none,
+        .ansi256 => |v| CellColor.ansi256(v),
+        .rgb => |v| CellColor.rgb(v.r, v.g, v.b),
+        .gradient => |g| blk: {
+            const mapped = g.from + (g.to - g.from) * std.math.clamp(t, 0.0, 1.0);
+            const c = g.map.sample(mapped);
+            const rb: u8 = @intFromFloat(@round(std.math.clamp(c.r, 0.0, 1.0) * 255.0));
+            const gb: u8 = @intFromFloat(@round(std.math.clamp(c.g, 0.0, 1.0) * 255.0));
+            const bb: u8 = @intFromFloat(@round(std.math.clamp(c.b, 0.0, 1.0) * 255.0));
+            break :blk CellColor.rgb(rb, gb, bb);
+        },
     };
 }
 
@@ -142,17 +161,54 @@ pub const NodeBorder = enum {
     angle, // <label>  (implicit default)
     none, //  label
 
-    // 3-row variants
+    // 3-row closed variants (all four corners)
     single_box, // ┌─┐ │ │ └─┘
     heavy_box, // ┏━┓ ┃ ┃ ┗━┛
     double_box, // ╔═╗ ║ ║ ╚═╝
     rounded_box, // ╭─╮ │ │ ╰─╯
-    open_box, // ┌── │   ──┘
+
+    // 3-row open variants (TL + BR corners only — implicit feel)
+    open_single, // ┌── │ │  ──┘
+    open_heavy, // ┏━━ ┃ ┃  ━━┛
+    open_double, // ╔══ ║ ║  ══╝
+    open_rounded, // ╭── │ │  ──╯
 
     pub fn height(self: NodeBorder) u8 {
         return switch (self) {
             .bracket, .angle, .none => 1,
-            .single_box, .heavy_box, .double_box, .rounded_box, .open_box => 3,
+            .single_box,
+            .heavy_box,
+            .double_box,
+            .rounded_box,
+            .open_single,
+            .open_heavy,
+            .open_double,
+            .open_rounded,
+            => 3,
+        };
+    }
+
+    /// Return the open (implicit) counterpart of a closed box style.
+    /// 1-row styles return `.angle`; open styles return themselves.
+    pub fn openVariant(self: NodeBorder) NodeBorder {
+        return switch (self) {
+            .bracket, .angle, .none => .angle,
+            .single_box, .open_single => .open_single,
+            .heavy_box, .open_heavy => .open_heavy,
+            .double_box, .open_double => .open_double,
+            .rounded_box, .open_rounded => .open_rounded,
+        };
+    }
+
+    /// Return the closed (explicit) counterpart of an open box style.
+    /// 1-row styles return `.bracket`; closed styles return themselves.
+    pub fn closedVariant(self: NodeBorder) NodeBorder {
+        return switch (self) {
+            .bracket, .angle, .none => .bracket,
+            .single_box, .open_single => .single_box,
+            .heavy_box, .open_heavy => .heavy_box,
+            .double_box, .open_double => .double_box,
+            .rounded_box, .open_rounded => .rounded_box,
         };
     }
 };
@@ -190,9 +246,15 @@ pub const TerminalEdgeStyle = struct {
 };
 
 /// Style returned by `node_style_fn` for each node.
+///
+/// Colors: `border_color` applies to box-drawing chars, `text_color` to the
+/// label text, `bg_color` to the cell background behind the node. Any of
+/// these can be a gradient — per-cell sampling happens automatically.
+/// When `.default`, no escape is emitted (terminal default colors).
 pub const TerminalNodeStyle = struct {
     border: NodeBorder = .bracket,
-    fg_color: Color = .default,
+    border_color: Color = .default,
+    text_color: Color = .default,
     bg_color: Color = .default,
     attrs: TextAttrs = .{},
 };
@@ -241,6 +303,27 @@ pub const subgraph_presets = struct {
             .border = borders[ctx.depth % borders.len],
             .color = .{ .ansi256 = palette[ctx.depth % palette.len] },
         };
+    }
+};
+
+// ── Node style presets ──────────────────────────────────────────────────────
+
+pub const node_presets = struct {
+    /// 3-row single box: explicit = ┌─┐│ │└─┘, implicit = ┌── │ │  ──┘
+    pub fn singleBox(ctx: NodeStyleContext) TerminalNodeStyle {
+        return .{ .border = if (ctx.is_implicit) .open_single else .single_box };
+    }
+    /// 3-row heavy box: explicit = ┏━┓┃ ┃┗━┛, implicit = ┏━━ ┃ ┃  ━━┛
+    pub fn heavyBox(ctx: NodeStyleContext) TerminalNodeStyle {
+        return .{ .border = if (ctx.is_implicit) .open_heavy else .heavy_box };
+    }
+    /// 3-row double box: explicit = ╔═╗║ ║╚═╝, implicit = ╔══ ║ ║  ══╝
+    pub fn doubleBox(ctx: NodeStyleContext) TerminalNodeStyle {
+        return .{ .border = if (ctx.is_implicit) .open_double else .double_box };
+    }
+    /// 3-row rounded box: explicit = ╭─╮│ │╰─╯, implicit = ╭── │ │  ──╯
+    pub fn roundedBox(ctx: NodeStyleContext) TerminalNodeStyle {
+        return .{ .border = if (ctx.is_implicit) .open_rounded else .rounded_box };
     }
 };
 

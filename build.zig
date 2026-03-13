@@ -396,6 +396,25 @@ pub fn build(b: *std.Build) void {
     const run_dummy_visibility_step = b.step("run-dummy", "Run dummy visibility example");
     run_dummy_visibility_step.dependOn(&run_dummy_visibility.step);
 
+    // Terminal node control example
+    const terminal_node_control_mod = b.addModule("terminal_node_control", .{
+        .root_source_file = b.path("examples/terminal/node_control.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_node_control_exe = b.addExecutable(.{
+        .name = "terminal_node_control",
+        .root_module = terminal_node_control_mod,
+    });
+    b.installArtifact(terminal_node_control_exe);
+
+    const run_terminal_node_control = b.addRunArtifact(terminal_node_control_exe);
+    const run_terminal_node_control_step = b.step("run-terminal-node-control", "Run terminal node control example");
+    run_terminal_node_control_step.dependOn(&run_terminal_node_control.step);
+
     // Generate README assets (all hero formats)
     const generate_assets_example = b.addModule("generate_assets_example", .{
         .root_source_file = b.path("examples/generate_assets.zig"),

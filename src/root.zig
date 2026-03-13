@@ -201,6 +201,7 @@ pub const TerminalColor = terminal.Color;
 pub const TerminalColorMode = terminal.ColorMode;
 pub const TerminalCellColor = terminal.CellColor;
 pub const terminal_subgraph_presets = terminal.subgraph_presets;
+pub const terminal_node_presets = terminal.node_presets;
 
 // ============================================================================
 // Layout configuration

@@ -208,15 +208,24 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color
 
     // Vertical from horizontal to target
     y = h_y + 1;
+    var placed_arrow = false;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
             if (markerChar(marker_end, .down)) |ch| {
                 buffer.setWithColor(x2, y, ch, color);
+                placed_arrow = true;
             } else {
                 drawLineCell(buffer, x2, y, true, color, arm);
             }
         } else {
             drawLineCell(buffer, x2, y, true, color, arm);
+        }
+    }
+    // When h_y is directly above target (no room for arrow in the vertical
+    // segment), place the arrow at the corner position.
+    if (!placed_arrow and !edge.reversed and edge.directed and h_y + 1 >= edge.to_y) {
+        if (markerChar(marker_end, .down)) |ch| {
+            buffer.setWithColor(x2, h_y, ch, color);
         }
     }
 }
@@ -269,15 +278,23 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
 
     // Vertical from end_y to target
     y = end_y + 1;
+    var placed_sc_arrow = false;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
             if (markerChar(marker_end, .down)) |ch| {
                 buffer.setWithColor(x2, y, ch, color);
+                placed_sc_arrow = true;
             } else {
                 drawLineCell(buffer, x2, y, true, color, arm);
             }
         } else {
             drawLineCell(buffer, x2, y, true, color, arm);
+        }
+    }
+    // When end_y is directly above target, place arrow at corner position.
+    if (!placed_sc_arrow and !edge.reversed and edge.directed and end_y + 1 >= edge.to_y) {
+        if (markerChar(marker_end, .down)) |ch| {
+            buffer.setWithColor(x2, end_y, ch, color);
         }
     }
 }
@@ -330,15 +347,23 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Cell
 
     // Vertical from horizontal to target
     y = h_y + 1;
+    var placed_ms_arrow = false;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
             if (markerChar(marker_end, .down)) |ch| {
                 buffer.setWithColor(x2, y, ch, color);
+                placed_ms_arrow = true;
             } else {
                 drawLineCell(buffer, x2, y, true, color, arm);
             }
         } else {
             drawLineCell(buffer, x2, y, true, color, arm);
+        }
+    }
+    // When h_y is directly above target, place arrow at corner position.
+    if (!placed_ms_arrow and !edge.reversed and edge.directed and h_y + 1 >= edge.to_y) {
+        if (markerChar(marker_end, .down)) |ch| {
+            buffer.setWithColor(x2, h_y, ch, color);
         }
     }
 }
