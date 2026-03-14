@@ -36,6 +36,18 @@ pub const ColorMode = enum {
     truecolor, // \e[38;2;R;G;Bm — modern terminals
 };
 
+/// Character set used for buffer serialization.
+pub const CharSet = enum {
+    unicode, // Box-drawing characters (default): ┌ ─ ┐ │ └ ┘ ├ ┤ ┬ ┴ ┼
+    ascii, // ASCII fallback:                     + - + | + + + + + + +
+};
+
+/// Output serialization format.
+pub const OutputFormat = enum {
+    raw, // Plain text with optional ANSI escapes (terminal output)
+    html_pre, // <pre> block with <span style="..."> for colors
+};
+
 /// User-facing color specification returned by style functions.
 /// Converted to `CellColor` at buffer-write time via `resolveColor()`.
 pub const Color = union(enum) {
@@ -351,6 +363,15 @@ pub const Config = struct {
 
     /// Output color encoding mode.
     color_mode: ColorMode = .ansi256,
+
+    /// Character set for output. `.ascii` maps box-drawing to ASCII equivalents.
+    char_set: CharSet = .unicode,
+
+    /// Serialization format. `.html_pre` emits styled HTML instead of ANSI escapes.
+    output_format: OutputFormat = .raw,
+
+    /// CSS style string for the `<pre>` wrapper when `output_format = .html_pre`.
+    html_pre_style: []const u8 = "font-family:monospace;line-height:1.2",
 
     /// Per-edge style function — returns line weight, color, markers.
     edge_style_fn: *const fn (EdgeStyleContext) TerminalEdgeStyle = &defaultEdgeStyle,

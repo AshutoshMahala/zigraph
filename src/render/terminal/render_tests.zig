@@ -10,6 +10,8 @@ const renderWithConfig = mod.renderWithConfig;
 const mergeJunction = mod.mergeJunction;
 const Config = mod.Config;
 const Color = mod.Color;
+const CharSet = mod.CharSet;
+const OutputFormat = mod.OutputFormat;
 const CellColor = mod.CellColor;
 const resolveColorAt = mod.resolveColorAt;
 const Buffer2D = mod.Buffer2D;
@@ -1243,4 +1245,396 @@ test "subgraph: edge crosses single-border subgraph" {
 
     // Edge crosses single border → standard junction ┼ (U+253C)
     try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\xbc") != null);
+}
+
+// ── Output format tests ─────────────────────────────────────────────────────
+
+test "ASCII charset: box-drawing mapped to +, -, |" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 3,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
+    });
+
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .reversed = false,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 1,
+        .to_y = 3,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+    });
+    layout_ir.setDimensions(4, 4);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .char_set = .ascii,
+        .color_mode = .none,
+    });
+    defer allocator.free(output);
+
+    // Should contain ASCII brackets [A] and pipes | for edges, no box-drawing
+    try std.testing.expect(std.mem.indexOf(u8, output, "[A]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "|") != null);
+    // Should NOT contain any Unicode box-drawing (codepoint >= 0x2500)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94") == null); // U+250x range
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x95") == null); // U+254x range
+}
+
+test "ASCII charset: arrows mapped to v, ^" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 3,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
+    });
+
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .reversed = false,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 1,
+        .to_y = 3,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+    });
+    layout_ir.setDimensions(4, 4);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .char_set = .ascii,
+        .color_mode = .none,
+    });
+    defer allocator.free(output);
+
+    // Arrow should be 'v' not '↓' — check it appears as the last char on a trimmed line
+    try std.testing.expect(std.mem.indexOf(u8, output, "v\n") != null);
+    // Should NOT contain Unicode arrow ↓ (U+2193 = \xe2\x86\x93)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x86\x93") == null);
+}
+
+test "HTML output: wraps in <pre> and contains <span>" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 3,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
+    });
+
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .reversed = false,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 1,
+        .to_y = 3,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+    });
+    layout_ir.setDimensions(4, 4);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .output_format = .html_pre,
+        .color_mode = .ansi256,
+        .edge_palette = &[_]u8{196}, // red
+    });
+    defer allocator.free(output);
+
+    // Must start with <pre> and end with </pre>
+    try std.testing.expect(std.mem.startsWith(u8, output, "<pre style=\""));
+    try std.testing.expect(std.mem.indexOf(u8, output, "</pre>") != null);
+    // Must contain <span style="color: for the colored edge
+    try std.testing.expect(std.mem.indexOf(u8, output, "<span style=\"color:#") != null);
+    // Must NOT contain ANSI escape sequences
+    try std.testing.expect(std.mem.indexOf(u8, output, "\x1b[") == null);
+}
+
+test "HTML output: HTML-escapes special characters" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    // Use a label with < and > characters
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "<A>",
+        .x = 0,
+        .y = 0,
+        .width = 5,
+        .center_x = 2,
+        .level = 0,
+        .level_position = 0,
+        .kind = .implicit,
+    });
+    layout_ir.setDimensions(6, 1);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .output_format = .html_pre,
+        .color_mode = .none,
+    });
+    defer allocator.free(output);
+
+    // The < and > in the label should be HTML-escaped
+    try std.testing.expect(std.mem.indexOf(u8, output, "&lt;A&gt;") != null);
+}
+
+test "toAscii: box-drawing decomposition" {
+    const toAscii = @import("junctions.zig").toAscii;
+
+    // Lines
+    try std.testing.expectEqual(@as(u21, '|'), toAscii('\u{2502}')); // │
+    try std.testing.expectEqual(@as(u21, '-'), toAscii('\u{2500}')); // ─
+    try std.testing.expectEqual(@as(u21, '|'), toAscii('\u{2503}')); // ┃ heavy vertical
+    try std.testing.expectEqual(@as(u21, '-'), toAscii('\u{2501}')); // ━ heavy horizontal
+    try std.testing.expectEqual(@as(u21, '='), toAscii('\u{2550}')); // ═ double horizontal
+    try std.testing.expectEqual(@as(u21, '|'), toAscii('\u{2551}')); // ║ double vertical
+
+    // Corners → +
+    try std.testing.expectEqual(@as(u21, '+'), toAscii('\u{250C}')); // ┌
+    try std.testing.expectEqual(@as(u21, '+'), toAscii('\u{2510}')); // ┐
+    try std.testing.expectEqual(@as(u21, '+'), toAscii('\u{2514}')); // └
+    try std.testing.expectEqual(@as(u21, '+'), toAscii('\u{2518}')); // ┘
+    try std.testing.expectEqual(@as(u21, '+'), toAscii('\u{2554}')); // ╔
+    try std.testing.expectEqual(@as(u21, '+'), toAscii('\u{253C}')); // ┼
+
+    // Arrows
+    try std.testing.expectEqual(@as(u21, 'v'), toAscii('\u{2193}')); // ↓
+    try std.testing.expectEqual(@as(u21, '^'), toAscii('\u{2191}')); // ↑
+    try std.testing.expectEqual(@as(u21, '>'), toAscii('\u{2192}')); // →
+    try std.testing.expectEqual(@as(u21, '<'), toAscii('\u{2190}')); // ←
+    try std.testing.expectEqual(@as(u21, 'v'), toAscii('\u{25BC}')); // ▼
+    try std.testing.expectEqual(@as(u21, '*'), toAscii('\u{25C6}')); // ◆
+    try std.testing.expectEqual(@as(u21, 'o'), toAscii('\u{25CB}')); // ○
+
+    // ASCII passthrough
+    try std.testing.expectEqual(@as(u21, 'A'), toAscii('A'));
+    try std.testing.expectEqual(@as(u21, ' '), toAscii(' '));
+}
+
+test "HTML output: no spans when color_mode is none" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "X",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    layout_ir.setDimensions(3, 1);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .output_format = .html_pre,
+        .color_mode = .none,
+    });
+    defer allocator.free(output);
+
+    // Should have <pre> wrapper but NO <span> tags since color is disabled
+    try std.testing.expect(std.mem.startsWith(u8, output, "<pre style=\""));
+    try std.testing.expect(std.mem.indexOf(u8, output, "</pre>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "<span") == null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "[X]") != null);
+}
+
+test "HTML output: legend with edge labels" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 6,
+        .y = 0,
+        .width = 3,
+        .center_x = 7,
+        .level = 0,
+        .level_position = 1,
+    });
+
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .reversed = false,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 7,
+        .to_y = 0,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+        .label = "depends",
+    });
+    layout_ir.setDimensions(10, 1);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .output_format = .html_pre,
+        .color_mode = .none,
+    });
+    defer allocator.free(output);
+
+    // Legend should contain HTML-escaped arrow and quoted label
+    try std.testing.expect(std.mem.indexOf(u8, output, "Edge labels:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "&quot;depends&quot;") != null);
+    // Should use → (raw UTF-8, not ANSI-escaped) in legend
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x86\x92") != null);
+}
+
+test "HTML output: custom pre style" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "Z",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    layout_ir.setDimensions(3, 1);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .output_format = .html_pre,
+        .color_mode = .none,
+        .html_pre_style = "font-family:'Fira Code',monospace;font-size:14px",
+    });
+    defer allocator.free(output);
+
+    try std.testing.expect(std.mem.indexOf(u8, output, "font-family:'Fira Code',monospace;font-size:14px") != null);
+}
+
+test "HTML output: html_pre_style rejects double quote" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "X",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    layout_ir.setDimensions(3, 1);
+
+    const result = renderWithConfig(&layout_ir, allocator, .{
+        .output_format = .html_pre,
+        .color_mode = .none,
+        .html_pre_style = "color:red\" onclick=\"alert(1)",
+    });
+    try std.testing.expectError(error.InvalidHtmlPreStyle, result);
+}
+
+test "HTML output: html_pre_style rejects angle brackets" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "X",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    layout_ir.setDimensions(3, 1);
+
+    const result = renderWithConfig(&layout_ir, allocator, .{
+        .output_format = .html_pre,
+        .color_mode = .none,
+        .html_pre_style = "><script>alert(1)</script>",
+    });
+    try std.testing.expectError(error.InvalidHtmlPreStyle, result);
 }

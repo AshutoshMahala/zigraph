@@ -377,6 +377,25 @@ pub fn build(b: *std.Build) void {
     const run_subgraph_step = b.step("run-subgraph", "Run subgraph demo example");
     run_subgraph_step.dependOn(&run_subgraph.step);
 
+    // Output format variants example
+    const output_formats_example = b.addModule("output_formats_example", .{
+        .root_source_file = b.path("examples/terminal/output_formats.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const output_formats_exe = b.addExecutable(.{
+        .name = "output_formats",
+        .root_module = output_formats_example,
+    });
+    b.installArtifact(output_formats_exe);
+
+    const run_output_formats = b.addRunArtifact(output_formats_exe);
+    const run_output_formats_step = b.step("run-output-formats", "Run output format variants example");
+    run_output_formats_step.dependOn(&run_output_formats.step);
+
     // Dummy visibility example
     const dummy_visibility_example = b.addModule("dummy_visibility_example", .{
         .root_source_file = b.path("examples/dummy_visibility.zig"),

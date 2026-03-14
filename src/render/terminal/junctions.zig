@@ -230,6 +230,48 @@ pub const CP_MIX_T_LEFT_DV: u21 = CP_MD_T_LEFT_DV; // ╡
 
 // ── Character decomposition and lookup ───────────────────────────────────────
 
+/// Map a Unicode codepoint to its ASCII equivalent for `.ascii` char_set.
+/// Box-drawing characters are classified via arm decomposition:
+///   corners / T-junctions / crossings → '+'
+///   horizontal lines → '-' (or '=' for double weight)
+///   vertical lines → '|'
+/// Arrows, markers, and other special characters have explicit mappings.
+/// Non-box-drawing characters pass through unchanged.
+pub fn toAscii(cp: u21) u21 {
+    // Fast path: already ASCII
+    if (cp < 128) return cp;
+
+    // Arrows and markers
+    return switch (cp) {
+        '\u{2193}', '\u{25BC}', '\u{25BD}', '\u{21E3}' => 'v', // ↓ ▼ ▽ ⇣
+        '\u{2191}', '\u{25B2}', '\u{25B3}', '\u{21E1}' => '^', // ↑ ▲ △ ⇡
+        '\u{2192}', '\u{25B6}', '\u{25B7}', '\u{21E2}' => '>', // → ▶ ▷ ⇢
+        '\u{2190}', '\u{25C0}', '\u{25C1}', '\u{21E0}' => '<', // ← ◀ ◁ ⇠
+        '\u{25C6}', '\u{25C7}' => '*', // ◆ ◇
+        '\u{25CF}', '\u{25CB}' => 'o', // ● ○
+        0x21BA => '@', // ↺ self-loop (@ suggests circular/self-referencing)
+        else => blk: {
+            // Box-drawing: decompose into directional arm weights
+            const dw = decomposeChar(cp);
+            const has_up = dw.up != .none;
+            const has_down = dw.down != .none;
+            const has_left = dw.left != .none;
+            const has_right = dw.right != .none;
+            const vert: u2 = @as(u2, @intFromBool(has_up)) + @intFromBool(has_down);
+            const horiz: u2 = @as(u2, @intFromBool(has_left)) + @intFromBool(has_right);
+
+            if (@as(u3, vert) + horiz == 0) break :blk cp; // not a recognized box char
+            if (vert > 0 and horiz > 0) break :blk '+'; // corner, T, or cross
+            if (horiz > 0) {
+                // Horizontal line — use '=' for double weight
+                if (dw.left == .double or dw.right == .double) break :blk '=';
+                break :blk '-';
+            }
+            break :blk '|'; // vertical line
+        },
+    };
+}
+
 /// Check if a character has any double-weight arm (pure double or mixed light↔double).
 /// NOTE: only detects double-line characters. For other border weights (single,
 /// heavy, dashed), a broader predicate will be introduced with the scanline

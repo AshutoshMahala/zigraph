@@ -61,6 +61,8 @@ pub const SubgraphBorder = config_mod.SubgraphBorder;
 pub const LabelPosition = config_mod.LabelPosition;
 pub const Color = config_mod.Color;
 pub const ColorMode = config_mod.ColorMode;
+pub const CharSet = config_mod.CharSet;
+pub const OutputFormat = config_mod.OutputFormat;
 pub const CellColor = config_mod.CellColor;
 pub const resolveColor = config_mod.resolveColor;
 pub const resolveColorAt = config_mod.resolveColorAt;
@@ -83,6 +85,7 @@ pub const mergeJunction = junction_mod.mergeJunction;
 pub const mergeJunctionWeighted = junction_mod.mergeJunctionWeighted;
 pub const mergeWithDoubleLine = junction_mod.mergeWithDoubleLine;
 pub const isDoubleBorderChar = junction_mod.isDoubleBorderChar;
+pub const toAscii = junction_mod.toAscii;
 pub const isMarkerChar = junction_mod.isMarkerChar;
 pub const ArmWeight = junction_mod.ArmWeight;
 pub const DirWeights = junction_mod.DirWeights;
@@ -525,94 +528,130 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
         }
     }
 
-    // Convert to UTF-8 string with optional ANSI color escapes
+    // ── Serialization: convert Buffer2D → output bytes ──────────────────────
     var output: std.ArrayListUnmanaged(u8) = .{};
     errdefer output.deinit(allocator);
-    try output.ensureTotalCapacity(allocator, height * (width * 4 + 1));
+    const capacity_per_cell: usize = if (config.output_format == .html_pre) 40 else 4;
+    try output.ensureTotalCapacity(allocator, height * (width * capacity_per_cell + 1));
 
-    var last_fg: CellColor = CellColor.none;
-    var last_bg: CellColor = CellColor.none;
-    const has_bg = buffer.hasBgPlane();
+    const use_ascii = config.char_set == .ascii;
 
-    for (0..height) |y| {
-        const row = buffer.getRow(y);
-        const color_row = buffer.getColorRow(y);
-        const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
+    switch (config.output_format) {
+        .raw => {
+            var last_fg: CellColor = CellColor.none;
+            var last_bg: CellColor = CellColor.none;
+            const has_bg = buffer.hasBgPlane();
 
-        // Trim trailing spaces
-        var end: usize = row.len;
-        while (end > 0 and row[end - 1] == ' ') {
-            end -= 1;
-        }
+            for (0..height) |y| {
+                const row = buffer.getRow(y);
+                const color_row = buffer.getColorRow(y);
+                const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
 
-        // Encode each character with optional fg + bg color
-        for (0..end) |xi| {
-            const codepoint = row[xi];
+                var end: usize = row.len;
+                while (end > 0 and row[end - 1] == ' ') {
+                    end -= 1;
+                }
 
-            if (config.color_mode != .none) {
-                const cell_fg = color_row[xi];
-                const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
+                for (0..end) |xi| {
+                    const codepoint = if (use_ascii) junction_mod.toAscii(row[xi]) else row[xi];
 
-                // Foreground escape
-                if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
-                    try emitFgEscape(&output, allocator, cell_fg, config.color_mode);
-                    last_fg = cell_fg;
-                } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                    if (config.color_mode != .none) {
+                        const cell_fg = color_row[xi];
+                        const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
+
+                        if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
+                            try emitFgEscape(&output, allocator, cell_fg, config.color_mode);
+                            last_fg = cell_fg;
+                        } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                            try output.appendSlice(allocator, colors.escape.reset);
+                            last_fg = CellColor.none;
+                            last_bg = CellColor.none;
+                        }
+
+                        if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
+                            try emitBgEscape(&output, allocator, cell_bg, config.color_mode);
+                            last_bg = cell_bg;
+                        } else if (!cell_bg.isSet() and last_bg.isSet()) {
+                            try output.appendSlice(allocator, "\x1b[49m");
+                            last_bg = CellColor.none;
+                        }
+                    }
+
+                    var buf: [4]u8 = undefined;
+                    const len = std.unicode.utf8Encode(codepoint, &buf) catch 1;
+                    try output.appendSlice(allocator, buf[0..len]);
+                }
+
+                if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet())) {
                     try output.appendSlice(allocator, colors.escape.reset);
                     last_fg = CellColor.none;
-                    last_bg = CellColor.none; // reset clears both
-                }
-
-                // Background escape
-                if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
-                    try emitBgEscape(&output, allocator, cell_bg, config.color_mode);
-                    last_bg = cell_bg;
-                } else if (!cell_bg.isSet() and last_bg.isSet()) {
-                    // Need to clear bg without resetting fg — use bg default
-                    try output.appendSlice(allocator, "\x1b[49m");
                     last_bg = CellColor.none;
                 }
+
+                try output.append(allocator, '\n');
             }
 
-            var buf: [4]u8 = undefined;
-            const len = std.unicode.utf8Encode(codepoint, &buf) catch 1;
-            try output.appendSlice(allocator, buf[0..len]);
-        }
+            // Legend
+            try emitLegend(&output, allocator, legend_edges.items, layout_ir, config, use_ascii);
+        },
+        .html_pre => {
+            // Validate html_pre_style: reject characters that could break
+            // out of the style attribute or inject HTML.
+            for (config.html_pre_style) |c| {
+                if (c == '"' or c == '<' or c == '>') return error.InvalidHtmlPreStyle;
+            }
+            try output.appendSlice(allocator, "<pre style=\"");
+            try output.appendSlice(allocator, config.html_pre_style);
+            try output.appendSlice(allocator, "\">\n");
+            var span_open = false;
+            const has_bg = buffer.hasBgPlane();
 
-        if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet())) {
-            try output.appendSlice(allocator, colors.escape.reset);
-            last_fg = CellColor.none;
-            last_bg = CellColor.none;
-        }
+            for (0..height) |y| {
+                const row = buffer.getRow(y);
+                const color_row = buffer.getColorRow(y);
+                const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
 
-        try output.append(allocator, '\n');
-    }
+                var end: usize = row.len;
+                while (end > 0 and row[end - 1] == ' ') {
+                    end -= 1;
+                }
 
-    // Append legend for labels that couldn't be placed inline
-    if (legend_edges.items.len > 0) {
-        try output.appendSlice(allocator, "\nEdge labels:\n");
-        for (legend_edges.items) |entry| {
-            try output.appendSlice(allocator, "  ");
+                for (0..end) |xi| {
+                    const codepoint = if (use_ascii) junction_mod.toAscii(row[xi]) else row[xi];
+                    const cell_fg = color_row[xi];
+                    const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
+                    const has_color = cell_fg.isSet() or cell_bg.isSet();
 
-            const from_label = if (layout_ir.nodeById(entry.from_id)) |n| n.label else "?";
-            const to_label = if (layout_ir.nodeById(entry.to_id)) |n| n.label else "?";
+                    if (has_color) {
+                        if (span_open) try output.appendSlice(allocator, "</span>");
+                        try output.appendSlice(allocator, "<span style=\"");
+                        if (cell_fg.isSet()) try emitHtmlFgColor(&output, allocator, cell_fg);
+                        if (cell_bg.isSet()) {
+                            if (cell_fg.isSet()) try output.append(allocator, ';');
+                            try emitHtmlBgColor(&output, allocator, cell_bg);
+                        }
+                        try output.appendSlice(allocator, "\">");
+                        span_open = true;
+                    } else if (span_open) {
+                        try output.appendSlice(allocator, "</span>");
+                        span_open = false;
+                    }
 
-            if (config.color_mode != .none and entry.color.isSet()) {
-                try emitFgEscape(&output, allocator, entry.color, config.color_mode);
+                    try emitHtmlChar(&output, allocator, codepoint);
+                }
+
+                if (span_open) {
+                    try output.appendSlice(allocator, "</span>");
+                    span_open = false;
+                }
+                try output.append(allocator, '\n');
             }
 
-            try output.appendSlice(allocator, from_label);
-            try output.appendSlice(allocator, " → ");
-            try output.appendSlice(allocator, to_label);
-            try output.appendSlice(allocator, ": \"");
-            try output.appendSlice(allocator, entry.label);
-            try output.appendSlice(allocator, "\"");
+            // Legend
+            try emitLegend(&output, allocator, legend_edges.items, layout_ir, config, use_ascii);
 
-            if (config.color_mode != .none and entry.color.isSet()) {
-                try output.appendSlice(allocator, colors.escape.reset);
-            }
-            try output.append(allocator, '\n');
-        }
+            try output.appendSlice(allocator, "</pre>\n");
+        },
     }
 
     return output.toOwnedSlice(allocator);
@@ -687,6 +726,125 @@ fn emitBgEscape(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: C
             },
             else => {},
         },
+    }
+}
+
+// ── HTML serialization helpers ──────────────────────────────────────────────
+
+/// Resolve a CellColor to (r, g, b) for CSS, converting ANSI 256 if needed.
+fn cellColorToRgb(cc: CellColor) struct { r: u8, g: u8, b: u8 } {
+    return switch (cc.tag) {
+        .rgb => .{ .r = cc.r(), .g = cc.g(), .b = cc.b() },
+        .ansi => blk: {
+            const c = colors.ansi256ToRgb(cc.ansiIndex());
+            break :blk .{ .r = c.r, .g = c.g, .b = c.b };
+        },
+        else => .{ .r = 0, .g = 0, .b = 0 }, // unreachable if caller checks isSet()
+    };
+}
+
+/// Emit `color:#rrggbb` (no trailing semicolon).
+fn emitHtmlFgColor(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor) !void {
+    const rgb = cellColorToRgb(cc);
+    var buf: [13]u8 = undefined; // "color:#rrggbb"
+    const s = std.fmt.bufPrint(&buf, "color:#{x:0>2}{x:0>2}{x:0>2}", .{ rgb.r, rgb.g, rgb.b }) catch unreachable;
+    try output.appendSlice(allocator, s);
+}
+
+/// Emit `background-color:#rrggbb` (no trailing semicolon).
+fn emitHtmlBgColor(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor) !void {
+    const rgb = cellColorToRgb(cc);
+    var buf: [24]u8 = undefined; // "background-color:#rrggbb"
+    const s = std.fmt.bufPrint(&buf, "background-color:#{x:0>2}{x:0>2}{x:0>2}", .{ rgb.r, rgb.g, rgb.b }) catch unreachable;
+    try output.appendSlice(allocator, s);
+}
+
+/// Emit a single Unicode codepoint as HTML-safe UTF-8.
+fn emitHtmlChar(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cp: u21) !void {
+    switch (cp) {
+        '<' => try output.appendSlice(allocator, "&lt;"),
+        '>' => try output.appendSlice(allocator, "&gt;"),
+        '&' => try output.appendSlice(allocator, "&amp;"),
+        '"' => try output.appendSlice(allocator, "&quot;"),
+        '\'' => try output.appendSlice(allocator, "&#39;"),
+        else => {
+            var buf: [4]u8 = undefined;
+            const len = std.unicode.utf8Encode(cp, &buf) catch 1;
+            try output.appendSlice(allocator, buf[0..len]);
+        },
+    }
+}
+
+/// Emit a UTF-8 string slice as HTML-safe text.
+fn emitHtmlStr(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '<' => try output.appendSlice(allocator, "&lt;"),
+            '>' => try output.appendSlice(allocator, "&gt;"),
+            '&' => try output.appendSlice(allocator, "&amp;"),
+            '"' => try output.appendSlice(allocator, "&quot;"),
+            '\'' => try output.appendSlice(allocator, "&#39;"),
+            else => try output.append(allocator, c),
+        }
+    }
+}
+
+/// Emit the edge-label legend section, adapting output encoding to the format.
+fn emitLegend(
+    output: *std.ArrayListUnmanaged(u8),
+    allocator: Allocator,
+    legend_items: []const LegendEntry,
+    layout_ir: *const LayoutIR,
+    config: Config,
+    use_ascii: bool,
+) !void {
+    if (legend_items.len == 0) return;
+
+    const is_html = config.output_format == .html_pre;
+    try output.appendSlice(allocator, "\nEdge labels:\n");
+
+    for (legend_items) |entry| {
+        try output.appendSlice(allocator, "  ");
+        const from_label = if (layout_ir.nodeById(entry.from_id)) |n| n.label else "?";
+        const to_label = if (layout_ir.nodeById(entry.to_id)) |n| n.label else "?";
+
+        // Color open
+        if (entry.color.isSet()) {
+            if (is_html) {
+                try output.appendSlice(allocator, "<span style=\"");
+                try emitHtmlFgColor(output, allocator, entry.color);
+                try output.appendSlice(allocator, "\">");
+            } else if (config.color_mode != .none) {
+                try emitFgEscape(output, allocator, entry.color, config.color_mode);
+            }
+        }
+
+        // Labels + arrow
+        if (is_html) {
+            try emitHtmlStr(output, allocator, from_label);
+            try output.appendSlice(allocator, if (use_ascii) " -&gt; " else " \xe2\x86\x92 ");
+            try emitHtmlStr(output, allocator, to_label);
+            try output.appendSlice(allocator, ": &quot;");
+            try emitHtmlStr(output, allocator, entry.label);
+            try output.appendSlice(allocator, "&quot;");
+        } else {
+            try output.appendSlice(allocator, from_label);
+            try output.appendSlice(allocator, if (use_ascii) " -> " else " \xe2\x86\x92 ");
+            try output.appendSlice(allocator, to_label);
+            try output.appendSlice(allocator, ": \"");
+            try output.appendSlice(allocator, entry.label);
+            try output.appendSlice(allocator, "\"");
+        }
+
+        // Color close
+        if (entry.color.isSet()) {
+            if (is_html) {
+                try output.appendSlice(allocator, "</span>");
+            } else if (config.color_mode != .none) {
+                try output.appendSlice(allocator, colors.escape.reset);
+            }
+        }
+        try output.append(allocator, '\n');
     }
 }
 
