@@ -529,6 +529,44 @@ pub fn build(b: *std.Build) void {
     const run_cycle_step = b.step("run-cycle", "Run cycle breaking example");
     run_cycle_step.dependOn(&run_cycle.step);
 
+    // Streaming demo example
+    const streaming_example = b.addModule("streaming_example", .{
+        .root_source_file = b.path("examples/terminal/streaming_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const streaming_exe = b.addExecutable(.{
+        .name = "streaming_demo",
+        .root_module = streaming_example,
+    });
+    b.installArtifact(streaming_exe);
+
+    const run_streaming = b.addRunArtifact(streaming_exe);
+    const run_streaming_step = b.step("run-streaming", "Run streaming render demo");
+    run_streaming_step.dependOn(&run_streaming.step);
+
+    // Interactive TUI example
+    const tui_example = b.addModule("tui_example", .{
+        .root_source_file = b.path("examples/terminal/interactive_tui.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const tui_exe = b.addExecutable(.{
+        .name = "interactive_tui",
+        .root_module = tui_example,
+    });
+    b.installArtifact(tui_exe);
+
+    const run_tui = b.addRunArtifact(tui_exe);
+    const run_tui_step = b.step("run-tui", "Run interactive TUI demo (click on graph elements)");
+    run_tui_step.dependOn(&run_tui.step);
+
     // ── SVG Gallery Examples ────────────────────────────────────────────────
 
     const svg_gallery = [_]struct { file: []const u8, name: []const u8, desc: []const u8 }{

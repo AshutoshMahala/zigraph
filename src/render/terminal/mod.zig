@@ -33,8 +33,6 @@ const Allocator = std.mem.Allocator;
 const ir_mod = @import("../../core/ir.zig");
 const LayoutIR = ir_mod.LayoutIR(usize);
 const colors = @import("../color/mod.zig");
-const types = @import("../types.zig");
-const shared_helpers = @import("../helpers.zig");
 
 // ── Submodule imports ───────────────────────────────────────────────────────
 
@@ -45,6 +43,7 @@ const node_render = @import("nodes.zig");
 const edge_render = @import("edges.zig");
 const label_render = @import("labels.zig");
 const subgraph_render = @import("subgraphs.zig");
+const plan_mod = @import("plan.zig");
 
 // ── Public re-exports ───────────────────────────────────────────────────────
 
@@ -148,6 +147,9 @@ pub const drawDirectVertical = edge_render.drawDirectVertical;
 pub const drawDirectHorizontal = edge_render.drawDirectHorizontal;
 pub const drawDirectManhattan = edge_render.drawDirectManhattan;
 
+pub const RenderPlan = plan_mod.RenderPlan;
+pub const HitResult = plan_mod.HitResult;
+
 // ── Force test inclusion for submodules ─────────────────────────────────────
 
 comptime {
@@ -158,6 +160,7 @@ comptime {
     _ = edge_render;
     _ = label_render;
     _ = subgraph_render;
+    _ = plan_mod;
     _ = @import("render_tests.zig");
 }
 
@@ -171,12 +174,25 @@ pub fn renderGeneric(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coo
 
 /// Render any GenericLayoutIR to a Unicode string with configuration.
 pub fn renderGenericWithConfig(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator, config: Config) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    try renderGenericStreamingWithConfig(Coord, layout_ir, list.writer(), allocator, config);
+    return try list.toOwnedSlice();
+}
+
+/// Stream-render any GenericLayoutIR to a writer.
+pub fn renderGenericStreamingWithConfig(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), writer: anytype, allocator: Allocator, config: Config) !void {
     if (Coord == usize) {
-        return renderWithConfig(layout_ir, allocator, config);
+        return renderStreamingWithConfig(layout_ir, writer, allocator, config);
     }
     var converted = try layout_ir.convertCoord(usize, allocator);
     defer converted.deinit();
-    return renderWithConfig(&converted, allocator, config);
+    return renderStreamingWithConfig(&converted, writer, allocator, config);
+}
+
+/// Stream-render a LayoutIR to a writer with default config.
+pub fn renderStreaming(layout_ir: *const LayoutIR, writer: anytype, allocator: Allocator) !void {
+    return renderStreamingWithConfig(layout_ir, writer, allocator, .{});
 }
 
 /// Render a LayoutIR to a Unicode string.
@@ -186,354 +202,103 @@ pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {
 
 /// Render a LayoutIR to a Unicode string with configuration.
 pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config: Config) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    errdefer list.deinit();
+    try renderStreamingWithConfig(layout_ir, list.writer(), allocator, config);
+    return try list.toOwnedSlice();
+}
+
+/// Streaming render entry point — writes directly to any writer (zero accumulation).
+pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, allocator: Allocator, config: Config) !void {
     const base_width = layout_ir.getWidth();
     const ir_height = layout_ir.getHeight();
 
-    if (base_width == 0 or ir_height == 0) {
-        const result = try allocator.alloc(u8, 0);
-        return result;
-    }
+    if (base_width == 0 or ir_height == 0) return;
 
-    // Arena for style function contexts and coordinate tables (bulk-freed at end)
-    var arena_state = std.heap.ArenaAllocator.init(allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
+    // ── Step 1: Build render plan ───────────────────────────────────────
+    var plan = try plan_mod.RenderPlan.build(allocator, layout_ir, config);
+    defer plan.deinit();
 
-    const total_edges = layout_ir.getEdges().len;
-    const total_nodes = layout_ir.getNodes().len;
+    const width = plan.width;
+    const height = plan.height;
 
-    // ── Y-expansion: compute per-level max rendered height ──────────────
-
-    // Find max level index and collect per-level info
-    var max_level: usize = 0;
-    for (layout_ir.getNodes()) |node| {
-        if (node.level > max_level) max_level = node.level;
-    }
-    const num_levels = max_level + 1;
-
-    const level_ir_ys = try arena.alloc(usize, num_levels);
-    const level_max_height = try arena.alloc(usize, num_levels);
-    @memset(level_ir_ys, 0);
-    @memset(level_max_height, 1);
-
-    // Pass 1: collect level Y positions and max rendered heights
-    for (layout_ir.getNodes()) |node| {
-        level_ir_ys[node.level] = node.y;
-        if (node.kind == .dummy) continue;
-        const node_ctx = NodeStyleContext{
-            .node_id = node.id,
-            .label = node.label,
-            .total_nodes = total_nodes,
-            .width = node.width,
-            .height = 1,
-            .is_implicit = node.kind == .implicit,
-            .arena = arena,
-        };
-        const ns = config.node_style_fn(node_ctx);
-        const h: usize = ns.border.height();
-        if (h > level_max_height[node.level]) level_max_height[node.level] = h;
-    }
-
-    // Build cumulative extra rows: cumulative_extra[L] = total extra rows from levels 0..L-1
-    const cumulative_extra = try arena.alloc(usize, num_levels + 1);
-    cumulative_extra[0] = 0;
-    for (0..num_levels) |l| {
-        cumulative_extra[l + 1] = cumulative_extra[l] + (level_max_height[l] -| 1);
-    }
-    const total_extra = cumulative_extra[num_levels];
-    const height = ir_height + total_extra;
-
-    // Check if extra width is needed for self-loop indicators (↺ + label)
-    var extra_width: usize = 0;
-    for (layout_ir.getEdges()) |edge| {
-        if (edge.reversed and edge.from_id == edge.to_id) {
-            if (layout_ir.nodeById(edge.from_id)) |node| {
-                var needed = node.x + node.width + 1; // +1 for ↺
-                if (edge.label) |label| {
-                    needed += label.len + 2; // +2 for quotes
-                }
-                if (needed > base_width + extra_width) {
-                    extra_width = needed - base_width;
-                }
-            }
-        }
-    }
-
-    const width = base_width + extra_width;
-
-    // Single flat allocation for cache efficiency
+    // ── Step 2: Allocate band buffer (full height for 9a) ───────────────
     var buffer = try Buffer2D.init(allocator, width, height);
     defer buffer.deinit(allocator);
 
-    // ── Paint subgraph boxes first (background layer) ───────────────────
-    const sg_depths: []const usize = if (config.show_subgraphs and layout_ir.subgraphs.items.len > 0)
-        shared_helpers.computeSubgraphDepths(layout_ir.subgraphs.items, arena)
-    else
-        &.{};
+    // ── Step 3: Composite from plan in Z-order ─────────────────────────
 
-    // Pre-compute styles once per subgraph (avoids calling style_fn twice per SG).
-    const sg_styles: []const config_mod.TerminalSubgraphStyle = if (config.show_subgraphs and layout_ir.subgraphs.items.len > 0) blk: {
-        const sgs = layout_ir.subgraphs.items;
-        const styles = arena.alloc(config_mod.TerminalSubgraphStyle, sgs.len) catch break :blk &.{};
-        for (sgs, 0..) |sg, idx| {
-            styles[idx] = config.subgraph_style_fn(.{
-                .subgraph_id = sg.id,
-                .parent_id = sg.parent_id,
-                .label = sg.label,
-                .depth = if (idx < sg_depths.len) sg_depths[idx] else 0,
-                .total_subgraphs = sgs.len,
-                .width = sg.width,
-                .height = sg.height,
-                .arena = arena,
-            });
+    // Z0: Paint subgraph boxes (background layer)
+    for (plan.subgraph_plans) |sp| {
+        subgraph_render.paintSubgraphBox(&buffer, sp.x, sp.y, sp.w, sp.h, sp.style);
+    }
+
+    // Z1: Paint edges
+    for (plan.edge_plans) |ep| {
+        edge_render.paintEdge(&buffer, &ep.edge, ep.color, ep.weight, ep.marker_end, ep.marker_start);
+    }
+
+    // Z2: Dummy node cleanup
+    for (plan.dummy_fixes) |df| {
+        const x = df.center_x;
+        const y = df.rendered_y;
+        const lh = df.level_height;
+
+        var dy: usize = 0;
+        while (dy < lh) : (dy += 1) {
+            const row = y + dy;
+            if (row < height) {
+                const current = buffer.get(x, row);
+                const merged = junction_mod.mergeJunction(current, true, true, false, false);
+                buffer.set(x, row, merged);
+            }
         }
-        break :blk styles;
-    } else &.{};
-
-    if (config.show_subgraphs) {
-        const sgs = layout_ir.subgraphs.items;
-        if (sgs.len > 0) {
-            // Render in reverse order: parents first (they appear last in the array)
-            var idx: usize = sgs.len;
-            while (idx > 0) {
-                idx -= 1;
-                const sg = sgs[idx];
-                const sg_style = if (idx < sg_styles.len) sg_styles[idx] else config_mod.TerminalSubgraphStyle{};
-                const new_y = if (total_extra == 0) sg.y else yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra);
-                const new_h = if (total_extra == 0) sg.height else blk: {
-                    const new_bottom = yTransform(sg.y + sg.height -| 1, num_levels, level_ir_ys, cumulative_extra);
-                    break :blk new_bottom - new_y + 1;
-                };
-                subgraph_render.paintSubgraphBox(&buffer, sg.x, new_y, sg.width, new_h, sg_style);
+        if (y > 0) {
+            const above = buffer.get(x, y - 1);
+            if (junction_mod.isMarkerChar(above)) {
+                buffer.set(x, y - 1, CP_V_LINE);
+            }
+        }
+        const band_bottom = y + lh;
+        if (band_bottom < height) {
+            const below = buffer.get(x, band_bottom);
+            if (junction_mod.isMarkerChar(below)) {
+                buffer.set(x, band_bottom, CP_V_LINE);
             }
         }
     }
 
-    // ── Paint all edges (so nodes overwrite them) ───────────────────────
-    for (layout_ir.getEdges()) |edge| {
-        // Build edge style context
-        const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
-        const to_label = if (layout_ir.nodeById(edge.to_id)) |n| n.label else "";
-        const ctx = EdgeStyleContext{
-            .edge_index = edge.edge_index,
-            .total_edges = total_edges,
-            .from_id = edge.from_id,
-            .to_id = edge.to_id,
-            .from_label = from_label,
-            .to_label = to_label,
-            .label = edge.label,
-            .directed = edge.directed,
-            .reversed = edge.reversed,
-            .arena = arena,
-        };
-
-        // Call style function, resolve color (style > palette > none)
-        const style = config.edge_style_fn(ctx);
-        const edge_color: CellColor = if (style.color != .default)
-            resolveColor(style.color)
-        else if (config.edge_palette) |palette|
-            CellColor.ansi256(colors.getAnsi(palette, edge.edge_index))
-        else
-            CellColor.none;
-
-        if (total_extra == 0) {
-            edge_render.paintEdge(&buffer, &edge, edge_color, style.weight, style.marker_end, style.marker_start);
-        } else {
-            var te = try transformEdge(edge, num_levels, level_ir_ys, cumulative_extra, arena);
-            edge_render.paintEdge(&buffer, &te, edge_color, style.weight, style.marker_end, style.marker_start);
+    // Z3: Paint edge labels (plan-driven placement from geometric occupancy)
+    for (plan.label_plans) |lp| {
+        switch (lp.placement) {
+            .placed => |pos| {
+                label_render.paintLabel(&buffer, lp.label, pos.x, pos.y, lp.color);
+            },
+            .legend => {}, // legend entries handled below
         }
     }
 
-    // For invisible dummy nodes, paint a vertical line at their position
-    // and clean up any marker characters to make a continuous line.
-    // When Y-expansion is active, fill the entire level band with verticals.
-    if (!config.show_dummy_nodes) {
-        for (layout_ir.getNodes()) |node| {
-            if (node.kind == .dummy) {
-                const x = node.center_x;
-                const y = yTransform(node.y, num_levels, level_ir_ys, cumulative_extra);
-                const lh = level_max_height[node.level];
+    // Z4: Paint nodes
+    const nodes = layout_ir.getNodes();
+    for (plan.node_plans) |np| {
+        const node = &nodes[np.node_index];
+        node_render.paintNode(&buffer, node, config.show_dummy_nodes, np.style, np.rendered_y, np.level_height);
+    }
 
-                // Fill the entire level band with vertical lines
-                var dy: usize = 0;
-                while (dy < lh) : (dy += 1) {
-                    const row = y + dy;
-                    if (row < height) {
-                        const current = buffer.get(x, row);
-                        const merged = junction_mod.mergeJunction(current, true, true, false, false);
-                        buffer.set(x, row, merged);
-                    }
-                }
+    // Z5: Paint subgraph labels
+    for (plan.subgraph_plans) |sp| {
+        subgraph_render.paintSubgraphLabel(&buffer, sp.x, sp.y, sp.w, sp.h, sp.label, sp.style);
+    }
 
-                if (y > 0) {
-                    const above = buffer.get(x, y - 1);
-                    if (junction_mod.isMarkerChar(above)) {
-                        buffer.set(x, y - 1, CP_V_LINE);
-                    }
-                }
-                const band_bottom = y + lh;
-                if (band_bottom < height) {
-                    const below = buffer.get(x, band_bottom);
-                    if (junction_mod.isMarkerChar(below)) {
-                        buffer.set(x, band_bottom, CP_V_LINE);
-                    }
-                }
-            }
+    // Z6: Paint self-loop indicators
+    for (plan.self_loops) |sl| {
+        buffer.setWithColor(sl.loop_x, sl.label_row, 0x21BA, sl.color); // ↺
+        if (sl.label) |elabel| {
+            label_render.paintLabel(&buffer, elabel, sl.loop_x + 1, sl.label_row, sl.color);
         }
     }
 
-    // ── Paint edge labels (between edges and nodes) ─────────────────────
-    var legend_edges: std.ArrayListUnmanaged(LegendEntry) = .{};
-    defer legend_edges.deinit(allocator);
-
-    for (layout_ir.getEdges()) |edge| {
-        if (edge.label) |label| {
-            // Skip self-loop labels — handled after node painting with ↺ indicator
-            if (edge.reversed and edge.from_id == edge.to_id) continue;
-
-            // Resolve edge color via style function (same logic as paint loop)
-            const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
-            const to_label = if (layout_ir.nodeById(edge.to_id)) |n| n.label else "";
-            const ctx = EdgeStyleContext{
-                .edge_index = edge.edge_index,
-                .total_edges = total_edges,
-                .from_id = edge.from_id,
-                .to_id = edge.to_id,
-                .from_label = from_label,
-                .to_label = to_label,
-                .label = edge.label,
-                .directed = edge.directed,
-                .reversed = edge.reversed,
-                .arena = arena,
-            };
-            const style = config.edge_style_fn(ctx);
-            const edge_color: CellColor = if (style.color != .default)
-                resolveColor(style.color)
-            else if (config.edge_palette) |palette|
-                CellColor.ansi256(colors.getAnsi(palette, edge.edge_index))
-            else
-                CellColor.none;
-
-            const lbl_y = yTransform(edge.label_y, num_levels, level_ir_ys, cumulative_extra);
-            if (label_render.canPlaceLabel(&buffer, label, edge.label_x, lbl_y)) {
-                label_render.paintLabel(&buffer, label, edge.label_x, lbl_y, edge_color);
-            } else {
-                // Couldn't place — try sliding Y within the edge's vertical span
-                var placed = false;
-                const t_from_y = yTransform(edge.from_y, num_levels, level_ir_ys, cumulative_extra);
-                const t_to_y = yTransform(edge.to_y, num_levels, level_ir_ys, cumulative_extra);
-                const min_y = t_from_y + 1;
-                const max_y = if (t_to_y > 1) t_to_y - 1 else t_to_y;
-                var try_y = min_y;
-                while (try_y <= max_y) : (try_y += 1) {
-                    if (try_y == lbl_y) continue; // Already tried
-                    if (label_render.canPlaceLabel(&buffer, label, edge.label_x, try_y)) {
-                        label_render.paintLabel(&buffer, label, edge.label_x, try_y, edge_color);
-                        placed = true;
-                        break;
-                    }
-                }
-                if (!placed) {
-                    // Fallback: add to legend
-                    try legend_edges.append(allocator, .{
-                        .from_id = edge.from_id,
-                        .to_id = edge.to_id,
-                        .label = label,
-                        .color = edge_color,
-                    });
-                }
-            }
-        }
-    }
-
-    // ── Paint nodes (overwrite edges) ───────────────────────────────────
-    for (layout_ir.getNodes()) |node| {
-        const rendered_y = yTransform(node.y, num_levels, level_ir_ys, cumulative_extra);
-        const lh = level_max_height[node.level];
-        if (node.kind == .dummy) {
-            node_render.paintNode(&buffer, &node, config.show_dummy_nodes, .{}, rendered_y, lh);
-        } else {
-            const node_ctx = NodeStyleContext{
-                .node_id = node.id,
-                .label = node.label,
-                .total_nodes = total_nodes,
-                .width = node.width,
-                .height = 1,
-                .is_implicit = node.kind == .implicit,
-                .arena = arena,
-            };
-            const node_style = config.node_style_fn(node_ctx);
-            node_render.paintNode(&buffer, &node, config.show_dummy_nodes, node_style, rendered_y, lh);
-        }
-    }
-
-    // Paint subgraph labels last so they're not overwritten by edges/nodes
-    if (config.show_subgraphs) {
-        const sgs = layout_ir.subgraphs.items;
-        for (sgs, 0..) |sg, idx| {
-            const sg_style = if (idx < sg_styles.len) sg_styles[idx] else config_mod.TerminalSubgraphStyle{};
-            const new_y = if (total_extra == 0) sg.y else yTransform(sg.y, num_levels, level_ir_ys, cumulative_extra);
-            const new_h = if (total_extra == 0) sg.height else blk: {
-                const new_bottom = yTransform(sg.y + sg.height -| 1, num_levels, level_ir_ys, cumulative_extra);
-                break :blk new_bottom - new_y + 1;
-            };
-            subgraph_render.paintSubgraphLabel(&buffer, sg.x, new_y, sg.width, new_h, sg.label, sg_style);
-        }
-    }
-
-    // ── Paint self-loop indicators (↺) after nodes ──────────────────────
-    for (layout_ir.getEdges()) |edge| {
-        if (edge.reversed and edge.from_id == edge.to_id) {
-            const from_label = if (layout_ir.nodeById(edge.from_id)) |n| n.label else "";
-            const sl_ctx = EdgeStyleContext{
-                .edge_index = edge.edge_index,
-                .total_edges = total_edges,
-                .from_id = edge.from_id,
-                .to_id = edge.to_id,
-                .from_label = from_label,
-                .to_label = from_label,
-                .label = edge.label,
-                .directed = edge.directed,
-                .reversed = edge.reversed,
-                .arena = arena,
-            };
-            const sl_style = config.edge_style_fn(sl_ctx);
-            const edge_color: CellColor = if (sl_style.color != .default)
-                resolveColor(sl_style.color)
-            else if (config.edge_palette) |palette|
-                CellColor.ansi256(colors.getAnsi(palette, edge.edge_index))
-            else
-                CellColor.none;
-
-            if (layout_ir.nodeById(edge.from_id)) |node| {
-                const loop_x = node.x + node.width; // right after ']'
-                const loop_y = yTransform(node.y, num_levels, level_ir_ys, cumulative_extra);
-                // For 3-row nodes, place ↺ on the label row (middle)
-                const node_ctx = NodeStyleContext{
-                    .node_id = node.id,
-                    .label = node.label,
-                    .total_nodes = total_nodes,
-                    .width = node.width,
-                    .height = 1,
-                    .is_implicit = node.kind == .implicit,
-                    .arena = arena,
-                };
-                const ns = config.node_style_fn(node_ctx);
-                const label_row = if (ns.border.height() == 3) loop_y + 1 else loop_y;
-                buffer.setWithColor(loop_x, label_row, 0x21BA, edge_color); // ↺
-                if (edge.label) |elabel| {
-                    label_render.paintLabel(&buffer, elabel, loop_x + 1, label_row, edge_color);
-                }
-            }
-        }
-    }
-
-    // ── Serialization: convert Buffer2D → output bytes ──────────────────────
-    var output: std.ArrayListUnmanaged(u8) = .{};
-    errdefer output.deinit(allocator);
-    const capacity_per_cell: usize = if (config.output_format == .html_pre) 40 else 4;
-    try output.ensureTotalCapacity(allocator, height * (width * capacity_per_cell + 1));
-
+    // ── Step 4: Serialize buffer → writer ──────────────────────────────
     const use_ascii = config.char_set == .ascii;
 
     switch (config.output_format) {
@@ -560,39 +325,39 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                         const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
 
                         if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
-                            try emitFgEscape(&output, allocator, cell_fg, config.color_mode);
+                            try emitFgEscape(writer, cell_fg, config.color_mode);
                             last_fg = cell_fg;
                         } else if (!cell_fg.isSet() and last_fg.isSet()) {
-                            try output.appendSlice(allocator, colors.escape.reset);
+                            try writer.writeAll(colors.escape.reset);
                             last_fg = CellColor.none;
                             last_bg = CellColor.none;
                         }
 
                         if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
-                            try emitBgEscape(&output, allocator, cell_bg, config.color_mode);
+                            try emitBgEscape(writer, cell_bg, config.color_mode);
                             last_bg = cell_bg;
                         } else if (!cell_bg.isSet() and last_bg.isSet()) {
-                            try output.appendSlice(allocator, "\x1b[49m");
+                            try writer.writeAll("\x1b[49m");
                             last_bg = CellColor.none;
                         }
                     }
 
                     var buf: [4]u8 = undefined;
                     const len = std.unicode.utf8Encode(codepoint, &buf) catch 1;
-                    try output.appendSlice(allocator, buf[0..len]);
+                    try writer.writeAll(buf[0..len]);
                 }
 
                 if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet())) {
-                    try output.appendSlice(allocator, colors.escape.reset);
+                    try writer.writeAll(colors.escape.reset);
                     last_fg = CellColor.none;
                     last_bg = CellColor.none;
                 }
 
-                try output.append(allocator, '\n');
+                try writer.writeByte('\n');
             }
 
             // Legend
-            try emitLegend(&output, allocator, legend_edges.items, layout_ir, config, use_ascii);
+            try emitLegend(writer, plan.legend_entries, layout_ir, config, use_ascii);
         },
         .html_pre => {
             // Validate html_pre_style: reject characters that could break
@@ -600,9 +365,9 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
             for (config.html_pre_style) |c| {
                 if (c == '"' or c == '<' or c == '>') return error.InvalidHtmlPreStyle;
             }
-            try output.appendSlice(allocator, "<pre style=\"");
-            try output.appendSlice(allocator, config.html_pre_style);
-            try output.appendSlice(allocator, "\">\n");
+            try writer.writeAll("<pre style=\"");
+            try writer.writeAll(config.html_pre_style);
+            try writer.writeAll("\">\n");
             var span_open = false;
             const has_bg = buffer.hasBgPlane();
 
@@ -623,38 +388,36 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
                     const has_color = cell_fg.isSet() or cell_bg.isSet();
 
                     if (has_color) {
-                        if (span_open) try output.appendSlice(allocator, "</span>");
-                        try output.appendSlice(allocator, "<span style=\"");
-                        if (cell_fg.isSet()) try emitHtmlFgColor(&output, allocator, cell_fg);
+                        if (span_open) try writer.writeAll("</span>");
+                        try writer.writeAll("<span style=\"");
+                        if (cell_fg.isSet()) try emitHtmlFgColor(writer, cell_fg);
                         if (cell_bg.isSet()) {
-                            if (cell_fg.isSet()) try output.append(allocator, ';');
-                            try emitHtmlBgColor(&output, allocator, cell_bg);
+                            if (cell_fg.isSet()) try writer.writeByte(';');
+                            try emitHtmlBgColor(writer, cell_bg);
                         }
-                        try output.appendSlice(allocator, "\">");
+                        try writer.writeAll("\">");
                         span_open = true;
                     } else if (span_open) {
-                        try output.appendSlice(allocator, "</span>");
+                        try writer.writeAll("</span>");
                         span_open = false;
                     }
 
-                    try emitHtmlChar(&output, allocator, codepoint);
+                    try emitHtmlChar(writer, codepoint);
                 }
 
                 if (span_open) {
-                    try output.appendSlice(allocator, "</span>");
+                    try writer.writeAll("</span>");
                     span_open = false;
                 }
-                try output.append(allocator, '\n');
+                try writer.writeByte('\n');
             }
 
             // Legend
-            try emitLegend(&output, allocator, legend_edges.items, layout_ir, config, use_ascii);
+            try emitLegend(writer, plan.legend_entries, layout_ir, config, use_ascii);
 
-            try output.appendSlice(allocator, "</pre>\n");
+            try writer.writeAll("</pre>\n");
         },
     }
-
-    return output.toOwnedSlice(allocator);
 }
 
 // ── Color serialization helpers ─────────────────────────────────────────────
@@ -666,32 +429,32 @@ fn cellColorEql(a: CellColor, b: CellColor) bool {
 
 /// Emit a foreground color escape sequence, adapting between ANSI 256 and
 /// truecolor as needed. In `.none` mode this is a no-op.
-fn emitFgEscape(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor, mode: ColorMode) !void {
+fn emitFgEscape(writer: anytype, cc: CellColor, mode: ColorMode) !void {
     switch (mode) {
         .none => {},
         .ansi256 => switch (cc.tag) {
             .ansi => {
                 const seq = colors.escape.fg256(cc.ansiIndex());
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             .rgb => {
                 // Quantize RGB → nearest ANSI 256 index
                 const idx = colors.rgbToAnsi256(cc.r(), cc.g(), cc.b());
                 const seq = colors.escape.fg256(idx);
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             else => {},
         },
         .truecolor => switch (cc.tag) {
             .rgb => {
                 const seq = colors.escape.fgRgb(cc.r(), cc.g(), cc.b());
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             .ansi => {
                 // Expand ANSI 256 → RGB for truecolor output
                 const rgb_val = colors.ansi256ToRgb(cc.ansiIndex());
                 const seq = colors.escape.fgRgb(rgb_val.r, rgb_val.g, rgb_val.b);
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             else => {},
         },
@@ -699,30 +462,30 @@ fn emitFgEscape(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: C
 }
 
 /// Emit a background color escape sequence, mirroring `emitFgEscape`.
-fn emitBgEscape(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor, mode: ColorMode) !void {
+fn emitBgEscape(writer: anytype, cc: CellColor, mode: ColorMode) !void {
     switch (mode) {
         .none => {},
         .ansi256 => switch (cc.tag) {
             .ansi => {
                 const seq = colors.escape.bg256(cc.ansiIndex());
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             .rgb => {
                 const idx = colors.rgbToAnsi256(cc.r(), cc.g(), cc.b());
                 const seq = colors.escape.bg256(idx);
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             else => {},
         },
         .truecolor => switch (cc.tag) {
             .rgb => {
                 const seq = colors.escape.bgRgb(cc.r(), cc.g(), cc.b());
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             .ansi => {
                 const rgb_val = colors.ansi256ToRgb(cc.ansiIndex());
                 const seq = colors.escape.bgRgb(rgb_val.r, rgb_val.g, rgb_val.b);
-                try output.appendSlice(allocator, &seq);
+                try writer.writeAll(&seq);
             },
             else => {},
         },
@@ -744,55 +507,54 @@ fn cellColorToRgb(cc: CellColor) struct { r: u8, g: u8, b: u8 } {
 }
 
 /// Emit `color:#rrggbb` (no trailing semicolon).
-fn emitHtmlFgColor(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor) !void {
+fn emitHtmlFgColor(writer: anytype, cc: CellColor) !void {
     const rgb = cellColorToRgb(cc);
     var buf: [13]u8 = undefined; // "color:#rrggbb"
     const s = std.fmt.bufPrint(&buf, "color:#{x:0>2}{x:0>2}{x:0>2}", .{ rgb.r, rgb.g, rgb.b }) catch unreachable;
-    try output.appendSlice(allocator, s);
+    try writer.writeAll(s);
 }
 
 /// Emit `background-color:#rrggbb` (no trailing semicolon).
-fn emitHtmlBgColor(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cc: CellColor) !void {
+fn emitHtmlBgColor(writer: anytype, cc: CellColor) !void {
     const rgb = cellColorToRgb(cc);
     var buf: [24]u8 = undefined; // "background-color:#rrggbb"
     const s = std.fmt.bufPrint(&buf, "background-color:#{x:0>2}{x:0>2}{x:0>2}", .{ rgb.r, rgb.g, rgb.b }) catch unreachable;
-    try output.appendSlice(allocator, s);
+    try writer.writeAll(s);
 }
 
 /// Emit a single Unicode codepoint as HTML-safe UTF-8.
-fn emitHtmlChar(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, cp: u21) !void {
+fn emitHtmlChar(writer: anytype, cp: u21) !void {
     switch (cp) {
-        '<' => try output.appendSlice(allocator, "&lt;"),
-        '>' => try output.appendSlice(allocator, "&gt;"),
-        '&' => try output.appendSlice(allocator, "&amp;"),
-        '"' => try output.appendSlice(allocator, "&quot;"),
-        '\'' => try output.appendSlice(allocator, "&#39;"),
+        '<' => try writer.writeAll("&lt;"),
+        '>' => try writer.writeAll("&gt;"),
+        '&' => try writer.writeAll("&amp;"),
+        '"' => try writer.writeAll("&quot;"),
+        '\'' => try writer.writeAll("&#39;"),
         else => {
             var buf: [4]u8 = undefined;
             const len = std.unicode.utf8Encode(cp, &buf) catch 1;
-            try output.appendSlice(allocator, buf[0..len]);
+            try writer.writeAll(buf[0..len]);
         },
     }
 }
 
 /// Emit a UTF-8 string slice as HTML-safe text.
-fn emitHtmlStr(output: *std.ArrayListUnmanaged(u8), allocator: Allocator, s: []const u8) !void {
+fn emitHtmlStr(writer: anytype, s: []const u8) !void {
     for (s) |c| {
         switch (c) {
-            '<' => try output.appendSlice(allocator, "&lt;"),
-            '>' => try output.appendSlice(allocator, "&gt;"),
-            '&' => try output.appendSlice(allocator, "&amp;"),
-            '"' => try output.appendSlice(allocator, "&quot;"),
-            '\'' => try output.appendSlice(allocator, "&#39;"),
-            else => try output.append(allocator, c),
+            '<' => try writer.writeAll("&lt;"),
+            '>' => try writer.writeAll("&gt;"),
+            '&' => try writer.writeAll("&amp;"),
+            '"' => try writer.writeAll("&quot;"),
+            '\'' => try writer.writeAll("&#39;"),
+            else => try writer.writeByte(c),
         }
     }
 }
 
 /// Emit the edge-label legend section, adapting output encoding to the format.
 fn emitLegend(
-    output: *std.ArrayListUnmanaged(u8),
-    allocator: Allocator,
+    writer: anytype,
     legend_items: []const LegendEntry,
     layout_ir: *const LayoutIR,
     config: Config,
@@ -801,114 +563,49 @@ fn emitLegend(
     if (legend_items.len == 0) return;
 
     const is_html = config.output_format == .html_pre;
-    try output.appendSlice(allocator, "\nEdge labels:\n");
+    try writer.writeAll("\nEdge labels:\n");
 
     for (legend_items) |entry| {
-        try output.appendSlice(allocator, "  ");
+        try writer.writeAll("  ");
         const from_label = if (layout_ir.nodeById(entry.from_id)) |n| n.label else "?";
         const to_label = if (layout_ir.nodeById(entry.to_id)) |n| n.label else "?";
 
         // Color open
         if (entry.color.isSet()) {
             if (is_html) {
-                try output.appendSlice(allocator, "<span style=\"");
-                try emitHtmlFgColor(output, allocator, entry.color);
-                try output.appendSlice(allocator, "\">");
+                try writer.writeAll("<span style=\"");
+                try emitHtmlFgColor(writer, entry.color);
+                try writer.writeAll("\">");
             } else if (config.color_mode != .none) {
-                try emitFgEscape(output, allocator, entry.color, config.color_mode);
+                try emitFgEscape(writer, entry.color, config.color_mode);
             }
         }
 
         // Labels + arrow
         if (is_html) {
-            try emitHtmlStr(output, allocator, from_label);
-            try output.appendSlice(allocator, if (use_ascii) " -&gt; " else " \xe2\x86\x92 ");
-            try emitHtmlStr(output, allocator, to_label);
-            try output.appendSlice(allocator, ": &quot;");
-            try emitHtmlStr(output, allocator, entry.label);
-            try output.appendSlice(allocator, "&quot;");
+            try emitHtmlStr(writer, from_label);
+            try writer.writeAll(if (use_ascii) " -&gt; " else " \xe2\x86\x92 ");
+            try emitHtmlStr(writer, to_label);
+            try writer.writeAll(": &quot;");
+            try emitHtmlStr(writer, entry.label);
+            try writer.writeAll("&quot;");
         } else {
-            try output.appendSlice(allocator, from_label);
-            try output.appendSlice(allocator, if (use_ascii) " -> " else " \xe2\x86\x92 ");
-            try output.appendSlice(allocator, to_label);
-            try output.appendSlice(allocator, ": \"");
-            try output.appendSlice(allocator, entry.label);
-            try output.appendSlice(allocator, "\"");
+            try writer.writeAll(from_label);
+            try writer.writeAll(if (use_ascii) " -> " else " \xe2\x86\x92 ");
+            try writer.writeAll(to_label);
+            try writer.writeAll(": \"");
+            try writer.writeAll(entry.label);
+            try writer.writeAll("\"");
         }
 
         // Color close
         if (entry.color.isSet()) {
             if (is_html) {
-                try output.appendSlice(allocator, "</span>");
+                try writer.writeAll("</span>");
             } else if (config.color_mode != .none) {
-                try output.appendSlice(allocator, colors.escape.reset);
+                try writer.writeAll(colors.escape.reset);
             }
         }
-        try output.append(allocator, '\n');
+        try writer.writeByte('\n');
     }
-}
-
-// ── Y-expansion helpers ─────────────────────────────────────────────────────
-
-const EdgePath = ir_mod.EdgePath(usize);
-const LayoutEdge = ir_mod.LayoutEdge(usize);
-
-/// Map an IR Y coordinate to the rendered Y coordinate, accounting for
-/// level expansion from 3-row node borders.
-///
-/// For a Y that sits exactly at a level's IR position, the offset is the
-/// cumulative expansion from all *previous* levels. For a Y in a gap between
-/// levels, the offset includes the expansion from the level above the gap.
-fn yTransform(ir_y: usize, num_levels: usize, level_ir_ys: []const usize, cumulative_extra: []const usize) usize {
-    // Find the last level whose Y <= ir_y
-    var l: usize = 0;
-    while (l < num_levels and level_ir_ys[l] <= ir_y) : (l += 1) {}
-    // l = first level with Y > ir_y (or num_levels)
-    if (l == 0) return ir_y; // Before the first level — no expansion
-    l -= 1;
-    if (ir_y == level_ir_ys[l]) {
-        // Exactly at this level
-        return ir_y + cumulative_extra[l];
-    } else {
-        // In the gap after level l — include l's expansion
-        return ir_y + cumulative_extra[l + 1];
-    }
-}
-
-/// Create a stack copy of an edge with all Y coordinates transformed.
-/// The path union is copied by value (slices point at original data).
-/// For multi_segment paths, waypoints are cloned with transformed Y values.
-fn transformEdge(edge: LayoutEdge, num_levels: usize, level_ir_ys: []const usize, cumulative_extra: []const usize, arena: Allocator) !LayoutEdge {
-    var e = edge;
-    e.from_y = yTransform(edge.from_y, num_levels, level_ir_ys, cumulative_extra);
-    e.to_y = yTransform(edge.to_y, num_levels, level_ir_ys, cumulative_extra);
-    e.label_y = yTransform(edge.label_y, num_levels, level_ir_ys, cumulative_extra);
-    switch (e.path) {
-        .direct => {},
-        .corner => |*c| {
-            c.horizontal_y = yTransform(c.horizontal_y, num_levels, level_ir_ys, cumulative_extra);
-        },
-        .side_channel => |*sc| {
-            sc.start_y = yTransform(sc.start_y, num_levels, level_ir_ys, cumulative_extra);
-            sc.end_y = yTransform(sc.end_y, num_levels, level_ir_ys, cumulative_extra);
-        },
-        .multi_segment => |ms| {
-            const wp = try arena.alloc(EdgePath.Waypoint, ms.waypoints.items.len);
-            for (ms.waypoints.items, 0..) |pt, i| {
-                wp[i] = .{ .x = pt.x, .y = yTransform(pt.y, num_levels, level_ir_ys, cumulative_extra) };
-            }
-            // Replace the waypoints slice in the copy with the transformed version.
-            // We can't directly reassign the ArrayListUnmanaged, so we overwrite
-            // items pointer and len via the underlying structure.
-            e.path = .{ .multi_segment = .{
-                .waypoints = .{ .items = wp, .capacity = wp.len },
-                .allocator = ms.allocator,
-            } };
-        },
-        .spline => |*sp| {
-            sp.cp1_y = yTransform(sp.cp1_y, num_levels, level_ir_ys, cumulative_extra);
-            sp.cp2_y = yTransform(sp.cp2_y, num_levels, level_ir_ys, cumulative_extra);
-        },
-    }
-    return e;
 }

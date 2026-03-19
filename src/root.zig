@@ -202,6 +202,8 @@ pub const TerminalColorMode = terminal.ColorMode;
 pub const TerminalCellColor = terminal.CellColor;
 pub const TerminalCharSet = terminal.CharSet;
 pub const TerminalOutputFormat = terminal.OutputFormat;
+pub const TerminalRenderPlan = terminal.RenderPlan;
+pub const TerminalHitResult = terminal.HitResult;
 pub const terminal_subgraph_presets = terminal.subgraph_presets;
 pub const terminal_node_presets = terminal.node_presets;
 
