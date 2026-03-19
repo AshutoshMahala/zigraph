@@ -148,6 +148,7 @@ pub const drawDirectHorizontal = edge_render.drawDirectHorizontal;
 pub const drawDirectManhattan = edge_render.drawDirectManhattan;
 
 pub const RenderPlan = plan_mod.RenderPlan;
+pub const NodePlan = plan_mod.NodePlan;
 pub const HitResult = plan_mod.HitResult;
 
 // ── Force test inclusion for submodules ─────────────────────────────────────
@@ -206,6 +207,70 @@ pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config
     errdefer list.deinit();
     try renderStreamingWithConfig(layout_ir, list.writer(), allocator, config);
     return try list.toOwnedSlice();
+}
+
+/// Serialize a Buffer2D to a writer using the `.raw` terminal format.
+///
+/// Useful for custom rendering pipelines: build your RenderPlan, allocate and
+/// paint a Buffer2D (possibly larger than the plan height), then call this to
+/// produce ANSI-colored terminal output.
+///
+/// `render_height` is the number of rows to emit. Pass `buffer.height` for
+/// the full buffer. Values exceeding `buffer.height` are capped automatically.
+pub fn serializeBuffer(buffer: *const Buffer2D, writer: anytype, config: Config, render_height: usize) !void {
+    const use_ascii = config.char_set == .ascii;
+    var last_fg: CellColor = CellColor.none;
+    var last_bg: CellColor = CellColor.none;
+    const has_bg = buffer.hasBgPlane();
+
+    const safe_height = @min(render_height, buffer.height);
+
+    for (0..safe_height) |y| {
+        const row = buffer.getRow(y);
+        const color_row = buffer.getColorRow(y);
+        const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
+
+        var end: usize = row.len;
+        while (end > 0 and row[end - 1] == ' ') end -= 1;
+
+        for (0..end) |xi| {
+            const codepoint = if (use_ascii) junction_mod.toAscii(row[xi]) else row[xi];
+
+            if (config.color_mode != .none) {
+                const cell_fg = color_row[xi];
+                const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
+
+                if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
+                    try emitFgEscape(writer, cell_fg, config.color_mode);
+                    last_fg = cell_fg;
+                } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                    try writer.writeAll(colors.escape.reset);
+                    last_fg = CellColor.none;
+                    last_bg = CellColor.none;
+                }
+
+                if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
+                    try emitBgEscape(writer, cell_bg, config.color_mode);
+                    last_bg = cell_bg;
+                } else if (!cell_bg.isSet() and last_bg.isSet()) {
+                    try writer.writeAll("\x1b[49m");
+                    last_bg = CellColor.none;
+                }
+            }
+
+            var enc_buf: [4]u8 = undefined;
+            const len = std.unicode.utf8Encode(codepoint, &enc_buf) catch 1;
+            try writer.writeAll(enc_buf[0..len]);
+        }
+
+        if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet())) {
+            try writer.writeAll(colors.escape.reset);
+            last_fg = CellColor.none;
+            last_bg = CellColor.none;
+        }
+
+        try writer.writeByte('\n');
+    }
 }
 
 /// Streaming render entry point — writes directly to any writer (zero accumulation).

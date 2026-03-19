@@ -472,6 +472,82 @@ pub fn build(b: *std.Build) void {
     const run_terminal_edge_labels_step = b.step("run-terminal-edge-labels", "Run terminal edge labels example");
     run_terminal_edge_labels_step.dependOn(&run_terminal_edge_labels.step);
 
+    // Terminal edge styles example (Topics 3 + 4: line weights, marker shapes)
+    const terminal_edge_styles_mod = b.addModule("terminal_edge_styles", .{
+        .root_source_file = b.path("examples/terminal/edge_styles.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_edge_styles_exe = b.addExecutable(.{
+        .name = "terminal_edge_styles",
+        .root_module = terminal_edge_styles_mod,
+    });
+    b.installArtifact(terminal_edge_styles_exe);
+
+    const run_terminal_edge_styles = b.addRunArtifact(terminal_edge_styles_exe);
+    const run_terminal_edge_styles_step = b.step("run-terminal-edge-styles", "Run terminal edge styles example");
+    run_terminal_edge_styles_step.dependOn(&run_terminal_edge_styles.step);
+
+    // Terminal color system example (Topic 5: ColorMode, gradients, node colors)
+    const terminal_color_system_mod = b.addModule("terminal_color_system", .{
+        .root_source_file = b.path("examples/terminal/color_system.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_color_system_exe = b.addExecutable(.{
+        .name = "terminal_color_system",
+        .root_module = terminal_color_system_mod,
+    });
+    b.installArtifact(terminal_color_system_exe);
+
+    const run_terminal_color_system = b.addRunArtifact(terminal_color_system_exe);
+    const run_terminal_color_system_step = b.step("run-terminal-color-system", "Run terminal color system example");
+    run_terminal_color_system_step.dependOn(&run_terminal_color_system.step);
+
+    // Terminal record node demo (low-level Buffer2D + paintNode custom pipeline)
+    const terminal_record_nodes_mod = b.addModule("terminal_record_nodes", .{
+        .root_source_file = b.path("examples/terminal/record_nodes.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_record_nodes_exe = b.addExecutable(.{
+        .name = "terminal_record_nodes",
+        .root_module = terminal_record_nodes_mod,
+    });
+    b.installArtifact(terminal_record_nodes_exe);
+
+    const run_terminal_record_nodes = b.addRunArtifact(terminal_record_nodes_exe);
+    const run_terminal_record_nodes_step = b.step("run-terminal-record-nodes", "Run terminal record node demo (ER-diagram style)");
+    run_terminal_record_nodes_step.dependOn(&run_terminal_record_nodes.step);
+
+    // Terminal DB diagram (record nodes connected by FK edges — full ER diagram)
+    const terminal_db_diagram_mod = b.addModule("terminal_db_diagram", .{
+        .root_source_file = b.path("examples/terminal/db_diagram.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_db_diagram_exe = b.addExecutable(.{
+        .name = "terminal_db_diagram",
+        .root_module = terminal_db_diagram_mod,
+    });
+    b.installArtifact(terminal_db_diagram_exe);
+
+    const run_terminal_db_diagram = b.addRunArtifact(terminal_db_diagram_exe);
+    const run_terminal_db_diagram_step = b.step("run-terminal-db-diagram", "Run terminal database ER diagram example");
+    run_terminal_db_diagram_step.dependOn(&run_terminal_db_diagram.step);
+
     // Generate README assets (all hero formats)
     const generate_assets_example = b.addModule("generate_assets_example", .{
         .root_source_file = b.path("examples/generate_assets.zig"),
