@@ -453,6 +453,25 @@ pub fn build(b: *std.Build) void {
     const run_terminal_subgraph_styles_step = b.step("run-terminal-subgraph-styles", "Run terminal subgraph styles example");
     run_terminal_subgraph_styles_step.dependOn(&run_terminal_subgraph_styles.step);
 
+    // Terminal edge labels example
+    const terminal_edge_labels_mod = b.addModule("terminal_edge_labels", .{
+        .root_source_file = b.path("examples/terminal/edge_labels.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_edge_labels_exe = b.addExecutable(.{
+        .name = "terminal_edge_labels",
+        .root_module = terminal_edge_labels_mod,
+    });
+    b.installArtifact(terminal_edge_labels_exe);
+
+    const run_terminal_edge_labels = b.addRunArtifact(terminal_edge_labels_exe);
+    const run_terminal_edge_labels_step = b.step("run-terminal-edge-labels", "Run terminal edge labels example");
+    run_terminal_edge_labels_step.dependOn(&run_terminal_edge_labels.step);
+
     // Generate README assets (all hero formats)
     const generate_assets_example = b.addModule("generate_assets_example", .{
         .root_source_file = b.path("examples/generate_assets.zig"),

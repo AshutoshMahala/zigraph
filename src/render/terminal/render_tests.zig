@@ -17,6 +17,9 @@ const resolveColorAt = mod.resolveColorAt;
 const Buffer2D = mod.Buffer2D;
 const TerminalNodeStyle = mod.TerminalNodeStyle;
 const TerminalSubgraphStyle = mod.TerminalSubgraphStyle;
+const TerminalEdgeLabelStyle = mod.TerminalEdgeLabelStyle;
+const LabelPlacement = mod.LabelPlacement;
+const EdgeStyleContext = mod.EdgeStyleContext;
 const SubgraphStyleContext = mod.SubgraphStyleContext;
 const config_mod = @import("config.zig");
 const colormaps = @import("../color/colormaps.zig");
@@ -1637,4 +1640,220 @@ test "HTML output: html_pre_style rejects angle brackets" {
         .html_pre_style = "><script>alert(1)</script>",
     });
     try std.testing.expectError(error.InvalidHtmlPreStyle, result);
+}
+
+// ── Phase 7: Edge Labels ──────────────────────────────────────────────────────
+
+/// Build a standard vertical-edge IR used by several edge-label tests.
+/// Node A at (0,0,w=3), Node B at (0,6,w=3), direct edge from (1,0)→(1,6)
+/// with label "hi" pre-positioned at (label_x=3, label_y=3). Dims 8×7.
+fn buildVerticalLabelIR(layout_ir: *LayoutIR) !void {
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 0,
+        .y = 6,
+        .width = 3,
+        .center_x = 1,
+        .level = 1,
+        .level_position = 0,
+    });
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 1,
+        .to_y = 6,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+        .label = "hi",
+        .label_x = 3,
+        .label_y = 3,
+    });
+    layout_ir.setDimensions(8, 7);
+}
+
+test "edge labels: inline auto placement on vertical edge" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+    try buildVerticalLabelIR(&layout_ir);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .none,
+    });
+    defer allocator.free(output);
+
+    // Label must appear inline (quoted text in buffer row 3)
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"hi\"") != null);
+    // No overflow to legend
+    try std.testing.expect(std.mem.indexOf(u8, output, "Edge labels:") == null);
+}
+
+test "edge labels: near_source placement via style_fn" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+    try buildVerticalLabelIR(&layout_ir);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .none,
+        .edge_label_style_fn = &struct {
+            fn f(_: EdgeStyleContext) TerminalEdgeLabelStyle {
+                return .{ .placement = .near_source };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // near_source: target_y = from_y + 1 = 1 → label on row 1
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    _ = lines.next(); // row 0 (node A)
+    const row1 = lines.next().?;
+    try std.testing.expect(std.mem.indexOf(u8, row1, "\"hi\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Edge labels:") == null);
+}
+
+test "edge labels: near_target placement via style_fn" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+    try buildVerticalLabelIR(&layout_ir);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .none,
+        .edge_label_style_fn = &struct {
+            fn f(_: EdgeStyleContext) TerminalEdgeLabelStyle {
+                return .{ .placement = .near_target };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // near_target: target_y = to_y - 1 = 5 → label on row 5
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    _ = lines.next(); // row 0
+    _ = lines.next(); // row 1
+    _ = lines.next(); // row 2
+    _ = lines.next(); // row 3
+    _ = lines.next(); // row 4
+    const row5 = lines.next().?;
+    try std.testing.expect(std.mem.indexOf(u8, row5, "\"hi\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Edge labels:") == null);
+}
+
+test "edge labels: center placement via style_fn" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+    try buildVerticalLabelIR(&layout_ir);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .none,
+        .edge_label_style_fn = &struct {
+            fn f(_: EdgeStyleContext) TerminalEdgeLabelStyle {
+                return .{ .placement = .center };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // center: mid_y = (from_y + to_y) / 2 = 3 → label on row 3
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    _ = lines.next(); // row 0
+    _ = lines.next(); // row 1
+    _ = lines.next(); // row 2
+    const row3 = lines.next().?;
+    try std.testing.expect(std.mem.indexOf(u8, row3, "\"hi\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Edge labels:") == null);
+}
+
+test "edge labels: label_color override via style_fn" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+    try buildVerticalLabelIR(&layout_ir);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .ansi256,
+        .edge_label_style_fn = &struct {
+            fn f(_: EdgeStyleContext) TerminalEdgeLabelStyle {
+                return .{ .color = .{ .ansi256 = 196 } };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // ANSI 256 foreground escape for color 196: \x1b[38;5;196m
+    try std.testing.expect(std.mem.indexOf(u8, output, "\x1b[38;5;196m") != null);
+}
+
+test "edge labels: legend fallback in raw format" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    // Two nodes at the same row with a horizontal edge between them.
+    // The nodes occupy the only available row, leaving no room for inline placement.
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "A",
+        .x = 0,
+        .y = 0,
+        .width = 3,
+        .center_x = 1,
+        .level = 0,
+        .level_position = 0,
+    });
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "B",
+        .x = 6,
+        .y = 0,
+        .width = 3,
+        .center_x = 7,
+        .level = 0,
+        .level_position = 1,
+    });
+    // Horizontal edge: from_y == to_y == 0; node occupancy blocks all columns on row 0
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 1,
+        .from_y = 0,
+        .to_x = 7,
+        .to_y = 0,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+        .label = "depends",
+    });
+    layout_ir.setDimensions(10, 1);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .color_mode = .none,
+    });
+    defer allocator.free(output);
+
+    // Legend section must appear in raw output
+    try std.testing.expect(std.mem.indexOf(u8, output, "Edge labels:") != null);
+    // Raw format: plain quotes around label and UTF-8 arrow
+    try std.testing.expect(std.mem.indexOf(u8, output, "\"depends\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x86\x92") != null); // →
 }
