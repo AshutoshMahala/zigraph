@@ -662,6 +662,25 @@ pub fn build(b: *std.Build) void {
     const run_tui_step = b.step("run-tui", "Run interactive TUI demo (click on graph elements)");
     run_tui_step.dependOn(&run_tui.step);
 
+    // Terminal text attributes example (bold, dim, italic, underline)
+    const terminal_text_attrs_mod = b.addModule("terminal_text_attrs", .{
+        .root_source_file = b.path("examples/terminal/text_attrs.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_text_attrs_exe = b.addExecutable(.{
+        .name = "terminal_text_attrs",
+        .root_module = terminal_text_attrs_mod,
+    });
+    b.installArtifact(terminal_text_attrs_exe);
+
+    const run_terminal_text_attrs = b.addRunArtifact(terminal_text_attrs_exe);
+    const run_terminal_text_attrs_step = b.step("run-terminal-text-attrs", "Run terminal text attributes demo (bold, dim, italic, underline)");
+    run_terminal_text_attrs_step.dependOn(&run_terminal_text_attrs.step);
+
     // ── SVG Gallery Examples ────────────────────────────────────────────────
 
     const svg_gallery = [_]struct { file: []const u8, name: []const u8, desc: []const u8 }{

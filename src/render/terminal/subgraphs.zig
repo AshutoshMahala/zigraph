@@ -6,6 +6,7 @@
 const Buffer2D = @import("buffer.zig").Buffer2D;
 const config_mod = @import("config.zig");
 const CellColor = config_mod.CellColor;
+const TextAttrs = config_mod.TextAttrs;
 const SubgraphBorder = config_mod.SubgraphBorder;
 const LabelPosition = config_mod.LabelPosition;
 const TerminalSubgraphStyle = config_mod.TerminalSubgraphStyle;
@@ -72,6 +73,7 @@ pub fn paintSubgraphLabel(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: us
     if (w < 4 or h < 2) return;
 
     const color = config_mod.resolveColor(style.color);
+    const has_attrs = @as(u8, @bitCast(style.attrs)) != 0;
 
     switch (style.label_pos) {
         .top_left => {
@@ -82,6 +84,7 @@ pub fn paintSubgraphLabel(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: us
             const start = x + 2;
             for (label[0..display_len], 0..) |ch, i| {
                 setCell(buffer, start + i, y, @as(u21, ch), color);
+                if (has_attrs) buffer.setAttrs(start + i, y, style.attrs);
             }
         },
         .top_center => {
@@ -92,6 +95,7 @@ pub fn paintSubgraphLabel(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: us
             const start = x + 2 + (max_len - display_len) / 2;
             for (label[0..display_len], 0..) |ch, i| {
                 setCell(buffer, start + i, y, @as(u21, ch), color);
+                if (has_attrs) buffer.setAttrs(start + i, y, style.attrs);
             }
         },
         .inside => {
@@ -103,6 +107,7 @@ pub fn paintSubgraphLabel(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: us
             const start = x + 2;
             for (label[0..display_len], 0..) |ch, i| {
                 setCell(buffer, start + i, y + 1, @as(u21, ch), color);
+                if (has_attrs) buffer.setAttrs(start + i, y + 1, style.attrs);
             }
         },
     }

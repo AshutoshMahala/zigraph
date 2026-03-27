@@ -1,7 +1,9 @@
 //! Edge label painting and legend support for the terminal renderer.
 
 const Buffer2D = @import("buffer.zig").Buffer2D;
-const CellColor = @import("config.zig").CellColor;
+const config_mod = @import("config.zig");
+const CellColor = config_mod.CellColor;
+const TextAttrs = config_mod.TextAttrs;
 const j = @import("junctions.zig");
 
 /// Entry for the legend (labels that couldn't be placed inline).
@@ -25,13 +27,16 @@ pub fn canPlaceLabel(buffer: *const Buffer2D, label: []const u8, x: usize, y: us
     return true;
 }
 
-/// Paint a label as `"text"` at the given position with optional color.
-pub fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: CellColor) void {
+/// Paint a label as `"text"` at the given position with optional color and text attributes.
+pub fn paintLabel(buffer: *Buffer2D, label: []const u8, x: usize, y: usize, color: CellColor, text_attrs: TextAttrs) void {
     var px = x;
     buffer.setWithColor(px, y, '"', color);
     px += 1;
     for (label) |ch| {
         buffer.setWithColor(px, y, ch, color);
+        if (@as(u8, @bitCast(text_attrs)) != 0) {
+            buffer.setAttrs(px, y, text_attrs);
+        }
         px += 1;
     }
     buffer.setWithColor(px, y, '"', color);

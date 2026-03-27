@@ -288,9 +288,8 @@ pub const TerminalSubgraphStyle = struct {
     /// renderer and silently falls back to no color.
     color: Color = .default,
     label_pos: LabelPosition = .top_left,
-    // TODO: label text attributes (bold, dim, italic, underline) — requires
-    // ANSI text-attribute escape sequence support, which is not yet implemented
-    // for any terminal text output (nodes, edges, or subgraphs).
+    /// Text attributes for the subgraph label (bold, dim, italic, underline).
+    attrs: TextAttrs = .{},
 };
 
 // ── Default style functions ─────────────────────────────────────────────────

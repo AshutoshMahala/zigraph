@@ -7,6 +7,7 @@ const config_mod = @import("config.zig");
 const TerminalNodeStyle = config_mod.TerminalNodeStyle;
 const CellColor = config_mod.CellColor;
 const Color = config_mod.Color;
+const TextAttrs = config_mod.TextAttrs;
 const resolveColorAt = config_mod.resolveColorAt;
 
 /// Box-drawing character set for a 3-row node border.
@@ -100,24 +101,24 @@ pub fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: b
     switch (style.border) {
         // ── 1-row variants ──────────────────────────────────────────────
         .bracket => {
-            emitCell(buffer, x, actual_y, '[', style.border_color, style.bg_color, 0);
+            emitCell(buffer, x, actual_y, '[', style.border_color, style.bg_color, 0, .{});
             x += 1;
             for (node.label) |c| {
                 const t: f32 = @as(f32, @floatFromInt(x - node.x)) / w_f;
-                emitCell(buffer, x, actual_y, c, style.text_color, style.bg_color, t);
+                emitCell(buffer, x, actual_y, c, style.text_color, style.bg_color, t, style.attrs);
                 x += 1;
             }
-            emitCell(buffer, x, actual_y, ']', style.border_color, style.bg_color, 1.0);
+            emitCell(buffer, x, actual_y, ']', style.border_color, style.bg_color, 1.0, .{});
         },
         .angle => {
-            emitCell(buffer, x, actual_y, '<', style.border_color, style.bg_color, 0);
+            emitCell(buffer, x, actual_y, '<', style.border_color, style.bg_color, 0, .{});
             x += 1;
             for (node.label) |c| {
                 const t: f32 = @as(f32, @floatFromInt(x - node.x)) / w_f;
-                emitCell(buffer, x, actual_y, c, style.text_color, style.bg_color, t);
+                emitCell(buffer, x, actual_y, c, style.text_color, style.bg_color, t, style.attrs);
                 x += 1;
             }
-            emitCell(buffer, x, actual_y, '>', style.border_color, style.bg_color, 1.0);
+            emitCell(buffer, x, actual_y, '>', style.border_color, style.bg_color, 1.0, .{});
         },
         .none => {
             for (node.label) |c| {
@@ -125,7 +126,7 @@ pub fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: b
                     @as(f32, @floatFromInt(x - node.x)) / @as(f32, @floatFromInt(node.label.len - 1))
                 else
                     0.5;
-                emitCell(buffer, x, actual_y, c, style.text_color, style.bg_color, t);
+                emitCell(buffer, x, actual_y, c, style.text_color, style.bg_color, t, style.attrs);
                 x += 1;
             }
         },
@@ -143,19 +144,19 @@ pub fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: b
             const bc = boxCharsFor(style.border);
 
             // Top border row (rendered_y)
-            emitCell(buffer, x, rendered_y, bc.tl, style.border_color, style.bg_color, 0);
+            emitCell(buffer, x, rendered_y, bc.tl, style.border_color, style.bg_color, 0, .{});
             var col: usize = 1;
             while (col < w - 1) : (col += 1) {
                 const t: f32 = @as(f32, @floatFromInt(col)) / w_f;
-                emitCell(buffer, x + col, rendered_y, bc.h, style.border_color, style.bg_color, t);
+                emitCell(buffer, x + col, rendered_y, bc.h, style.border_color, style.bg_color, t, .{});
             }
             if (bc.tr != 0) {
-                emitCell(buffer, x + w - 1, rendered_y, bc.tr, style.border_color, style.bg_color, 1.0);
+                emitCell(buffer, x + w - 1, rendered_y, bc.tr, style.border_color, style.bg_color, 1.0, .{});
             }
 
             // Label row (rendered_y + 1)
             const label_y = rendered_y + 1;
-            emitCell(buffer, x, label_y, bc.v, style.border_color, style.bg_color, 0);
+            emitCell(buffer, x, label_y, bc.v, style.border_color, style.bg_color, 0, .{});
 
             var lx = x + 1;
             const inner_w = if (w >= 2) w - 2 else 0;
@@ -163,38 +164,38 @@ pub fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: b
             var fill: usize = 0;
             while (fill < pad) : (fill += 1) {
                 const t: f32 = @as(f32, @floatFromInt(lx - x)) / w_f;
-                emitCell(buffer, lx, label_y, ' ', style.text_color, style.bg_color, t);
+                emitCell(buffer, lx, label_y, ' ', style.text_color, style.bg_color, t, .{});
                 lx += 1;
             }
             for (node.label) |c| {
                 const t: f32 = @as(f32, @floatFromInt(lx - x)) / w_f;
-                emitCell(buffer, lx, label_y, c, style.text_color, style.bg_color, t);
+                emitCell(buffer, lx, label_y, c, style.text_color, style.bg_color, t, style.attrs);
                 lx += 1;
             }
             while (lx < x + w - 1) : (lx += 1) {
                 const t: f32 = @as(f32, @floatFromInt(lx - x)) / w_f;
-                emitCell(buffer, lx, label_y, ' ', style.text_color, style.bg_color, t);
+                emitCell(buffer, lx, label_y, ' ', style.text_color, style.bg_color, t, .{});
             }
-            emitCell(buffer, x + w - 1, label_y, bc.v, style.border_color, style.bg_color, 1.0);
+            emitCell(buffer, x + w - 1, label_y, bc.v, style.border_color, style.bg_color, 1.0, .{});
 
             // Bottom border row (rendered_y + 2)
             const bottom_y = rendered_y + 2;
             if (bc.bl != 0) {
-                emitCell(buffer, x, bottom_y, bc.bl, style.border_color, style.bg_color, 0);
+                emitCell(buffer, x, bottom_y, bc.bl, style.border_color, style.bg_color, 0, .{});
             }
             col = 1;
             while (col < w - 1) : (col += 1) {
                 const t: f32 = @as(f32, @floatFromInt(col)) / w_f;
-                emitCell(buffer, x + col, bottom_y, bc.h, style.border_color, style.bg_color, t);
+                emitCell(buffer, x + col, bottom_y, bc.h, style.border_color, style.bg_color, t, .{});
             }
-            emitCell(buffer, x + w - 1, bottom_y, bc.br, style.border_color, style.bg_color, 1.0);
+            emitCell(buffer, x + w - 1, bottom_y, bc.br, style.border_color, style.bg_color, 1.0, .{});
         },
     }
 }
 
-/// Emit a single cell with foreground + optional background color.
+/// Emit a single cell with foreground + optional background color + optional text attrs.
 /// `t` is the horizontal position within the node (0.0–1.0) for gradient sampling.
-inline fn emitCell(buffer: *Buffer2D, x: usize, y: usize, ch: u21, fg_color: Color, bg_color: Color, t: f32) void {
+inline fn emitCell(buffer: *Buffer2D, x: usize, y: usize, ch: u21, fg_color: Color, bg_color: Color, t: f32, text_attrs: TextAttrs) void {
     const fg = resolveColorAt(fg_color, t);
     if (fg.isSet()) {
         buffer.setWithColor(x, y, ch, fg);
@@ -204,5 +205,8 @@ inline fn emitCell(buffer: *Buffer2D, x: usize, y: usize, ch: u21, fg_color: Col
     const bg = resolveColorAt(bg_color, t);
     if (bg.isSet()) {
         buffer.setBgColor(x, y, bg);
+    }
+    if (@as(u8, @bitCast(text_attrs)) != 0) {
+        buffer.setAttrs(x, y, text_attrs);
     }
 }

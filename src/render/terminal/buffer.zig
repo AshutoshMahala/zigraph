@@ -5,15 +5,19 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const CellColor = @import("config.zig").CellColor;
+const config_mod = @import("config.zig");
+const CellColor = config_mod.CellColor;
+const TextAttrs = config_mod.TextAttrs;
 
 /// 2D buffer backed by a single flat allocation for cache efficiency.
-/// Includes per-cell foreground color plane (always allocated) and a lazy
-/// background color plane (allocated on first write — zero cost when unused).
+/// Includes per-cell foreground color plane (always allocated), a lazy
+/// background color plane (allocated on first write — zero cost when unused),
+/// and a lazy text-attributes plane (allocated on first write).
 pub const Buffer2D = struct {
     data: []u21,
     colors: []CellColor,
     bg_colors: ?[]CellColor,
+    attrs: ?[]TextAttrs,
     width: usize,
     height: usize,
     allocator_ref: Allocator,
@@ -31,13 +35,14 @@ pub const Buffer2D = struct {
         const color_plane = try allocator.alloc(CellColor, size);
         @memset(color_plane, CellColor.none);
 
-        return .{ .data = data, .colors = color_plane, .bg_colors = null, .width = w, .height = h, .allocator_ref = allocator };
+        return .{ .data = data, .colors = color_plane, .bg_colors = null, .attrs = null, .width = w, .height = h, .allocator_ref = allocator };
     }
 
     pub fn deinit(self: *Buffer2D, allocator: Allocator) void {
         allocator.free(self.data);
         allocator.free(self.colors);
         if (self.bg_colors) |bg| allocator.free(bg);
+        if (self.attrs) |a| allocator.free(a);
     }
 
     pub inline fn get(self: *const Buffer2D, x: usize, y: usize) u21 {
@@ -75,6 +80,19 @@ pub const Buffer2D = struct {
         return bg[y * self.width + x];
     }
 
+    /// Set text attributes for a cell, lazily allocating the attrs plane.
+    pub inline fn setAttrs(self: *Buffer2D, x: usize, y: usize, text_attrs: TextAttrs) void {
+        if (x >= self.width or y >= self.height) return;
+        const a = self.ensureAttrsPlane() orelse return;
+        a[y * self.width + x] = text_attrs;
+    }
+
+    pub inline fn getAttrs(self: *const Buffer2D, x: usize, y: usize) TextAttrs {
+        const a = self.attrs orelse return .{};
+        if (x >= self.width or y >= self.height) return .{};
+        return a[y * self.width + x];
+    }
+
     pub fn getRow(self: *const Buffer2D, y: usize) []const u21 {
         if (y >= self.height) return &.{};
         const start = y * self.width;
@@ -94,9 +112,21 @@ pub const Buffer2D = struct {
         return bg[start .. start + self.width];
     }
 
+    pub fn getAttrsRow(self: *const Buffer2D, y: usize) ?[]const TextAttrs {
+        const a = self.attrs orelse return null;
+        if (y >= self.height) return null;
+        const start = y * self.width;
+        return a[start .. start + self.width];
+    }
+
     /// Returns true if the background color plane has been allocated.
     pub inline fn hasBgPlane(self: *const Buffer2D) bool {
         return self.bg_colors != null;
+    }
+
+    /// Returns true if the text attributes plane has been allocated.
+    pub inline fn hasAttrsPlane(self: *const Buffer2D) bool {
+        return self.attrs != null;
     }
 
     /// Lazily allocate the background color plane on first use.
@@ -108,5 +138,16 @@ pub const Buffer2D = struct {
         @memset(bg, CellColor.none);
         self.bg_colors = bg;
         return bg;
+    }
+
+    /// Lazily allocate the text attributes plane on first use.
+    /// Returns null on OOM — callers silently degrade (no text attributes).
+    fn ensureAttrsPlane(self: *Buffer2D) ?[]TextAttrs {
+        if (self.attrs) |a| return a;
+        const size = self.width * self.height;
+        const a = self.allocator_ref.alloc(TextAttrs, size) catch return null;
+        @memset(a, TextAttrs{});
+        self.attrs = a;
+        return a;
     }
 };

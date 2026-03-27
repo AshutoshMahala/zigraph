@@ -203,10 +203,10 @@ pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {
 
 /// Render a LayoutIR to a Unicode string with configuration.
 pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config: Config) ![]u8 {
-    var list = std.ArrayList(u8).init(allocator);
-    errdefer list.deinit();
-    try renderStreamingWithConfig(layout_ir, list.writer(), allocator, config);
-    return try list.toOwnedSlice();
+    var list: std.ArrayListUnmanaged(u8) = .{};
+    errdefer list.deinit(allocator);
+    try renderStreamingWithConfig(layout_ir, list.writer(allocator), allocator, config);
+    return try list.toOwnedSlice(allocator);
 }
 
 /// Serialize a Buffer2D to a writer using the `.raw` terminal format.
@@ -221,7 +221,9 @@ pub fn serializeBuffer(buffer: *const Buffer2D, writer: anytype, config: Config,
     const use_ascii = config.char_set == .ascii;
     var last_fg: CellColor = CellColor.none;
     var last_bg: CellColor = CellColor.none;
+    var last_attrs: TextAttrs = .{};
     const has_bg = buffer.hasBgPlane();
+    const has_attrs = buffer.hasAttrsPlane();
 
     const safe_height = @min(render_height, buffer.height);
 
@@ -229,6 +231,7 @@ pub fn serializeBuffer(buffer: *const Buffer2D, writer: anytype, config: Config,
         const row = buffer.getRow(y);
         const color_row = buffer.getColorRow(y);
         const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
+        const attrs_row: ?[]const TextAttrs = if (has_attrs) buffer.getAttrsRow(y) else null;
 
         var end: usize = row.len;
         while (end > 0 and row[end - 1] == ' ') end -= 1;
@@ -239,22 +242,45 @@ pub fn serializeBuffer(buffer: *const Buffer2D, writer: anytype, config: Config,
             if (config.color_mode != .none) {
                 const cell_fg = color_row[xi];
                 const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
+                const cell_attrs: TextAttrs = if (attrs_row) |ar| ar[xi] else .{};
 
-                if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
-                    try emitFgEscape(writer, cell_fg, config.color_mode);
-                    last_fg = cell_fg;
-                } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                // Check if attrs changed — if so, full reset + re-apply everything
+                if (@as(u8, @bitCast(cell_attrs)) != @as(u8, @bitCast(last_attrs))) {
                     try writer.writeAll(colors.escape.reset);
                     last_fg = CellColor.none;
                     last_bg = CellColor.none;
-                }
+                    last_attrs = cell_attrs;
+                    if (@as(u8, @bitCast(cell_attrs)) != 0) {
+                        try emitAttrsEscape(writer, cell_attrs);
+                    }
+                    // Re-emit colors after reset
+                    if (cell_fg.isSet()) {
+                        try emitFgEscape(writer, cell_fg, config.color_mode);
+                        last_fg = cell_fg;
+                    }
+                    if (cell_bg.isSet()) {
+                        try emitBgEscape(writer, cell_bg, config.color_mode);
+                        last_bg = cell_bg;
+                    }
+                } else {
+                    // Attrs unchanged — handle fg/bg transitions normally
+                    if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
+                        try emitFgEscape(writer, cell_fg, config.color_mode);
+                        last_fg = cell_fg;
+                    } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                        try writer.writeAll(colors.escape.reset);
+                        last_fg = CellColor.none;
+                        last_bg = CellColor.none;
+                        last_attrs = .{};
+                    }
 
-                if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
-                    try emitBgEscape(writer, cell_bg, config.color_mode);
-                    last_bg = cell_bg;
-                } else if (!cell_bg.isSet() and last_bg.isSet()) {
-                    try writer.writeAll("\x1b[49m");
-                    last_bg = CellColor.none;
+                    if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
+                        try emitBgEscape(writer, cell_bg, config.color_mode);
+                        last_bg = cell_bg;
+                    } else if (!cell_bg.isSet() and last_bg.isSet()) {
+                        try writer.writeAll("\x1b[49m");
+                        last_bg = CellColor.none;
+                    }
                 }
             }
 
@@ -263,10 +289,11 @@ pub fn serializeBuffer(buffer: *const Buffer2D, writer: anytype, config: Config,
             try writer.writeAll(enc_buf[0..len]);
         }
 
-        if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet())) {
+        if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet() or @as(u8, @bitCast(last_attrs)) != 0)) {
             try writer.writeAll(colors.escape.reset);
             last_fg = CellColor.none;
             last_bg = CellColor.none;
+            last_attrs = .{};
         }
 
         try writer.writeByte('\n');
@@ -337,7 +364,7 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
     for (plan.label_plans) |lp| {
         switch (lp.placement) {
             .placed => |pos| {
-                label_render.paintLabel(&buffer, lp.label, pos.x, pos.y, lp.color);
+                label_render.paintLabel(&buffer, lp.label, pos.x, pos.y, lp.color, lp.attrs);
             },
             .legend => {}, // legend entries handled below
         }
@@ -359,7 +386,7 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
     for (plan.self_loops) |sl| {
         buffer.setWithColor(sl.loop_x, sl.label_row, 0x21BA, sl.color); // ↺
         if (sl.label) |elabel| {
-            label_render.paintLabel(&buffer, elabel, sl.loop_x + 1, sl.label_row, sl.color);
+            label_render.paintLabel(&buffer, elabel, sl.loop_x + 1, sl.label_row, sl.color, .{});
         }
     }
 
@@ -370,12 +397,15 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
         .raw => {
             var last_fg: CellColor = CellColor.none;
             var last_bg: CellColor = CellColor.none;
+            var last_attrs: TextAttrs = .{};
             const has_bg = buffer.hasBgPlane();
+            const has_attrs_plane = buffer.hasAttrsPlane();
 
             for (0..height) |y| {
                 const row = buffer.getRow(y);
                 const color_row = buffer.getColorRow(y);
                 const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
+                const attrs_row: ?[]const TextAttrs = if (has_attrs_plane) buffer.getAttrsRow(y) else null;
 
                 var end: usize = row.len;
                 while (end > 0 and row[end - 1] == ' ') {
@@ -388,22 +418,42 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
                     if (config.color_mode != .none) {
                         const cell_fg = color_row[xi];
                         const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
+                        const cell_attrs: TextAttrs = if (attrs_row) |ar| ar[xi] else .{};
 
-                        if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
-                            try emitFgEscape(writer, cell_fg, config.color_mode);
-                            last_fg = cell_fg;
-                        } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                        if (@as(u8, @bitCast(cell_attrs)) != @as(u8, @bitCast(last_attrs))) {
                             try writer.writeAll(colors.escape.reset);
                             last_fg = CellColor.none;
                             last_bg = CellColor.none;
-                        }
+                            last_attrs = cell_attrs;
+                            if (@as(u8, @bitCast(cell_attrs)) != 0) {
+                                try emitAttrsEscape(writer, cell_attrs);
+                            }
+                            if (cell_fg.isSet()) {
+                                try emitFgEscape(writer, cell_fg, config.color_mode);
+                                last_fg = cell_fg;
+                            }
+                            if (cell_bg.isSet()) {
+                                try emitBgEscape(writer, cell_bg, config.color_mode);
+                                last_bg = cell_bg;
+                            }
+                        } else {
+                            if (cell_fg.isSet() and !cellColorEql(cell_fg, last_fg)) {
+                                try emitFgEscape(writer, cell_fg, config.color_mode);
+                                last_fg = cell_fg;
+                            } else if (!cell_fg.isSet() and last_fg.isSet()) {
+                                try writer.writeAll(colors.escape.reset);
+                                last_fg = CellColor.none;
+                                last_bg = CellColor.none;
+                                last_attrs = .{};
+                            }
 
-                        if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
-                            try emitBgEscape(writer, cell_bg, config.color_mode);
-                            last_bg = cell_bg;
-                        } else if (!cell_bg.isSet() and last_bg.isSet()) {
-                            try writer.writeAll("\x1b[49m");
-                            last_bg = CellColor.none;
+                            if (cell_bg.isSet() and !cellColorEql(cell_bg, last_bg)) {
+                                try emitBgEscape(writer, cell_bg, config.color_mode);
+                                last_bg = cell_bg;
+                            } else if (!cell_bg.isSet() and last_bg.isSet()) {
+                                try writer.writeAll("\x1b[49m");
+                                last_bg = CellColor.none;
+                            }
                         }
                     }
 
@@ -412,10 +462,11 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
                     try writer.writeAll(buf[0..len]);
                 }
 
-                if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet())) {
+                if (config.color_mode != .none and (last_fg.isSet() or last_bg.isSet() or @as(u8, @bitCast(last_attrs)) != 0)) {
                     try writer.writeAll(colors.escape.reset);
                     last_fg = CellColor.none;
                     last_bg = CellColor.none;
+                    last_attrs = .{};
                 }
 
                 try writer.writeByte('\n');
@@ -435,11 +486,13 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
             try writer.writeAll("\">\n");
             var span_open = false;
             const has_bg = buffer.hasBgPlane();
+            const has_attrs_plane = buffer.hasAttrsPlane();
 
             for (0..height) |y| {
                 const row = buffer.getRow(y);
                 const color_row = buffer.getColorRow(y);
                 const bg_row: ?[]const CellColor = if (has_bg) buffer.getBgColorRow(y) else null;
+                const attrs_row: ?[]const TextAttrs = if (has_attrs_plane) buffer.getAttrsRow(y) else null;
 
                 var end: usize = row.len;
                 while (end > 0 and row[end - 1] == ' ') {
@@ -450,15 +503,40 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
                     const codepoint = if (use_ascii) junction_mod.toAscii(row[xi]) else row[xi];
                     const cell_fg = color_row[xi];
                     const cell_bg: CellColor = if (bg_row) |bgr| bgr[xi] else CellColor.none;
-                    const has_color = cell_fg.isSet() or cell_bg.isSet();
+                    const cell_attrs: TextAttrs = if (attrs_row) |ar| ar[xi] else .{};
+                    const has_style = cell_fg.isSet() or cell_bg.isSet() or @as(u8, @bitCast(cell_attrs)) != 0;
 
-                    if (has_color) {
+                    if (has_style) {
                         if (span_open) try writer.writeAll("</span>");
                         try writer.writeAll("<span style=\"");
-                        if (cell_fg.isSet()) try emitHtmlFgColor(writer, cell_fg);
+                        var need_sep = false;
+                        if (cell_fg.isSet()) {
+                            try emitHtmlFgColor(writer, cell_fg);
+                            need_sep = true;
+                        }
                         if (cell_bg.isSet()) {
-                            if (cell_fg.isSet()) try writer.writeByte(';');
+                            if (need_sep) try writer.writeByte(';');
                             try emitHtmlBgColor(writer, cell_bg);
+                            need_sep = true;
+                        }
+                        if (cell_attrs.bold) {
+                            if (need_sep) try writer.writeByte(';');
+                            try writer.writeAll("font-weight:bold");
+                            need_sep = true;
+                        }
+                        if (cell_attrs.italic) {
+                            if (need_sep) try writer.writeByte(';');
+                            try writer.writeAll("font-style:italic");
+                            need_sep = true;
+                        }
+                        if (cell_attrs.underline) {
+                            if (need_sep) try writer.writeByte(';');
+                            try writer.writeAll("text-decoration:underline");
+                            need_sep = true;
+                        }
+                        if (cell_attrs.dim) {
+                            if (need_sep) try writer.writeByte(';');
+                            try writer.writeAll("opacity:0.7");
                         }
                         try writer.writeAll("\">");
                         span_open = true;
@@ -555,6 +633,15 @@ fn emitBgEscape(writer: anytype, cc: CellColor, mode: ColorMode) !void {
             else => {},
         },
     }
+}
+
+/// Emit ANSI escape sequences for text attributes (bold, dim, italic, underline).
+/// Each attribute is a separate SGR parameter. Called after a reset when attrs change.
+fn emitAttrsEscape(writer: anytype, text_attrs: TextAttrs) !void {
+    if (text_attrs.bold) try writer.writeAll("\x1b[1m");
+    if (text_attrs.dim) try writer.writeAll("\x1b[2m");
+    if (text_attrs.italic) try writer.writeAll("\x1b[3m");
+    if (text_attrs.underline) try writer.writeAll("\x1b[4m");
 }
 
 // ── HTML serialization helpers ──────────────────────────────────────────────

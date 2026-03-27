@@ -25,6 +25,7 @@ const MarkerShape = config_mod.MarkerShape;
 const NodeStyleContext = config_mod.NodeStyleContext;
 const EdgeStyleContext = config_mod.EdgeStyleContext;
 const LabelPlacement = config_mod.LabelPlacement;
+const TextAttrs = config_mod.TextAttrs;
 const resolveColor = config_mod.resolveColor;
 const label_render = @import("labels.zig");
 const LegendEntry = label_render.LegendEntry;
@@ -113,6 +114,7 @@ pub const LabelPlan = struct {
     },
     label: []const u8,
     color: CellColor,
+    attrs: TextAttrs,
     from_id: usize,
     to_id: usize,
 };
@@ -409,6 +411,7 @@ pub const RenderPlan = struct {
                 edge_index: usize,
                 label: []const u8,
                 label_color: CellColor,
+                label_attrs: TextAttrs,
                 placement: LabelPlacement,
                 from_id: usize,
                 to_id: usize,
@@ -448,6 +451,7 @@ pub const RenderPlan = struct {
                         .edge_index = ei,
                         .label = label,
                         .label_color = label_color,
+                        .label_attrs = label_style.attrs,
                         .placement = label_style.placement,
                         .from_id = edge.from_id,
                         .to_id = edge.to_id,
@@ -494,6 +498,7 @@ pub const RenderPlan = struct {
                         .placement = .{ .placed = .{ .x = pos.x, .y = pos.y } },
                         .label = cand.label,
                         .color = cand.label_color,
+                        .attrs = cand.label_attrs,
                         .from_id = cand.from_id,
                         .to_id = cand.to_id,
                     });
@@ -503,6 +508,7 @@ pub const RenderPlan = struct {
                         .placement = .legend,
                         .label = cand.label,
                         .color = cand.label_color,
+                        .attrs = cand.label_attrs,
                         .from_id = cand.from_id,
                         .to_id = cand.to_id,
                     });

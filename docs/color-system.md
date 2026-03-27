@@ -284,19 +284,19 @@ Named constants for common UI meanings:
 
 ```zig
 color.semantic.success    // "#30a46c" green
-color.semantic.warning    // "#f59e0b" amber
+color.semantic.warning    // "#f76b15" orange
 color.semantic.error_     // "#e5484d" red
-color.semantic.info       // "#3b82f6" blue
-color.semantic.neutral    // "#64748b" gray
-color.semantic.highlight  // "#8b5cf6" purple
+color.semantic.info       // "#3e63dd" blue
+color.semantic.neutral    // "#666666" gray
+color.semantic.highlight  // "#ffe629" yellow
 ```
 
 ### Utilities
 
 ```zig
-color.isValidHex("#3b82f6")     // true
+color.isValidHex("#3e63dd")     // true
 color.isValidHex("#xyz")        // false
-color.hexToAnsi256("#3b82f6")   // nearest 256-color code (approx)
+color.hexToAnsi256("#3e63dd")   // nearest 256-color code (approx)
 ```
 
 ## Limitations
