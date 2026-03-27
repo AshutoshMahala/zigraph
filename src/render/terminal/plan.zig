@@ -797,6 +797,13 @@ fn optimizeHorizontalRows(edge_plans: []EdgePlan, alloc: Allocator) void {
         indices: std.ArrayListUnmanaged(usize),
     };
     var groups = std.AutoHashMapUnmanaged(usize, HyGroup){};
+    defer {
+        var git = groups.iterator();
+        while (git.next()) |entry| {
+            entry.value_ptr.indices.deinit(alloc);
+        }
+        groups.deinit(alloc);
+    }
 
     for (edge_plans, 0..) |ep, i| {
         switch (ep.edge.path) {

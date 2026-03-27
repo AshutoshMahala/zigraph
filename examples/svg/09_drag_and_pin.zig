@@ -413,10 +413,12 @@ fn handleRequest(
 
     // POST /api/layout → run layout and return JSON
     if (request.head.method == .POST and std.mem.eql(u8, target, "/api/layout")) {
-        // Read body using the new Zig 0.15.2 body reader API
-        var body_read_buf: [4096]u8 = undefined;
-        const body_reader = request.readerExpectNone(&body_read_buf);
-        const body = body_reader.allocRemaining(allocator, std.Io.Limit.limited(65536)) catch &[_]u8{};
+        // Read body via 0.14 reader API
+        const body_reader = request.reader() catch {
+            try request.respond("Bad Request", .{ .status = .bad_request });
+            return;
+        };
+        const body = body_reader.readAllAlloc(allocator, 65536) catch &[_]u8{};
         defer allocator.free(body);
 
         // Parse algorithm
@@ -529,10 +531,7 @@ pub fn main() !void {
         const conn = listener.accept() catch continue;
         defer conn.stream.close();
         var read_buf: [8192]u8 = undefined;
-        var send_buf: [8192]u8 = undefined;
-        var connection_reader = conn.stream.reader(&read_buf);
-        var connection_writer = conn.stream.writer(&send_buf);
-        var server: std.http.Server = .init(connection_reader.interface(), &connection_writer.interface);
+        var server = std.http.Server.init(conn, &read_buf);
         while (true) {
             var req = server.receiveHead() catch break;
             handleRequest(&req, allocator, html_page) catch break;
