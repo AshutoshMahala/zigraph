@@ -453,7 +453,7 @@ Benchmarks on Apple M2 (zig build run-benchmark):
   Graph API → Layout Engine → LayoutIR → Renderer → Output
                   │                          │
         ┌─────────┴──────────┐    ┌──────────┼──────────┐
-        Sugiyama       FDG        SVG    Unicode    JSON
+        Sugiyama           FDG    SVG    Unicode     JSON
      (hierarchical) (force-dir)  (styled)  (ANSI)  (data)
 ```
 
@@ -505,6 +505,50 @@ zig build run-svg-04       # Clusters
 zig build run-svg-05       # Dark theme
 zig build run-svg-06       # Interactive
 zig build run-svg-07       # Heatmap
+```
+</details>
+
+## Terminal Gallery
+
+The terminal renderer supports ANSI 256 / truecolor output with box-drawing characters, gradient edges, and custom node shapes. Each example demonstrates a specific feature.
+
+> See [Terminal Customization Guide](docs/terminal-customization.md) for the complete API reference.
+
+| 01 — Node Control | 02 — Edge Styles | 03 — Color System |
+|:---:|:---:|:---:|
+| <img src="assets/gallery/terminal_01_node_control.png" width="280"> | <img src="assets/gallery/terminal_02_edge_styles.png" width="280"> | <img src="assets/gallery/terminal_03_color_system.png" width="280"> |
+| Borders, colors, gradients | Line weights + marker shapes | Color modes, palettes, gradients |
+
+| 04 — Edge Labels | 05 — Subgraph Styles | 06 — Output Formats |
+|:---:|:---:|:---:|
+| <img src="assets/gallery/terminal_04_edge_labels.png" width="280"> | <img src="assets/gallery/terminal_05_subgraph_styles.png" width="280"> | <img src="assets/gallery/terminal_06_output_formats.png" width="280"> |
+| Label placement + colored labels | Nested borders, depth-cycled colors | ASCII charset, HTML `<pre>` output |
+
+| 07 — Record Nodes | 08 — DB Diagram | 10 — Interactive TUI |
+|:---:|:---:|:---:|
+| <img src="assets/gallery/terminal_07_record_nodes.png" width="280"> | <img src="assets/gallery/terminal_08_db_diagram.png" width="280"> | <img src="assets/gallery/terminal_10_interactive_tui.png" width="280"> |
+| ER-style multi-row record boxes | CRM schema with PK/FK color coding | Click-to-select with hit-testing |
+
+| 11 — Text Attributes |
+|:---:|
+| <img src="assets/gallery/terminal_11_text_attrs.png" width="280"> |
+| Bold, dim, italic, underline |
+
+<details>
+<summary><strong>Run individual examples</strong></summary>
+
+```bash
+zig build run-terminal-node-control      # Node borders + colors
+zig build run-terminal-edge-styles       # Edge weights + markers
+zig build run-terminal-color-system      # Color modes + gradients
+zig build run-terminal-edge-labels       # Label placement
+zig build run-terminal-subgraph-styles   # Subgraph borders + nesting
+zig build run-output-formats             # ASCII + HTML output
+zig build run-terminal-record-nodes      # Record-style nodes
+zig build run-terminal-db-diagram        # ER diagram
+zig build run-streaming                  # Streaming render
+zig build run-tui                        # Interactive TUI
+zig build run-terminal-text-attrs        # Text attributes
 ```
 </details>
 

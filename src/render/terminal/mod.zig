@@ -176,10 +176,10 @@ pub fn renderGeneric(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coo
 
 /// Render any GenericLayoutIR to a Unicode string with configuration.
 pub fn renderGenericWithConfig(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator, config: Config) ![]u8 {
-    var list = std.ArrayList(u8).init(allocator);
-    errdefer list.deinit();
-    try renderGenericStreamingWithConfig(Coord, layout_ir, list.writer(), allocator, config);
-    return try list.toOwnedSlice();
+    var list: std.ArrayListUnmanaged(u8) = .{};
+    errdefer list.deinit(allocator);
+    try renderGenericStreamingWithConfig(Coord, layout_ir, list.writer(allocator), allocator, config);
+    return try list.toOwnedSlice(allocator);
 }
 
 /// Stream-render any GenericLayoutIR to a writer.

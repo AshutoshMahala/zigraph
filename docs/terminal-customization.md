@@ -15,8 +15,8 @@ This guide covers every knob the terminal renderer exposes, from simple border c
 > | 6 | `zig build run-output-formats` | ASCII charset, HTML output |
 > | 7 | `zig build run-terminal-record-nodes` | Custom record-style nodes |
 > | 8 | `zig build run-terminal-db-diagram` | Full ER diagram with FK edges |
-> | 9 | `zig build run-streaming-demo` | Streaming render to stdout (zero-copy) |
-> | 10 | `zig build run-interactive-tui` | Interactive click-to-select with hit-testing |
+> | 9 | `zig build run-streaming` | Streaming render to stdout (zero-copy) |
+> | 10 | `zig build run-tui` | Interactive click-to-select with hit-testing |
 > | 11 | `zig build run-terminal-text-attrs` | Bold, dim, italic, underline on labels |
 
 ---
