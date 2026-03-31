@@ -27,9 +27,9 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    const stdout = std.io.getStdOut();
-    const writer = stdout.writer();
-    const stdin = std.io.getStdIn();
+    const stdout = std.fs.File.stdout();
+    const writer = stdout.deprecatedWriter();
+    const stdin = std.fs.File.stdin();
 
     // Build a demo graph
     var graph = zigraph.Graph.init(allocator);
@@ -182,7 +182,7 @@ fn enableRawMode(fd: posix.fd_t) !posix.termios {
 }
 
 fn restoreTerminal(stdout: std.fs.File, fd: posix.fd_t, orig: posix.termios) void {
-    const w = stdout.writer();
+    const w = stdout.deprecatedWriter();
     w.writeAll("\x1b[?1000l\x1b[?1006l") catch {}; // disable mouse
     w.writeAll("\x1b[?25h") catch {}; // show cursor
     w.writeAll("\x1b[0m") catch {}; // reset attributes

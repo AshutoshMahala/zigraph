@@ -238,7 +238,7 @@ pub fn main() !void {
 
     // ── Serialize ──────────────────────────────────────────────────────────────
 
-    const stdout = std.io.getStdOut().writer();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
     try T.serializeBuffer(&buf, stdout, render_config, plan.height + extra_rows);
 
     // ── Legend ────────────────────────────────────────────────────────────────

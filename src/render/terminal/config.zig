@@ -123,7 +123,7 @@ pub fn resolveColor(color: Color) CellColor {
         .default => CellColor.none,
         .ansi256 => |v| CellColor.ansi256(v),
         .rgb => |v| CellColor.rgb(v.r, v.g, v.b),
-        .gradient => CellColor.none,
+        .gradient => resolveColorAt(color, 0.5),
     };
 }
 

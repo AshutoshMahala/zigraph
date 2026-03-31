@@ -114,9 +114,5 @@ pub fn paintSubgraphLabel(buffer: *Buffer2D, x: usize, y: usize, w: usize, h: us
 }
 
 inline fn setCell(buffer: *Buffer2D, x: usize, y: usize, ch: u21, color: CellColor) void {
-    if (color.isSet()) {
-        buffer.setWithColor(x, y, ch, color);
-    } else {
-        buffer.set(x, y, ch);
-    }
+    buffer.setWithColor(x, y, ch, color);
 }

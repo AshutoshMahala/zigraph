@@ -249,6 +249,7 @@ pub fn main() !void {
         const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
             .color_mode = .ansi256,
             .node_style_fn = &coloredNodeStyle,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
         std.debug.print("{s}\n", .{output});
@@ -269,6 +270,7 @@ pub fn main() !void {
         const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
             .color_mode = .ansi256,
             .node_style_fn = &bgColorNodeStyle,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
         std.debug.print("{s}\n", .{output});
@@ -289,6 +291,7 @@ pub fn main() !void {
         const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
             .color_mode = .ansi256,
             .node_style_fn = &textAttrsNodeStyle,
+            .edge_palette = &zigraph.color.ansi_dark,
         });
         defer allocator.free(output);
         std.debug.print("{s}\n", .{output});

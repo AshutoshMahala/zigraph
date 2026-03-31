@@ -197,11 +197,7 @@ pub fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: b
 /// `t` is the horizontal position within the node (0.0–1.0) for gradient sampling.
 inline fn emitCell(buffer: *Buffer2D, x: usize, y: usize, ch: u21, fg_color: Color, bg_color: Color, t: f32, text_attrs: TextAttrs) void {
     const fg = resolveColorAt(fg_color, t);
-    if (fg.isSet()) {
-        buffer.setWithColor(x, y, ch, fg);
-    } else {
-        buffer.set(x, y, ch);
-    }
+    buffer.setWithColor(x, y, ch, fg);
     const bg = resolveColorAt(bg_color, t);
     if (bg.isSet()) {
         buffer.setBgColor(x, y, bg);

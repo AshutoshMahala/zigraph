@@ -27,6 +27,7 @@ const EdgeStyleContext = config_mod.EdgeStyleContext;
 const LabelPlacement = config_mod.LabelPlacement;
 const TextAttrs = config_mod.TextAttrs;
 const resolveColor = config_mod.resolveColor;
+const Color = config_mod.Color;
 const label_render = @import("labels.zig");
 const LegendEntry = label_render.LegendEntry;
 const colors = @import("../color/mod.zig");
@@ -57,6 +58,7 @@ pub const PlanElement = struct {
 pub const EdgePlan = struct {
     edge: LayoutEdge,
     color: CellColor,
+    style_color: Color,
     weight: LineWeight,
     marker_end: MarkerShape,
     marker_start: MarkerShape,
@@ -277,6 +279,14 @@ pub const RenderPlan = struct {
             else
                 CellColor.none;
 
+            // Preserve the original Color for gradient-aware painting.
+            const style_color: Color = if (style.color != .default)
+                style.color
+            else if (config.edge_palette) |palette|
+                Color{ .ansi256 = colors.getAnsi(palette, edge.edge_index) }
+            else
+                .default;
+
             const te = if (total_extra == 0)
                 edge
             else
@@ -285,6 +295,7 @@ pub const RenderPlan = struct {
             edge_plans_list.appendAssumeCapacity(.{
                 .edge = te,
                 .color = edge_color,
+                .style_color = style_color,
                 .weight = style.weight,
                 .marker_end = style.marker_end,
                 .marker_start = style.marker_start,
@@ -1099,6 +1110,7 @@ fn makeTestEdgePlan(from_x: usize, to_x: usize, from_y: usize, to_y: usize, h_y:
             .edge_index = 0,
         },
         .color = CellColor.none,
+        .style_color = .default,
         .weight = .light,
         .marker_end = .arrow,
         .marker_start = .none,
@@ -1120,6 +1132,7 @@ fn makeTestDirectEdgePlan(from_x: usize, to_x: usize, from_y: usize, to_y: usize
             .edge_index = 0,
         },
         .color = CellColor.none,
+        .style_color = .default,
         .weight = .light,
         .marker_end = .arrow,
         .marker_start = .none,
@@ -1264,6 +1277,7 @@ test "elementAt: edge hit" {
                 .edge_index = 3,
             },
             .color = CellColor.none,
+            .style_color = .default,
             .weight = .light,
             .marker_end = .arrow,
             .marker_start = .none,
@@ -1308,6 +1322,7 @@ test "elementAt: node takes priority over edge" {
                 .edge_index = 0,
             },
             .color = CellColor.none,
+            .style_color = .default,
             .weight = .light,
             .marker_end = .arrow,
             .marker_start = .none,

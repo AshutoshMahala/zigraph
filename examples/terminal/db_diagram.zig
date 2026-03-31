@@ -116,7 +116,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    const stdout = std.io.getStdOut().writer();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     try stdout.writeAll(
         \\╔════════════════════════════════════════════════════════════╗
@@ -201,7 +201,7 @@ pub fn main() !void {
     // ── Z1: Paint edges (route lines between levels) ──────────────────────────
 
     for (plan.edge_plans) |ep| {
-        T.paintEdge(&buf, &ep.edge, ep.color, ep.weight, ep.marker_end, ep.marker_start);
+        T.paintEdge(&buf, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start);
     }
 
     // ── Z4: Paint header boxes (overwrites edge markers inside box footprint) ─
@@ -379,7 +379,6 @@ pub fn main() !void {
     defer buf2.deinit(alloc);
 
     // Z1: Paint edges with origin-shifted coordinates.
-    const edge_cc2 = T.resolveColorAt(EDGE_COLOR, 0.0);
     for (edges2) |edge| {
         var e = edge;
         e.from_x = edge.from_x -| min_x2;
@@ -388,7 +387,7 @@ pub fn main() !void {
         e.to_y = edge.to_y -| min_y2;
         e.label_x = edge.label_x -| min_x2;
         e.label_y = edge.label_y -| min_y2;
-        T.paintEdge(&buf2, &e, edge_cc2, .light, .arrow, .none);
+        T.paintEdge(&buf2, &e, EDGE_COLOR, .light, .arrow, .none);
     }
 
     // Shared header style (same colour palette as Sugiyama section)

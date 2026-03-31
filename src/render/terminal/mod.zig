@@ -138,6 +138,7 @@ pub const CP_DB_H_LINE = junction_mod.CP_DB_H_LINE;
 
 // Paint functions (public for advanced usage / tests)
 pub const paintEdge = edge_render.paintEdge;
+pub const EdgeColor = edge_render.EdgeColor;
 pub const paintNode = node_render.paintNode;
 pub const paintSubgraphBox = subgraph_render.paintSubgraphBox;
 pub const paintSubgraphLabel = subgraph_render.paintSubgraphLabel;
@@ -327,7 +328,7 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
 
     // Z1: Paint edges
     for (plan.edge_plans) |ep| {
-        edge_render.paintEdge(&buffer, &ep.edge, ep.color, ep.weight, ep.marker_end, ep.marker_start);
+        edge_render.paintEdge(&buffer, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start);
     }
 
     // Z2: Dummy node cleanup
@@ -336,13 +337,32 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
         const y = df.rendered_y;
         const lh = df.level_height;
 
+        // Propagate edge color from adjacent cells (above or below the band).
+        // Edge painting (Z1) doesn't cover the dummy's level band, so cells
+        // within the band would otherwise remain colorless.
+        const edge_color = blk: {
+            if (y > 0) {
+                const c = buffer.getColor(x, y - 1);
+                if (c.isSet()) break :blk c;
+            }
+            if (y + lh < height) {
+                const c = buffer.getColor(x, y + lh);
+                if (c.isSet()) break :blk c;
+            }
+            break :blk CellColor.none;
+        };
+
         var dy: usize = 0;
         while (dy < lh) : (dy += 1) {
             const row = y + dy;
             if (row < height) {
                 const current = buffer.get(x, row);
                 const merged = junction_mod.mergeJunction(current, true, true, false, false);
-                buffer.set(x, row, merged);
+                if (edge_color.isSet()) {
+                    buffer.setWithColor(x, row, merged, edge_color);
+                } else {
+                    buffer.set(x, row, merged);
+                }
             }
         }
         if (y > 0) {
