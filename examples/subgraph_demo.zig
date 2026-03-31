@@ -1,7 +1,7 @@
 //! Subgraph Demo — hierarchical clustering with visual output
 //!
 //! Demonstrates subgraph support across all renderers:
-//! 1. Unicode (terminal) — double-line box borders
+//! 1. Terminal (box-drawing) — double-line box borders
 //! 2. SVG (file) — dashed rounded rectangles
 //! 3. JSON (file) — schema v1.2 with subgraph bounding boxes
 //!
@@ -44,13 +44,13 @@ pub fn main() !void {
         const backend = try g.addSubgraph("backend");
         try g.putNodes(&.{ 2, 3 }).inside(backend);
 
-        // Unicode output
+        // Terminal output
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();
 
-        const unicode = try zigraph.unicode.renderGeneric(usize, &ir, allocator);
-        defer allocator.free(unicode);
-        std.debug.print("{s}\n", .{unicode});
+        const term_output = try zigraph.terminal.renderGeneric(usize, &ir, allocator);
+        defer allocator.free(term_output);
+        std.debug.print("{s}\n", .{term_output});
 
         // Show subgraph bounding box info
         std.debug.print("Subgraph bounding boxes:\n", .{});
@@ -92,13 +92,13 @@ pub fn main() !void {
         try g.putNodes(&.{ 2, 5 }).inside(services);
         try g.putNodes(&.{ 3, 4 }).inside(auth);
 
-        // Unicode output
+        // Terminal output
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();
 
-        const unicode = try zigraph.unicode.renderGeneric(usize, &ir, allocator);
-        defer allocator.free(unicode);
-        std.debug.print("{s}\n", .{unicode});
+        const term_output = try zigraph.terminal.renderGeneric(usize, &ir, allocator);
+        defer allocator.free(term_output);
+        std.debug.print("{s}\n", .{term_output});
 
         // Subgraph info
         std.debug.print("Subgraph bounding boxes:\n", .{});
@@ -143,12 +143,12 @@ pub fn main() !void {
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();
 
-        // Unicode to terminal (with colors!)
-        const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
+        // Terminal render (with colors!)
+        const term_output = try zigraph.terminal.renderGenericWithConfig(usize, &ir, allocator, .{
             .edge_palette = &zigraph.color.ansi,
         });
-        defer allocator.free(unicode);
-        std.debug.print("{s}\n", .{unicode});
+        defer allocator.free(term_output);
+        std.debug.print("{s}\n", .{term_output});
 
         // SVG to file
         const svg_output = try zigraph.svg.render(&ir, allocator, .{});
@@ -242,12 +242,12 @@ pub fn main() !void {
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();
 
-        // Unicode with colors
-        const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
+        // Terminal with colors
+        const term_output = try zigraph.terminal.renderGenericWithConfig(usize, &ir, allocator, .{
             .edge_palette = &zigraph.color.ansi,
         });
-        defer allocator.free(unicode);
-        std.debug.print("{s}\n", .{unicode});
+        defer allocator.free(term_output);
+        std.debug.print("{s}\n", .{term_output});
 
         // SVG
         const svg_output = try zigraph.svg.render(&ir, allocator, .{});
@@ -341,12 +341,12 @@ pub fn main() !void {
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();
 
-        // Unicode with colors
-        const unicode = try zigraph.unicode.renderGenericWithConfig(usize, &ir, allocator, .{
+        // Terminal with colors
+        const term_output = try zigraph.terminal.renderGenericWithConfig(usize, &ir, allocator, .{
             .edge_palette = &zigraph.color.ansi,
         });
-        defer allocator.free(unicode);
-        std.debug.print("{s}\n", .{unicode});
+        defer allocator.free(term_output);
+        std.debug.print("{s}\n", .{term_output});
 
         // SVG
         const svg_output = try zigraph.svg.render(&ir, allocator, .{});

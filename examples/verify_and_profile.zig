@@ -79,7 +79,7 @@ fn verifyAndProfile(
 
     // Stage 3: Render
     counting.reset();
-    const output = try zigraph.unicode.render(&ir, allocator);
+    const output = try zigraph.terminal.render(&ir, allocator);
     defer allocator.free(output);
     stats.render_bytes = counting.total_allocated;
     stats.output_bytes = output.len;
@@ -139,7 +139,7 @@ fn memoryProfileAtScale(page_alloc: std.mem.Allocator) !void {
 
         // Render
         counting.reset();
-        const output = try zigraph.unicode.render(&ir, allocator);
+        const output = try zigraph.terminal.render(&ir, allocator);
         stats.render_bytes = counting.total_allocated;
         stats.output_bytes = output.len;
 
@@ -341,7 +341,7 @@ fn benchmarkWithAllocator(page_alloc: std.mem.Allocator, node_count: usize, use_
             }
 
             var ir = try zigraph.layout(&graph, allocator, .{});
-            _ = try zigraph.unicode.render(&ir, allocator);
+            _ = try zigraph.terminal.render(&ir, allocator);
             // Arena frees everything at once when it goes out of scope
 
             const end = std.time.nanoTimestamp();
@@ -369,7 +369,7 @@ fn benchmarkWithAllocator(page_alloc: std.mem.Allocator, node_count: usize, use_
 
             var ir = try zigraph.layout(&graph, allocator, .{});
             defer ir.deinit();
-            const output = try zigraph.unicode.render(&ir, allocator);
+            const output = try zigraph.terminal.render(&ir, allocator);
             defer allocator.free(output);
 
             const end = std.time.nanoTimestamp();

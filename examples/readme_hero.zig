@@ -57,7 +57,7 @@ pub fn main() !void {
     defer ir.deinit();
 
     // Render (dummy nodes hidden for clean output)
-    const output = try zigraph.unicode.renderWithConfig(&ir, allocator, .{
+    const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
         .show_dummy_nodes = false,
         .edge_palette = &zigraph.color.ansi_dark,
     });

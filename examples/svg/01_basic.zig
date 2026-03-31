@@ -56,7 +56,7 @@ pub fn main() !void {
     try writeSvg("01_basic", svg);
 
     // Also show the Unicode preview for comparison
-    const txt = try zigraph.unicode.render(&ir, allocator);
+    const txt = try zigraph.terminal.render(&ir, allocator);
     defer allocator.free(txt);
     std.debug.print("\n{s}\n", .{txt});
 }

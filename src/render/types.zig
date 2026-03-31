@@ -12,20 +12,23 @@ const Allocator = std.mem.Allocator;
 /// Semantic — describes *what* the marker means, not *how* it's drawn.
 /// Shared across renderers; each maps to its own output format:
 ///
-/// | MarkerShape   | SVG                      | Unicode (directional)        |
-/// |---------------|--------------------------|------------------------------|
-/// | `.arrow`      | filled `<polygon>`       | `▼ ▲ ▶ ◀`                   |
-/// | `.open_arrow` | outline `<polygon>`      | `▽ △ ▷ ◁`                   |
-/// | `.diamond`    | 45° rotated filled rect  | `◆`                          |
-/// | `.open_diamond`| 45° rotated outline rect| `◇`                          |
-/// | `.circle`     | filled `<circle>`        | `●`                          |
-/// | `.open_circle`| outline `<circle>`       | `○`                          |
-/// | `.none`       | (nothing)                | (nothing)                    |
+/// | MarkerShape     | SVG                      | Terminal (directional)        |
+/// |-----------------|--------------------------|-------------------------------|
+/// | `.arrow`        | filled `<polygon>`       | `↓ ↑ → ←` (thin arrows)      |
+/// | `.filled_arrow` | filled `<polygon>`       | `▼ ▲ ▶ ◀` (solid triangles)  |
+/// | `.open_arrow`   | outline `<polygon>`      | `▽ △ ▷ ◁`                    |
+/// | `.diamond`      | 45° rotated filled rect  | `◆`                           |
+/// | `.open_diamond` | 45° rotated outline rect | `◇`                           |
+/// | `.circle`       | filled `<circle>`        | `●`                           |
+/// | `.open_circle`  | outline `<circle>`       | `○`                           |
+/// | `.none`         | (nothing)                | (nothing)                     |
 pub const MarkerShape = enum {
     /// No marker rendered
     none,
-    /// Filled arrowhead (default for directed edges)
+    /// Thin arrowhead (default for directed edges)
     arrow,
+    /// Filled/solid arrowhead (heavier visual weight)
+    filled_arrow,
     /// Outline arrowhead (UML inheritance)
     open_arrow,
     /// Filled diamond (UML composition)

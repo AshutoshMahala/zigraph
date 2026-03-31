@@ -2,6 +2,8 @@
 zig-cache/
 zig-out/
 .zig-cache/
+libroot.a
+libroot.a.o
 
 # OS files
 .DS_Store

@@ -109,7 +109,7 @@ pub fn main() !void {
     try writeSvg("04_clusters", svg);
 
     // Also show Unicode for quick terminal preview
-    const txt = try zigraph.unicode.renderWithConfig(&ir, allocator, .{});
+    const txt = try zigraph.terminal.renderWithConfig(&ir, allocator, .{});
     defer allocator.free(txt);
     std.debug.print("\n{s}\n", .{txt});
 }

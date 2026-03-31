@@ -377,6 +377,25 @@ pub fn build(b: *std.Build) void {
     const run_subgraph_step = b.step("run-subgraph", "Run subgraph demo example");
     run_subgraph_step.dependOn(&run_subgraph.step);
 
+    // Output format variants example
+    const output_formats_example = b.addModule("output_formats_example", .{
+        .root_source_file = b.path("examples/terminal/output_formats.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const output_formats_exe = b.addExecutable(.{
+        .name = "output_formats",
+        .root_module = output_formats_example,
+    });
+    b.installArtifact(output_formats_exe);
+
+    const run_output_formats = b.addRunArtifact(output_formats_exe);
+    const run_output_formats_step = b.step("run-output-formats", "Run output format variants example");
+    run_output_formats_step.dependOn(&run_output_formats.step);
+
     // Dummy visibility example
     const dummy_visibility_example = b.addModule("dummy_visibility_example", .{
         .root_source_file = b.path("examples/dummy_visibility.zig"),
@@ -395,6 +414,139 @@ pub fn build(b: *std.Build) void {
     const run_dummy_visibility = b.addRunArtifact(dummy_visibility_exe);
     const run_dummy_visibility_step = b.step("run-dummy", "Run dummy visibility example");
     run_dummy_visibility_step.dependOn(&run_dummy_visibility.step);
+
+    // Terminal node control example
+    const terminal_node_control_mod = b.addModule("terminal_node_control", .{
+        .root_source_file = b.path("examples/terminal/node_control.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_node_control_exe = b.addExecutable(.{
+        .name = "terminal_node_control",
+        .root_module = terminal_node_control_mod,
+    });
+    b.installArtifact(terminal_node_control_exe);
+
+    const run_terminal_node_control = b.addRunArtifact(terminal_node_control_exe);
+    const run_terminal_node_control_step = b.step("run-terminal-node-control", "Run terminal node control example");
+    run_terminal_node_control_step.dependOn(&run_terminal_node_control.step);
+
+    // Terminal subgraph styles example
+    const terminal_subgraph_styles_mod = b.addModule("terminal_subgraph_styles", .{
+        .root_source_file = b.path("examples/terminal/subgraph_styles.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_subgraph_styles_exe = b.addExecutable(.{
+        .name = "terminal_subgraph_styles",
+        .root_module = terminal_subgraph_styles_mod,
+    });
+    b.installArtifact(terminal_subgraph_styles_exe);
+
+    const run_terminal_subgraph_styles = b.addRunArtifact(terminal_subgraph_styles_exe);
+    const run_terminal_subgraph_styles_step = b.step("run-terminal-subgraph-styles", "Run terminal subgraph styles example");
+    run_terminal_subgraph_styles_step.dependOn(&run_terminal_subgraph_styles.step);
+
+    // Terminal edge labels example
+    const terminal_edge_labels_mod = b.addModule("terminal_edge_labels", .{
+        .root_source_file = b.path("examples/terminal/edge_labels.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_edge_labels_exe = b.addExecutable(.{
+        .name = "terminal_edge_labels",
+        .root_module = terminal_edge_labels_mod,
+    });
+    b.installArtifact(terminal_edge_labels_exe);
+
+    const run_terminal_edge_labels = b.addRunArtifact(terminal_edge_labels_exe);
+    const run_terminal_edge_labels_step = b.step("run-terminal-edge-labels", "Run terminal edge labels example");
+    run_terminal_edge_labels_step.dependOn(&run_terminal_edge_labels.step);
+
+    // Terminal edge styles example (Topics 3 + 4: line weights, marker shapes)
+    const terminal_edge_styles_mod = b.addModule("terminal_edge_styles", .{
+        .root_source_file = b.path("examples/terminal/edge_styles.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_edge_styles_exe = b.addExecutable(.{
+        .name = "terminal_edge_styles",
+        .root_module = terminal_edge_styles_mod,
+    });
+    b.installArtifact(terminal_edge_styles_exe);
+
+    const run_terminal_edge_styles = b.addRunArtifact(terminal_edge_styles_exe);
+    const run_terminal_edge_styles_step = b.step("run-terminal-edge-styles", "Run terminal edge styles example");
+    run_terminal_edge_styles_step.dependOn(&run_terminal_edge_styles.step);
+
+    // Terminal color system example (Topic 5: ColorMode, gradients, node colors)
+    const terminal_color_system_mod = b.addModule("terminal_color_system", .{
+        .root_source_file = b.path("examples/terminal/color_system.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_color_system_exe = b.addExecutable(.{
+        .name = "terminal_color_system",
+        .root_module = terminal_color_system_mod,
+    });
+    b.installArtifact(terminal_color_system_exe);
+
+    const run_terminal_color_system = b.addRunArtifact(terminal_color_system_exe);
+    const run_terminal_color_system_step = b.step("run-terminal-color-system", "Run terminal color system example");
+    run_terminal_color_system_step.dependOn(&run_terminal_color_system.step);
+
+    // Terminal record node demo (low-level Buffer2D + paintNode custom pipeline)
+    const terminal_record_nodes_mod = b.addModule("terminal_record_nodes", .{
+        .root_source_file = b.path("examples/terminal/record_nodes.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_record_nodes_exe = b.addExecutable(.{
+        .name = "terminal_record_nodes",
+        .root_module = terminal_record_nodes_mod,
+    });
+    b.installArtifact(terminal_record_nodes_exe);
+
+    const run_terminal_record_nodes = b.addRunArtifact(terminal_record_nodes_exe);
+    const run_terminal_record_nodes_step = b.step("run-terminal-record-nodes", "Run terminal record node demo (ER-diagram style)");
+    run_terminal_record_nodes_step.dependOn(&run_terminal_record_nodes.step);
+
+    // Terminal DB diagram (record nodes connected by FK edges — full ER diagram)
+    const terminal_db_diagram_mod = b.addModule("terminal_db_diagram", .{
+        .root_source_file = b.path("examples/terminal/db_diagram.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_db_diagram_exe = b.addExecutable(.{
+        .name = "terminal_db_diagram",
+        .root_module = terminal_db_diagram_mod,
+    });
+    b.installArtifact(terminal_db_diagram_exe);
+
+    const run_terminal_db_diagram = b.addRunArtifact(terminal_db_diagram_exe);
+    const run_terminal_db_diagram_step = b.step("run-terminal-db-diagram", "Run terminal database ER diagram example");
+    run_terminal_db_diagram_step.dependOn(&run_terminal_db_diagram.step);
 
     // Generate README assets (all hero formats)
     const generate_assets_example = b.addModule("generate_assets_example", .{
@@ -471,6 +623,63 @@ pub fn build(b: *std.Build) void {
     const run_cycle = b.addRunArtifact(cycle_exe);
     const run_cycle_step = b.step("run-cycle", "Run cycle breaking example");
     run_cycle_step.dependOn(&run_cycle.step);
+
+    // Streaming demo example
+    const streaming_example = b.addModule("streaming_example", .{
+        .root_source_file = b.path("examples/terminal/streaming_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const streaming_exe = b.addExecutable(.{
+        .name = "streaming_demo",
+        .root_module = streaming_example,
+    });
+    b.installArtifact(streaming_exe);
+
+    const run_streaming = b.addRunArtifact(streaming_exe);
+    const run_streaming_step = b.step("run-streaming", "Run streaming render demo");
+    run_streaming_step.dependOn(&run_streaming.step);
+
+    // Interactive TUI example
+    const tui_example = b.addModule("tui_example", .{
+        .root_source_file = b.path("examples/terminal/interactive_tui.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const tui_exe = b.addExecutable(.{
+        .name = "interactive_tui",
+        .root_module = tui_example,
+    });
+    b.installArtifact(tui_exe);
+
+    const run_tui = b.addRunArtifact(tui_exe);
+    const run_tui_step = b.step("run-tui", "Run interactive TUI demo (click on graph elements)");
+    run_tui_step.dependOn(&run_tui.step);
+
+    // Terminal text attributes example (bold, dim, italic, underline)
+    const terminal_text_attrs_mod = b.addModule("terminal_text_attrs", .{
+        .root_source_file = b.path("examples/terminal/text_attrs.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_text_attrs_exe = b.addExecutable(.{
+        .name = "terminal_text_attrs",
+        .root_module = terminal_text_attrs_mod,
+    });
+    b.installArtifact(terminal_text_attrs_exe);
+
+    const run_terminal_text_attrs = b.addRunArtifact(terminal_text_attrs_exe);
+    const run_terminal_text_attrs_step = b.step("run-terminal-text-attrs", "Run terminal text attributes demo (bold, dim, italic, underline)");
+    run_terminal_text_attrs_step.dependOn(&run_terminal_text_attrs.step);
 
     // ── SVG Gallery Examples ────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@
 //! // Wrap a concrete renderer:
 //! const r = zigraph.Renderer.initSvg(.{});
 //! // — or —
-//! const r = zigraph.Renderer.initUnicode(.{});
+//! const r = zigraph.Renderer.initTerminal(.{});
 //! // — or —
 //! const r = zigraph.Renderer.initJson();
 //!
@@ -31,7 +31,7 @@ const ir_mod = @import("../core/ir.zig");
 const LayoutIR = ir_mod.LayoutIR(usize);
 
 const svg_mod = @import("svg/mod.zig");
-const unicode_mod = @import("unicode.zig");
+const terminal_mod = @import("terminal/mod.zig");
 const json_mod = @import("json.zig");
 
 const Renderer = @This();
@@ -64,12 +64,12 @@ pub fn initSvg(config: *const svg_mod.SvgConfig) Renderer {
     };
 }
 
-/// Create a Renderer backed by the Unicode backend.
+/// Create a Renderer backed by the terminal backend.
 /// The pointed-to config must outlive the Renderer.
-pub fn initUnicode(config: *const unicode_mod.Config) Renderer {
+pub fn initTerminal(config: *const terminal_mod.Config) Renderer {
     return .{
         .ctx = @ptrCast(config),
-        .vtable = &unicode_vtable,
+        .vtable = &terminal_vtable,
     };
 }
 
@@ -124,11 +124,11 @@ const svg_vtable = VTable{
     }.call,
 };
 
-const unicode_vtable = VTable{
+const terminal_vtable = VTable{
     .renderFn = struct {
         fn call(ctx: *const anyopaque, layout: *const LayoutIR, allocator: Allocator) anyerror![]u8 {
-            const config: *const unicode_mod.Config = @ptrCast(@alignCast(ctx));
-            return unicode_mod.renderWithConfig(layout, allocator, config.*);
+            const config: *const terminal_mod.Config = @ptrCast(@alignCast(ctx));
+            return terminal_mod.renderWithConfig(layout, allocator, config.*);
         }
     }.call,
 };
@@ -192,8 +192,8 @@ test "Renderer: Unicode backend produces output" {
     });
     layout.setDimensions(5, 3);
 
-    const config = unicode_mod.Config{};
-    const r = Renderer.initUnicode(&config);
+    const config = terminal_mod.Config{};
+    const r = Renderer.initTerminal(&config);
     const output = try r.render(&layout, allocator);
     defer allocator.free(output);
 
@@ -244,11 +244,11 @@ test "Renderer: all backends produce non-empty output for same layout" {
     layout.setDimensions(5, 3);
 
     const svg_config = svg_mod.SvgConfig{};
-    const uni_config = unicode_mod.Config{};
+    const uni_config = terminal_mod.Config{};
 
     const renderers = [_]Renderer{
         Renderer.initSvg(&svg_config),
-        Renderer.initUnicode(&uni_config),
+        Renderer.initTerminal(&uni_config),
         Renderer.initJson(),
     };
 

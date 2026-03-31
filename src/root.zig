@@ -154,8 +154,8 @@ pub const algorithm_interface = @import("algorithms/interface.zig");
 // Rendering
 // ============================================================================
 
-/// Unicode renderer (box drawing characters)
-pub const unicode = @import("render/unicode.zig");
+/// Terminal renderer (box drawing characters)
+pub const terminal = @import("render/terminal/mod.zig");
 
 /// JSON renderer for external tool integration
 pub const json = @import("render/json.zig");
@@ -163,7 +163,7 @@ pub const json = @import("render/json.zig");
 /// SVG renderer for high-quality vector output and spline visualization
 pub const svg = @import("render/svg/mod.zig");
 
-/// Type-erased renderer interface (wraps SVG, Unicode, JSON, or custom backends)
+/// Type-erased renderer interface (wraps SVG, Terminal, JSON, or custom backends)
 pub const Renderer = @import("render/Renderer.zig");
 
 /// Color system — numeric Color struct, scientific colormaps, palettes, gradients
@@ -171,6 +171,10 @@ pub const color = @import("render/color/mod.zig");
 
 /// Shared rendering types (MarkerShape, etc.)
 pub const render_types = @import("render/types.zig");
+
+/// Shared render helpers (subgraph depth computation, etc.)
+pub const render_helpers = @import("render/helpers.zig");
+
 pub const MarkerShape = render_types.MarkerShape;
 pub const EdgeStyleContext = render_types.EdgeStyleContext;
 pub const NodeStyleContext = render_types.NodeStyleContext;
@@ -181,6 +185,27 @@ pub const NodeStyle = svg.NodeStyle;
 pub const SubgraphStyle = svg.SubgraphStyle;
 pub const shapes = svg.shapes;
 pub const subgraph_presets = svg.subgraph_presets;
+
+// Terminal renderer types
+pub const TerminalEdgeStyle = terminal.TerminalEdgeStyle;
+pub const TerminalNodeStyle = terminal.TerminalNodeStyle;
+pub const TerminalEdgeLabelStyle = terminal.TerminalEdgeLabelStyle;
+pub const TerminalSubgraphStyle = terminal.TerminalSubgraphStyle;
+pub const LineWeight = terminal.LineWeight;
+pub const NodeBorder = terminal.NodeBorder;
+pub const LabelPlacement = terminal.LabelPlacement;
+pub const SubgraphBorder = terminal.SubgraphBorder;
+pub const LabelPosition = terminal.LabelPosition;
+pub const TextAttrs = terminal.TextAttrs;
+pub const TerminalColor = terminal.Color;
+pub const TerminalColorMode = terminal.ColorMode;
+pub const TerminalCellColor = terminal.CellColor;
+pub const TerminalCharSet = terminal.CharSet;
+pub const TerminalOutputFormat = terminal.OutputFormat;
+pub const TerminalRenderPlan = terminal.RenderPlan;
+pub const TerminalHitResult = terminal.HitResult;
+pub const terminal_subgraph_presets = terminal.subgraph_presets;
+pub const terminal_node_presets = terminal.node_presets;
 
 // ============================================================================
 // Layout configuration
@@ -722,7 +747,7 @@ fn staggerCornerEdges(result: *LayoutIR(usize)) void {
             }
         }
         const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
-        edge.path.corner.horizontal_y = edge.from_y + 1 + (slot % available);
+        edge.path.corner.horizontal_y = edge.from_y + (slot % available);
     }
 }
 
@@ -1350,14 +1375,14 @@ pub fn layoutTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.All
 
 /// Convenience function: layout and render in one step.
 ///
-/// Returns the Unicode string representation of the graph.
+/// Returns the terminal (box-drawing) string representation of the graph.
 /// Returns error.EmptyGraph or error.CycleDetected if graph is invalid.
 /// Custom crossing reducers may return additional errors.
 pub fn render(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layout(g, allocator, config);
     defer layout_ir.deinit();
 
-    return try unicode.renderWithConfig(&layout_ir, allocator, .{
+    return try terminal.renderWithConfig(&layout_ir, allocator, .{
         .show_dummy_nodes = config.include_dummy_nodes,
         .edge_palette = config.edge_palette,
     });
@@ -1385,14 +1410,14 @@ pub fn exportJson(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 /// via the renderer's generic path. Useful when you want the rendered output
 /// to reflect a non-usize coordinate space (e.g., JSON with float coords).
 ///
-/// For Unicode and SVG, the renderers convert back to usize internally,
+/// For Terminal and SVG, the renderers convert back to usize internally,
 /// so prefer `render()` for those formats unless you need the typed IR
 /// for other purposes.
 pub fn renderTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layoutTyped(Coord, g, allocator, config);
     defer layout_ir.deinit();
 
-    return try unicode.renderGenericWithConfig(Coord, &layout_ir, allocator, .{
+    return try terminal.renderGenericWithConfig(Coord, &layout_ir, allocator, .{
         .show_dummy_nodes = config.include_dummy_nodes,
         .edge_palette = config.edge_palette,
     });
@@ -2421,7 +2446,7 @@ test {
     _ = crossing.median;
     _ = positioning.barycentric;
     _ = routing.direct;
-    _ = unicode;
+    _ = terminal;
     _ = svg;
     _ = json;
     _ = subgraph_layout;

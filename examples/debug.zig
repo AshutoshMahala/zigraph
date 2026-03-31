@@ -54,7 +54,7 @@ pub fn main() !void {
     std.debug.print("\nDimensions: width={d} height={d}\n", .{ layout_ir.getWidth(), layout_ir.getHeight() });
 
     std.debug.print("\nRendered:\n", .{});
-    const output = try zigraph.unicode.render(&layout_ir, allocator);
+    const output = try zigraph.terminal.render(&layout_ir, allocator);
     defer allocator.free(output);
     std.debug.print("{s}\n", .{output});
 }

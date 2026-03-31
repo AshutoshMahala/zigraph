@@ -831,13 +831,105 @@ pub const escape = struct {
     pub const reset = "\x1b[0m";
 
     /// Format foreground color using 256-color palette
-    /// Returns a comptime-known format string for runtime color value
     pub fn fg256(color: u8) [11]u8 {
         var buf: [11]u8 = undefined;
         _ = std.fmt.bufPrint(&buf, "\x1b[38;5;{d:0>3}m", .{color}) catch unreachable;
         return buf;
     }
+
+    /// Format background color using 256-color palette
+    pub fn bg256(color: u8) [11]u8 {
+        var buf: [11]u8 = undefined;
+        _ = std.fmt.bufPrint(&buf, "\x1b[48;5;{d:0>3}m", .{color}) catch unreachable;
+        return buf;
+    }
+
+    /// Format foreground color using 24-bit truecolor
+    pub fn fgRgb(r: u8, g: u8, b: u8) [19]u8 {
+        var buf: [19]u8 = undefined;
+        _ = std.fmt.bufPrint(&buf, "\x1b[38;2;{d:0>3};{d:0>3};{d:0>3}m", .{ r, g, b }) catch unreachable;
+        return buf;
+    }
+
+    /// Format background color using 24-bit truecolor
+    pub fn bgRgb(r: u8, g: u8, b: u8) [19]u8 {
+        var buf: [19]u8 = undefined;
+        _ = std.fmt.bufPrint(&buf, "\x1b[48;2;{d:0>3};{d:0>3};{d:0>3}m", .{ r, g, b }) catch unreachable;
+        return buf;
+    }
 };
+
+/// Convert an ANSI 256 palette index to RGB values.
+pub fn ansi256ToRgb(index: u8) struct { r: u8, g: u8, b: u8 } {
+    // Standard 16 colors (approximate terminal defaults)
+    const standard_16 = [16][3]u8{
+        .{ 0, 0, 0 }, // 0: black
+        .{ 128, 0, 0 }, // 1: red
+        .{ 0, 128, 0 }, // 2: green
+        .{ 128, 128, 0 }, // 3: yellow
+        .{ 0, 0, 128 }, // 4: blue
+        .{ 128, 0, 128 }, // 5: magenta
+        .{ 0, 128, 128 }, // 6: cyan
+        .{ 192, 192, 192 }, // 7: white
+        .{ 128, 128, 128 }, // 8: bright black
+        .{ 255, 0, 0 }, // 9: bright red
+        .{ 0, 255, 0 }, // 10: bright green
+        .{ 255, 255, 0 }, // 11: bright yellow
+        .{ 0, 0, 255 }, // 12: bright blue
+        .{ 255, 0, 255 }, // 13: bright magenta
+        .{ 0, 255, 255 }, // 14: bright cyan
+        .{ 255, 255, 255 }, // 15: bright white
+    };
+
+    if (index < 16) {
+        return .{ .r = standard_16[index][0], .g = standard_16[index][1], .b = standard_16[index][2] };
+    }
+
+    // 6×6×6 color cube (indices 16-231)
+    if (index < 232) {
+        const ci = index - 16;
+        const cube_values = [6]u8{ 0, 95, 135, 175, 215, 255 };
+        return .{
+            .r = cube_values[ci / 36],
+            .g = cube_values[(ci % 36) / 6],
+            .b = cube_values[ci % 6],
+        };
+    }
+
+    // Grayscale ramp (indices 232-255)
+    const gray = @as(u8, 8) + @as(u8, index - 232) * 10;
+    return .{ .r = gray, .g = gray, .b = gray };
+}
+
+/// Convert RGB values to the nearest ANSI 256 palette index.
+pub fn rgbToAnsi256(r: u8, g: u8, b: u8) u8 {
+    // Check grayscale first (if r ≈ g ≈ b)
+    if (r == g and g == b) {
+        if (r < 4) return 16; // near-black → cube black
+        if (r > 248) return 231; // near-white → cube white
+        return @as(u8, @intCast((@as(u16, r) - 8 + 5) / 10)) + 232;
+    }
+
+    // Find nearest in the 6×6×6 color cube
+    const cube_values = [6]u8{ 0, 95, 135, 175, 215, 255 };
+    const ri = nearestCubeIndex(r, &cube_values);
+    const gi = nearestCubeIndex(g, &cube_values);
+    const bi = nearestCubeIndex(b, &cube_values);
+    return 16 + @as(u8, ri) * 36 + @as(u8, gi) * 6 + @as(u8, bi);
+}
+
+fn nearestCubeIndex(val: u8, cube_values: *const [6]u8) u8 {
+    var best: u8 = 0;
+    var best_dist: u16 = 0xFFFF;
+    for (cube_values, 0..) |cv, i| {
+        const dist = if (val >= cv) @as(u16, val - cv) else @as(u16, cv - val);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best = @intCast(i);
+        }
+    }
+    return best;
+}
 
 // ============================================================================
 // Tests
