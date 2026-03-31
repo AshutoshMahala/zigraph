@@ -747,7 +747,7 @@ fn staggerCornerEdges(result: *LayoutIR(usize)) void {
             }
         }
         const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
-        edge.path.corner.horizontal_y = edge.from_y + 1 + (slot % available);
+        edge.path.corner.horizontal_y = edge.from_y + (slot % available);
     }
 }
 

@@ -708,14 +708,34 @@ pub fn isMarkerChar(ch: u21) bool {
 
 /// Map a `MarkerShape` + direction to a terminal codepoint.
 /// Returns `null` for `.none` (no marker to paint).
-pub fn markerChar(shape: MarkerShape, dir: Direction) ?u21 {
+pub fn markerChar(shape: MarkerShape, dir: Direction, weight: ArmWeight) ?u21 {
     return switch (shape) {
         .none => null,
-        .arrow => switch (dir) {
-            .down => '↓',
-            .up => '↑',
-            .right => '→',
-            .left => '←',
+        .arrow => switch (weight) {
+            .heavy => switch (dir) {
+                .down => '▼',
+                .up => '▲',
+                .right => '▶',
+                .left => '◀',
+            },
+            .double => switch (dir) {
+                .down => '⇓',
+                .up => '⇑',
+                .right => '⇒',
+                .left => '⇐',
+            },
+            .dashed => switch (dir) {
+                .down => '⇣',
+                .up => '⇡',
+                .right => '⇢',
+                .left => '⇠',
+            },
+            else => switch (dir) {
+                .down => '↓',
+                .up => '↑',
+                .right => '→',
+                .left => '←',
+            },
         },
         .filled_arrow => switch (dir) {
             .down => '▼',

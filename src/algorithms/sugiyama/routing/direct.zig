@@ -63,14 +63,15 @@ pub fn route(
         const path: EdgePath = if (from_node.center_x == to_node.center_x) blk: {
             break :blk .{ .direct = {} };
         } else if (level_diff <= 1) blk: {
-            const available = if (to_y_edge > from_y_edge + 1) to_y_edge - from_y_edge - 1 else 1;
-            const base_h_y = from_y_edge + 1;
-            const h_y = base_h_y + (slot % available);
+            // Reserve 1 row above target for the arrow marker
+            const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
+            const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
+            const h_y = from_y_edge + (slot % available);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         } else blk: {
-            const available = if (to_y_edge > from_y_edge + 1) to_y_edge - from_y_edge - 1 else 1;
-            const base_h_y = from_y_edge + 1;
-            const h_y = base_h_y + (slot % available);
+            const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
+            const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
+            const h_y = from_y_edge + (slot % available);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         };
 
@@ -193,10 +194,10 @@ pub fn routeWithDummies(
             break :blk .{ .direct = {} };
         } else blk: {
             // Stagger horizontal_y by slot so edges from the same source
-            // don't all land on the same row
-            const available = if (to_y_edge > from_y_edge + 1) to_y_edge - from_y_edge - 1 else 1;
-            const base_h_y = from_y_edge + 1;
-            const h_y = base_h_y + (slot % available);
+            // don't all land on the same row — reserve 1 row above target for arrows
+            const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
+            const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
+            const h_y = from_y_edge + (slot % available);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         };
 

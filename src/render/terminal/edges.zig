@@ -68,7 +68,7 @@ pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usiz
     const arrow_y = if (going_down) hi - 1 else lo;
     const arm = ArmWeight.fromLineWeight(weight);
     const arrow_ch: ?u21 = if (directed)
-        markerChar(marker_end, if (going_down) .down else .up)
+        markerChar(marker_end, if (going_down) .down else .up, arm)
     else
         null;
 
@@ -91,7 +91,7 @@ pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: us
     const arrow_x = if (going_right) hi - 1 else lo;
     const arm = ArmWeight.fromLineWeight(weight);
     const arrow_ch: ?u21 = if (directed)
-        markerChar(marker_end, if (going_right) .right else .left)
+        markerChar(marker_end, if (going_right) .right else .left, arm)
     else
         null;
 
@@ -155,7 +155,7 @@ pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y
 
     // --- Arrow ---
     if (directed) {
-        drawManhattanArrow(buffer, x0, y0, x1, y1, mid_y, color, reversed, marker_end, marker_start);
+        drawManhattanArrow(buffer, x0, y0, x1, y1, mid_y, color, reversed, marker_end, marker_start, arm);
     }
 }
 
@@ -172,7 +172,7 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color
     var y = edge.from_y;
     while (y < h_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == edge.from_y) {
-            if (markerChar(marker_start, .up)) |ch| {
+            if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x1, y, ch, color);
             } else {
                 drawLineCell(buffer, x1, y, true, color, arm);
@@ -208,24 +208,15 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, color
 
     // Vertical from horizontal to target
     y = h_y + 1;
-    var placed_arrow = false;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            if (markerChar(marker_end, .down)) |ch| {
+            if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x2, y, ch, color);
-                placed_arrow = true;
             } else {
                 drawLineCell(buffer, x2, y, true, color, arm);
             }
         } else {
             drawLineCell(buffer, x2, y, true, color, arm);
-        }
-    }
-    // When h_y is directly above target (no room for arrow in the vertical
-    // segment), place the arrow at the corner position.
-    if (!placed_arrow and !edge.reversed and edge.directed and h_y + 1 >= edge.to_y) {
-        if (markerChar(marker_end, .down)) |ch| {
-            buffer.setWithColor(x2, h_y, ch, color);
         }
     }
 }
@@ -240,7 +231,7 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
     const first_vert_start = edge.from_y + 1;
     while (y < start_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == first_vert_start) {
-            if (markerChar(marker_start, .up)) |ch| {
+            if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x1, y, ch, color);
             } else {
                 drawLineCell(buffer, x1, y, true, color, arm);
@@ -278,23 +269,15 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
 
     // Vertical from end_y to target
     y = end_y + 1;
-    var placed_sc_arrow = false;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            if (markerChar(marker_end, .down)) |ch| {
+            if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x2, y, ch, color);
-                placed_sc_arrow = true;
             } else {
                 drawLineCell(buffer, x2, y, true, color, arm);
             }
         } else {
             drawLineCell(buffer, x2, y, true, color, arm);
-        }
-    }
-    // When end_y is directly above target, place arrow at corner position.
-    if (!placed_sc_arrow and !edge.reversed and edge.directed and end_y + 1 >= edge.to_y) {
-        if (markerChar(marker_end, .down)) |ch| {
-            buffer.setWithColor(x2, end_y, ch, color);
         }
     }
 }
@@ -311,7 +294,7 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Cell
     var y = edge.from_y;
     while (y < h_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == edge.from_y) {
-            if (markerChar(marker_start, .up)) |ch| {
+            if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x1, y, ch, color);
             } else {
                 drawLineCell(buffer, x1, y, true, color, arm);
@@ -347,23 +330,15 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Cell
 
     // Vertical from horizontal to target
     y = h_y + 1;
-    var placed_ms_arrow = false;
     while (y < edge.to_y) : (y += 1) {
         if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            if (markerChar(marker_end, .down)) |ch| {
+            if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x2, y, ch, color);
-                placed_ms_arrow = true;
             } else {
                 drawLineCell(buffer, x2, y, true, color, arm);
             }
         } else {
             drawLineCell(buffer, x2, y, true, color, arm);
-        }
-    }
-    // When h_y is directly above target, place arrow at corner position.
-    if (!placed_ms_arrow and !edge.reversed and edge.directed and h_y + 1 >= edge.to_y) {
-        if (markerChar(marker_end, .down)) |ch| {
-            buffer.setWithColor(x2, h_y, ch, color);
         }
     }
 }
@@ -374,13 +349,13 @@ fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: CellColor,
     var y = edge.from_y;
     while (y < edge.to_y) : (y += 1) {
         if (edge.reversed and edge.directed and y == edge.from_y) {
-            if (markerChar(marker_start, .up)) |ch| {
+            if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x, y, ch, color);
             } else {
                 drawLineCell(buffer, x, y, true, color, arm);
             }
         } else if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
-            if (markerChar(marker_end, .down)) |ch| {
+            if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x, y, ch, color);
             } else {
                 drawLineCell(buffer, x, y, true, color, arm);
@@ -427,18 +402,18 @@ fn drawVerticalSegment(buffer: *Buffer2D, x: usize, lo: usize, hi: usize, color:
 }
 
 /// Draw the arrow for a Manhattan route.
-fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, mid_y: usize, color: CellColor, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, mid_y: usize, color: CellColor, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape, arm: ArmWeight) void {
     if (reversed) {
         // Reversed: marker_start at FROM end, pointing away from target
         const shape = marker_start;
         if (y0 != mid_y) {
             const dir: Direction = if (y0 < mid_y) .up else .down;
-            if (markerChar(shape, dir)) |ch| {
+            if (markerChar(shape, dir, arm)) |ch| {
                 buffer.setWithColor(x0, y0, ch, color);
             }
         } else {
             const dir: Direction = if (x1 > x0) .left else .right;
-            if (markerChar(shape, dir)) |ch| {
+            if (markerChar(shape, dir, arm)) |ch| {
                 buffer.setWithColor(x0, y0, ch, color);
             }
         }
@@ -451,7 +426,7 @@ fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: us
             if (!going_down_s3 and y1 >= buffer.height) return;
             const arrow_y = if (going_down_s3) y1 - 1 else y1 + 1;
             const dir: Direction = if (going_down_s3) .down else .up;
-            if (markerChar(shape, dir)) |ch| {
+            if (markerChar(shape, dir, arm)) |ch| {
                 buffer.setWithColor(x1, arrow_y, ch, color);
             }
         } else {
@@ -460,7 +435,7 @@ fn drawManhattanArrow(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: us
             if (!going_right and x1 >= buffer.width) return;
             const arrow_x = if (going_right) x1 - 1 else x1 + 1;
             const dir: Direction = if (going_right) .right else .left;
-            if (markerChar(shape, dir)) |ch| {
+            if (markerChar(shape, dir, arm)) |ch| {
                 if (arrow_x < buffer.width) {
                     buffer.setWithColor(arrow_x, y1, ch, color);
                 }
