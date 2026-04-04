@@ -74,6 +74,28 @@ pub fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: b
         return;
     }
 
+    // Card nodes: delegate to card renderer
+    if (node.lines.len > 0) {
+        const card_render = @import("card.zig");
+        card_render.paintCard(
+            buffer,
+            node.x,
+            rendered_y,
+            node.width,
+            node.label,
+            node.lines,
+            .{
+                .border = style.border,
+                .border_color = style.border_color,
+                .header_color = style.text_color,
+                .content_color = style.text_color,
+                .bg_color = style.bg_color,
+                .header_attrs = style.attrs,
+            },
+        );
+        return;
+    }
+
     const w = node.width;
     const w_f: f32 = @floatFromInt(if (w > 1) w - 1 else 1);
 

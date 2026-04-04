@@ -1898,3 +1898,65 @@ test "terminal render: bus routing asymmetric tree" {
     try std.testing.expect(std.mem.indexOf(u8, output, "[Y]") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "[Z]") != null);
 }
+
+test "terminal render: card node with lines" {
+    const allocator = std.testing.allocator;
+
+    var layout_ir = LayoutIR.init(allocator);
+    defer layout_ir.deinit();
+
+    // Card node: label="Catalog", lines={"Game (price)", "Brand info"}
+    // width = max(7, 12) + 2 = 14, center_x = 7
+    // height = 2 lines + 4 = 6
+    const card_lines = [_][]const u8{ "Game (price)", "Brand info" };
+    try layout_ir.addNode(.{
+        .id = 1,
+        .label = "Catalog",
+        .x = 0,
+        .y = 0,
+        .width = 14,
+        .center_x = 7,
+        .level = 0,
+        .level_position = 0,
+        .lines = &card_lines,
+    });
+    // Simple label node at y=6
+    try layout_ir.addNode(.{
+        .id = 2,
+        .label = "Consumer",
+        .x = 0,
+        .y = 6,
+        .width = 10,
+        .center_x = 4,
+        .level = 1,
+        .level_position = 0,
+    });
+
+    try layout_ir.addEdge(.{
+        .from_id = 1,
+        .to_id = 2,
+        .from_x = 7,
+        .from_y = 0,
+        .to_x = 4,
+        .to_y = 6,
+        .path = .{ .direct = {} },
+        .edge_index = 0,
+    });
+
+    layout_ir.setDimensions(14, 7);
+
+    const output = try renderWithConfig(&layout_ir, allocator, .{
+        .node_style_fn = &struct {
+            fn f(_: NodeStyleContext) TerminalNodeStyle {
+                return .{ .border = .single_box };
+            }
+        }.f,
+    });
+    defer allocator.free(output);
+
+    // Card content should be visible
+    try std.testing.expect(std.mem.indexOf(u8, output, "Catalog") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Game (price)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Brand info") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Consumer") != null);
+}

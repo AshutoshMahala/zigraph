@@ -187,7 +187,9 @@ pub const RenderPlan = struct {
                 .is_implicit = node.kind == .implicit,
                 .arena = alloc,
             });
-            const h: usize = ns.border.height();
+            const border_h: usize = ns.border.height();
+            const node_h: usize = if (node.lines.len > 0) node.lines.len + 4 else border_h;
+            const h = @max(border_h, node_h);
             if (h > level_max_height[node.level]) level_max_height[node.level] = h;
         }
 
