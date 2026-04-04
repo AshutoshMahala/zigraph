@@ -372,6 +372,7 @@ pub fn LayoutIR(comptime Coord: type) type {
                 try result.addNode(.{
                     .id = node.id,
                     .label = node.label,
+                    .lines = node.lines,
                     .x = coordCast(Target, Coord, node.x),
                     .y = coordCast(Target, Coord, node.y),
                     .width = coordCast(Target, Coord, node.width),
