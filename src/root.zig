@@ -424,6 +424,7 @@ fn layoutFdg(
         try result.addNode(.{
             .id = node.id,
             .label = node.label,
+            .lines = node.lines,
             .x = x,
             .y = y,
             .width = node.width,
@@ -1311,6 +1312,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         try result.addNode(.{
             .id = node.id,
             .label = node.label,
+            .lines = node.lines,
             .x = real_positions.x[node_idx],
             .y = real_positions.y[node_idx],
             .width = node.width,
@@ -2632,6 +2634,33 @@ test "layout: FR fast respects pin constraints" {
     const br = result.nodeById(2).?;
     try std.testing.expect(tl.x < br.x);
     try std.testing.expect(tl.y < br.y);
+}
+
+test "end-to-end layout: card node height respected" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const lines: []const []const u8 = &.{ "line1", "line2" };
+    try g.addNode(1, NodeOptions{
+        .label = "Card",
+        .lines = lines,
+    });
+    try g.addNode(2, "Below");
+    try g.addEdge(1, 2);
+
+    var result = try layout(&g, allocator, .{});
+    defer result.deinit();
+
+    const nodes = result.getNodes();
+    // Card node should have height 6 (1+1+1+2+1)
+    var card_node: ?LayoutNode(usize) = null;
+    for (nodes) |n| {
+        if (std.mem.eql(u8, n.label, "Card")) card_node = n;
+    }
+    try std.testing.expect(card_node != null);
+    try std.testing.expectEqual(@as(usize, 6), card_node.?.height);
+    try std.testing.expectEqual(@as(usize, 2), card_node.?.lines.len);
 }
 
 // Run tests from submodules
