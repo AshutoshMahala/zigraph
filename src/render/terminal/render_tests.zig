@@ -1857,3 +1857,44 @@ test "edge labels: legend fallback in raw format" {
     try std.testing.expect(std.mem.indexOf(u8, output, "\"depends\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x86\x92") != null); // →
 }
+
+test "terminal render: bus routing asymmetric tree" {
+    const allocator = std.testing.allocator;
+    const root = @import("../../root.zig");
+    const Graph = root.Graph;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "Root");
+    try g.addNode(2, "Leaf");
+    try g.addNode(3, "Branch");
+    try g.addNode(4, "W");
+    try g.addNode(5, "X");
+    try g.addNode(6, "Y");
+    try g.addNode(7, "Z");
+    try g.addEdge(1, 2);
+    try g.addEdge(1, 3);
+    try g.addEdge(3, 4);
+    try g.addEdge(3, 5);
+    try g.addEdge(3, 6);
+    try g.addEdge(3, 7);
+
+    var layout_ir = try root.layout(&g, allocator, .{ .routing = .bus });
+    defer layout_ir.deinit();
+
+    const output = try render(&layout_ir, allocator);
+    defer allocator.free(output);
+
+    // Print for visual inspection during development
+    std.debug.print("\n{s}\n", .{output});
+
+    // Verify all nodes present
+    try std.testing.expect(std.mem.indexOf(u8, output, "Root") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Leaf") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Branch") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "[W]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "[X]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "[Y]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "[Z]") != null);
+}
