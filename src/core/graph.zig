@@ -64,6 +64,9 @@ pub const NodeOptions = struct {
     height: usize = 1,
     /// Pin constraint (null = fully free)
     pin: ?Pin = null,
+    /// Multi-line content for card nodes (displayed inside the box below a separator).
+    /// When set, height is auto-computed: top(1) + header(1) + sep(1) + lines.len + bottom(1).
+    lines: []const []const u8 = &.{},
 };
 
 /// A node in the graph.
@@ -82,6 +85,8 @@ pub const Node = struct {
     kind: NodeKind = .explicit,
     /// Pin constraint for fixing position (null = fully free)
     pin: ?Pin = null,
+    /// Multi-line card content (empty = standard single-line node)
+    lines: []const []const u8 = &.{},
 
     pub fn init(id: usize, label: []const u8) Node {
         // Width = "[" + label + "]" = label.len + 2
@@ -94,13 +99,30 @@ pub const Node = struct {
 
     /// Create a node from explicit options (for variable sizing).
     pub fn initFromOptions(id: usize, opts: NodeOptions) Node {
-        const effective_width = if (opts.width > 0) opts.width else opts.label.len + 2;
+        var effective_width = if (opts.width > 0) opts.width else opts.label.len + 2;
+        var effective_height = opts.height;
+
+        if (opts.lines.len > 0) {
+            // Card node: auto-compute dimensions from content
+            // Width = max(label, all lines) + 2 (borders)
+            for (opts.lines) |line| {
+                if (line.len + 2 > effective_width) {
+                    effective_width = line.len + 2;
+                }
+            }
+            // Height = top border(1) + header(1) + separator(1) + lines + bottom border(1)
+            if (opts.height == 1) { // only auto-compute if not explicitly set
+                effective_height = opts.lines.len + 4;
+            }
+        }
+
         return .{
             .id = id,
             .label = opts.label,
             .width = effective_width,
-            .height = opts.height,
+            .height = effective_height,
             .pin = opts.pin,
+            .lines = opts.lines,
         };
     }
 };
@@ -1017,4 +1039,22 @@ test "Graph: no subgraphs by default" {
 
     try std.testing.expectEqual(@as(usize, 0), g.subgraphCount());
     try std.testing.expect(!g.hasSubgraphs());
+}
+
+test "Graph: node with lines creates correct height" {
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    const lines: []const []const u8 = &.{ "line 1", "line 2", "line 3" };
+    try g.addNode(1, NodeOptions{
+        .label = "Header",
+        .lines = lines,
+    });
+
+    const node = g.nodes.items[0];
+    try std.testing.expectEqualStrings("Header", node.label);
+    // Height = top border + header + separator + 3 lines + bottom border = 7
+    try std.testing.expectEqual(@as(usize, 7), node.height);
+    try std.testing.expectEqual(@as(usize, 3), node.lines.len);
 }
