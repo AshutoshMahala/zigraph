@@ -699,6 +699,24 @@ pub fn build(b: *std.Build) void {
     const run_terminal_text_attrs_step = b.step("run-terminal-text-attrs", "Run terminal text attributes demo (bold, dim, italic, underline)");
     run_terminal_text_attrs_step.dependOn(&run_terminal_text_attrs.step);
 
+    const terminal_card_demo_mod = b.addModule("terminal_card_demo", .{
+        .root_source_file = b.path("examples/terminal/card_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+    const terminal_card_demo_exe = b.addExecutable(.{
+        .name = "terminal_card_demo",
+        .root_module = terminal_card_demo_mod,
+    });
+    b.installArtifact(terminal_card_demo_exe);
+
+    const run_terminal_card_demo = b.addRunArtifact(terminal_card_demo_exe);
+    const run_terminal_card_demo_step = b.step("run-terminal-card-demo", "Run card node demo");
+    run_terminal_card_demo_step.dependOn(&run_terminal_card_demo.step);
+
     // ── SVG Gallery Examples ────────────────────────────────────────────────
 
     const svg_gallery = [_]struct { file: []const u8, name: []const u8, desc: []const u8 }{
