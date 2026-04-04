@@ -1,14 +1,4 @@
-//! Card node rendering — multi-line box nodes for terminal output.
-//!
-//! Paints a box with a header, separator, and multiple content lines:
-//! ```text
-//! ┌─────────────┐
-//! │ Catalog     │
-//! ├─────────────┤
-//! │ Game (price)│
-//! │ line 2      │
-//! └─────────────┘
-//! ```
+//! Card node rendering — multi-line box nodes with header, separator, and content lines.
 
 const std = @import("std");
 const buffer_mod = @import("buffer.zig");
@@ -21,8 +11,6 @@ const NodeBorder = config_mod.NodeBorder;
 const CardStyle = config_mod.CardStyle;
 const resolveColorAt = config_mod.resolveColorAt;
 
-/// Compute card width from header and content lines.
-/// Width = max(header.len, max(line.len for each line)) + 2 (borders).
 pub fn cardWidth(header: []const u8, lines: []const []const u8) usize {
     var max_len = header.len;
     for (lines) |line| {
@@ -31,20 +19,10 @@ pub fn cardWidth(header: []const u8, lines: []const []const u8) usize {
     return max_len + 2;
 }
 
-/// Compute card height from number of content lines.
-/// Height = top(1) + header(1) + separator(1) + lines_count + bottom(1).
 pub fn cardHeight(lines_count: usize) usize {
     return lines_count + 4;
 }
 
-/// Paint a card node onto a Buffer2D.
-///
-/// Draws at position `(x, y)` with given `width`:
-/// - Row 0: top border
-/// - Row 1: header (centered)
-/// - Row 2: separator (├──┤)
-/// - Rows 3..3+N: content lines (left-aligned)
-/// - Row 3+N: bottom border
 pub fn paintCard(
     buffer: *Buffer2D,
     x: usize,
@@ -61,14 +39,12 @@ pub fn paintCard(
     const header_cc = resolveColorAt(style.header_color, 0.0);
     const content_cc = resolveColorAt(style.content_color, 0.0);
 
-    // Row 0: top border ┌──────┐
     buffer.setWithColor(x, y, bc.tl, border_cc);
     for (1..width - 1) |col| {
         buffer.setWithColor(x + col, y, bc.h, border_cc);
     }
     buffer.setWithColor(x + width - 1, y, bc.tr, border_cc);
 
-    // Row 1: header │ Title │
     buffer.setWithColor(x, y + 1, bc.v, border_cc);
     const pad = if (inner_w > header.len) (inner_w - header.len) / 2 else 0;
     for (0..inner_w) |col| {
@@ -84,14 +60,12 @@ pub fn paintCard(
     }
     buffer.setWithColor(x + width - 1, y + 1, bc.v, border_cc);
 
-    // Row 2: separator ├──────┤
-    buffer.setWithColor(x, y + 2, 0x251C, border_cc); // ├
+    buffer.setWithColor(x, y + 2, 0x251C, border_cc);
     for (1..width - 1) |col| {
         buffer.setWithColor(x + col, y + 2, bc.h, border_cc);
     }
-    buffer.setWithColor(x + width - 1, y + 2, 0x2524, border_cc); // ┤
+    buffer.setWithColor(x + width - 1, y + 2, 0x2524, border_cc);
 
-    // Rows 3..3+N: content lines
     for (lines, 0..) |line, li| {
         const fy = y + 3 + li;
         buffer.setWithColor(x, fy, bc.v, border_cc);
@@ -106,7 +80,6 @@ pub fn paintCard(
         buffer.setWithColor(x + width - 1, fy, bc.v, border_cc);
     }
 
-    // Bottom border └──────┘
     const bottom_y = y + 3 + lines.len;
     buffer.setWithColor(x, bottom_y, bc.bl, border_cc);
     for (1..width - 1) |col| {
