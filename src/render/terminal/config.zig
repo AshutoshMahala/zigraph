@@ -292,6 +292,22 @@ pub const TerminalSubgraphStyle = struct {
     attrs: TextAttrs = .{},
 };
 
+/// Style for card (multi-line) nodes. Used when a node has `lines.len > 0`.
+pub const CardStyle = struct {
+    /// Border style
+    border: NodeBorder = .single_box,
+    /// Border color
+    border_color: Color = .default,
+    /// Header text color
+    header_color: Color = .default,
+    /// Content line text color
+    content_color: Color = .default,
+    /// Background color
+    bg_color: Color = .default,
+    /// Header text attributes
+    header_attrs: TextAttrs = .{},
+};
+
 // ── Default style functions ─────────────────────────────────────────────────
 
 pub fn defaultEdgeStyle(ctx: EdgeStyleContext) TerminalEdgeStyle {
