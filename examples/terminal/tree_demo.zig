@@ -1,5 +1,8 @@
 //! Tree Renderer Demo — hierarchical text diagrams.
 //!
+//! Shows the tree renderer with examples relevant to graph visualization
+//! and the Zig ecosystem.
+//!
 //! Run with: zig build run-terminal-tree-demo
 
 const std = @import("std");
@@ -20,21 +23,56 @@ pub fn main() !void {
         \\
     , .{});
 
-    // ── Example 1: Review queue ─────────────────────────────────────────
-    std.debug.print("--- Review Queue ---\n\n", .{});
+    // ── Example 1: Sugiyama layout pipeline ───────────────────────────
+    std.debug.print("--- Sugiyama Layout Pipeline ---\n\n", .{});
     {
         const nodes = [_]TreeNode{.{
-            .label = "Variant appears in the review queue (split-panel UI)",
+            .label = "Graph",
+            .description = "input DAG with nodes, edges, subgraphs",
             .children = &.{
-                .{ .label = "Reviewer sees thumbnail + all metadata sections" },
-                .{ .label = "Can approve, flag, or edit individual fields" },
                 .{
-                    .label = "Corrections tracked as structured feedback",
-                    .extra_lines = &.{"(field, extracted_value, corrected_value)"},
+                    .label = "Cycle breaking",
+                    .description = "DFS-based back-edge detection",
+                    .extra_lines = &.{"(reversed edges rendered as dashed lines)"},
                 },
-                .{ .label = "Bulk operations: Cmd+click multiple \xe2\x86\x92 approve/flag all", .blank_above = true },
-                .{ .label = "Copy to siblings: share catalog/game data across color variants" },
-                .{ .label = "Status: unreviewed \xe2\x86\x92 approved / flagged", .blank_above = true },
+                .{
+                    .label = "Layering",
+                    .description = "assign nodes to horizontal ranks",
+                    .children = &.{
+                        .{ .label = "longest_path", .description = "simple, fast (default)" },
+                        .{ .label = "network_simplex", .description = "optimal: minimizes total edge span" },
+                    },
+                },
+                .{
+                    .label = "Crossing reduction",
+                    .description = "minimize edge crossings",
+                    .children = &.{
+                        .{ .label = "median heuristic", .description = "O(V log V) per pass" },
+                        .{ .label = "adjacent exchange", .description = "local swap optimization" },
+                    },
+                    .blank_above = true,
+                },
+                .{
+                    .label = "Positioning",
+                    .children = &.{
+                        .{ .label = "compact", .description = "left-to-right packing (default)" },
+                        .{ .label = "brandes_kopf", .description = "multi-pass parent/child centering" },
+                    },
+                },
+                .{
+                    .label = "Routing",
+                    .children = &.{
+                        .{ .label = "direct", .description = "Manhattan paths with slot-based h_y" },
+                        .{ .label = "spline", .description = "Bezier curves for SVG output" },
+                        .{ .label = "bus", .description = "shared horizontal bus with T-junctions" },
+                    },
+                    .blank_above = true,
+                },
+                .{
+                    .label = "LayoutIR",
+                    .description = "stable contract between layout and renderers",
+                    .blank_above = true,
+                },
             },
         }};
         const out = try T.tree.render(&nodes, alloc, .{});
@@ -42,23 +80,36 @@ pub fn main() !void {
         std.debug.print("{s}\n", .{out});
     }
 
-    // ── Example 2: Data pipeline ────────────────────────────────────────
-    std.debug.print("--- Data Pipeline ---\n\n", .{});
+    // ── Example 2: Zig build system ───────────────────────────────────
+    std.debug.print("--- Zig Build System ---\n\n", .{});
     {
         const nodes = [_]TreeNode{.{
-            .label = "Unity Designer",
+            .label = "build.zig",
             .children = &.{
-                .{ .label = "MaterialConfig JSON (base64)", .description = "GraphicsMetadataPropagator \xe2\x86\x92 GraphicsMetadata" },
-                .{ .label = "VXLB binary (voxel colors)", .description = "VxlbParser \xe2\x86\x92 ColorProfile" },
-                .{ .label = "GLB mesh", .description = "MeshGeometryAnalyzer \xe2\x86\x92 MeshMetadata" },
                 .{
-                    .label = "Thumbnail PNG",
-                    .description = "ColorExtractor (K-Means) \xe2\x86\x92 color hints",
+                    .label = "addExecutable",
+                    .description = "main binary",
                     .children = &.{
-                        .{ .label = "VLM (GPT-4.1-mini)", .description = "VisualMetadata" },
+                        .{ .label = "root_module", .description = "src/main.zig" },
+                        .{ .label = "addImport(\"zigraph\")", .description = "graph layout library" },
+                        .{ .label = "target", .description = "native or cross-compile" },
                     },
                 },
-                .{ .label = "SceneGraph (positions/rotations)", .description = "stored, never evaluated" },
+                .{
+                    .label = "addTest",
+                    .description = "unit tests",
+                    .children = &.{
+                        .{ .label = "root_source_file", .description = "src/root.zig" },
+                        .{ .label = "filter", .description = "run specific test by name" },
+                    },
+                    .blank_above = true,
+                },
+                .{
+                    .label = "addRunArtifact",
+                    .description = "run step",
+                    .extra_lines = &.{"(zig build run-terminal-tree-demo)"},
+                    .blank_above = true,
+                },
             },
         }};
         const out = try T.tree.render(&nodes, alloc, .{});
@@ -66,27 +117,77 @@ pub fn main() !void {
         std.debug.print("{s}\n", .{out});
     }
 
-    // ── Example 3: Build pipeline steps ─────────────────────────────────
-    std.debug.print("--- Build Pipeline ---\n\n", .{});
+    // ── Example 3: zigraph module structure ───────────────────────────
+    std.debug.print("--- Module Structure ---\n\n", .{});
     {
         const nodes = [_]TreeNode{.{
-            .label = "Step 1: BLENDER_CONVERT",
+            .label = "zigraph",
             .children = &.{
-                .{ .label = "Download source GLB from GCS" },
                 .{
-                    .label = "Send to remote Blender service",
+                    .label = "core/",
                     .children = &.{
-                        .{ .label = "Ambient occlusion baking" },
-                        .{ .label = "Format conversion to standardized GLB" },
-                        .{ .label = "Bounding box extraction (width, height, depth in meters)" },
+                        .{ .label = "graph.zig", .description = "Graph, Node, Edge, Subgraph" },
+                        .{ .label = "ir.zig", .description = "LayoutIR, LayoutNode, LayoutEdge" },
                     },
                 },
-                .{ .label = "Upload baked GLB to GCS" },
-                .{ .label = "Store bounding box on parent" },
-                .{ .label = "Propagate mesh dimensions to ALL variants' ItemMetadata.mesh.dimensions" },
+                .{
+                    .label = "algorithms/",
+                    .children = &.{
+                        .{
+                            .label = "sugiyama/",
+                            .children = &.{
+                                .{ .label = "layering/", .description = "longest_path, network_simplex" },
+                                .{ .label = "crossing/", .description = "median, adjacent_exchange" },
+                                .{ .label = "positioning/", .description = "compact, brandes_kopf" },
+                                .{ .label = "routing/", .description = "direct, spline, bus" },
+                            },
+                        },
+                        .{ .label = "fdg.zig", .description = "Fruchterman-Reingold + Barnes-Hut" },
+                    },
+                },
+                .{
+                    .label = "render/",
+                    .children = &.{
+                        .{
+                            .label = "terminal/",
+                            .children = &.{
+                                .{ .label = "buffer.zig", .description = "Buffer2D (char + color grid)" },
+                                .{ .label = "nodes.zig", .description = "paintNode (1-row, 3-row, card)" },
+                                .{ .label = "edges.zig", .description = "paintEdge, bus edges" },
+                                .{ .label = "tree.zig", .description = "standalone tree renderer" },
+                                .{ .label = "card.zig", .description = "multi-line box painting" },
+                            },
+                        },
+                        .{ .label = "svg/", .description = "SVG with splines, gradients, JS" },
+                        .{ .label = "json.zig", .description = "JSON export (schema v1.2)" },
+                    },
+                },
             },
         }};
         const out = try T.tree.render(&nodes, alloc, .{});
+        defer alloc.free(out);
+        std.debug.print("{s}\n", .{out});
+    }
+
+    // ── Example 4: ASCII fallback ─────────────────────────────────────
+    std.debug.print("--- ASCII Mode (for CI/piping) ---\n\n", .{});
+    {
+        const nodes = [_]TreeNode{.{
+            .label = "Graph.init(allocator)",
+            .children = &.{
+                .{ .label = "addNode(id, label)" },
+                .{ .label = "addDiEdge(from, to)" },
+                .{
+                    .label = "layout(&graph, allocator, config)",
+                    .children = &.{
+                        .{ .label = "terminal.render(&ir, allocator)" },
+                        .{ .label = "svg.render(&ir, allocator, .{})" },
+                        .{ .label = "json.render(&ir, allocator)" },
+                    },
+                },
+            },
+        }};
+        const out = try T.tree.render(&nodes, alloc, .{ .char_set = .ascii });
         defer alloc.free(out);
         std.debug.print("{s}\n", .{out});
     }

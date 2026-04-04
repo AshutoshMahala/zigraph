@@ -1,9 +1,7 @@
-//! Card Node Demo — multi-line boxes in graph layouts.
+//! Card Node Demo — multi-line box nodes in graph layouts.
 //!
-//! Demonstrates card nodes (nodes with multi-line content) in two real-world
-//! graph layouts:
-//! 1. Data flow — catalog/mesh feeding into item metadata
-//! 2. Architecture — VLM pipeline feeding into downstream services
+//! Shows card nodes (nodes with header + content lines) in graph layouts
+//! relevant to graph visualization and compiler pipelines.
 //!
 //! Run with: zig build run-terminal-card-demo
 
@@ -12,9 +10,9 @@ const zigraph = @import("zigraph");
 
 fn printSection(title: []const u8) void {
     std.debug.print("\n", .{});
-    for (0..60) |_| std.debug.print("─", .{});
+    for (0..60) |_| std.debug.print("\xe2\x94\x80", .{});
     std.debug.print("\n  {s}\n", .{title});
-    for (0..60) |_| std.debug.print("─", .{});
+    for (0..60) |_| std.debug.print("\xe2\x94\x80", .{});
     std.debug.print("\n\n", .{});
 }
 
@@ -31,33 +29,33 @@ pub fn main() !void {
     , .{});
 
     // ─────────────────────────────────────────────────────────────
-    // 1) Data flow: Catalog + Mesh → ItemMetadata
+    // 1) Compiler pipeline: Source → AST → IR → Machine Code
     // ─────────────────────────────────────────────────────────────
     {
-        printSection("1) Data flow: Catalog + Mesh → ItemMetadata");
+        printSection("1) Compiler pipeline");
 
         var g = zigraph.Graph.init(allocator);
         defer g.deinit();
 
-        const catalog_lines: []const []const u8 = &.{ "Game (price)", "Brand info", "" };
+        const parse_lines: []const []const u8 = &.{ "tokenize", "build AST" };
         try g.addNode(1, zigraph.NodeOptions{
-            .label = "Catalog",
-            .lines = catalog_lines,
+            .label = "Parser",
+            .lines = parse_lines,
         });
 
-        const mesh_lines: []const []const u8 = &.{ "(dims +", " geometry)" };
+        const sema_lines: []const []const u8 = &.{ "type checking", "comptime eval" };
         try g.addNode(2, zigraph.NodeOptions{
-            .label = "Mesh",
-            .lines = mesh_lines,
+            .label = "Semantic Analysis",
+            .lines = sema_lines,
         });
 
-        const meta_lines: []const []const u8 = &.{ "catalog | game | graphics", "mesh | visual" };
+        const codegen_lines: []const []const u8 = &.{ "LLVM IR", "machine code" };
         try g.addNode(3, zigraph.NodeOptions{
-            .label = "ItemMetadata (Spanner)",
-            .lines = meta_lines,
+            .label = "Code Generation",
+            .lines = codegen_lines,
         });
 
-        try g.addDiEdge(1, 3);
+        try g.addDiEdge(1, 2);
         try g.addDiEdge(2, 3);
 
         var ir = try zigraph.layout(&g, allocator, .{});
@@ -72,40 +70,89 @@ pub fn main() !void {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 2) Architecture: VLM pipeline → Downstream
+    // 2) zigraph render pipeline: Layout → Renderers
     // ─────────────────────────────────────────────────────────────
     {
-        printSection("2) Architecture: VLM pipeline → Downstream");
+        printSection("2) zigraph render pipeline");
 
         var g = zigraph.Graph.init(allocator);
         defer g.deinit();
 
-        const showroom_lines: []const []const u8 = &.{ "(not yet", " connected)" };
-        try g.addNode(10, zigraph.NodeOptions{
-            .label = "Designer showroom",
-            .lines = showroom_lines,
+        const graph_lines: []const []const u8 = &.{ "nodes, edges", "subgraphs" };
+        try g.addNode(1, zigraph.NodeOptions{
+            .label = "Graph",
+            .lines = graph_lines,
         });
 
-        const review_lines: []const []const u8 = &.{"(corrections)"};
-        try g.addNode(11, zigraph.NodeOptions{
-            .label = "Human review",
-            .lines = review_lines,
+        const layout_lines: []const []const u8 = &.{ "layering", "crossing reduction", "positioning", "routing" };
+        try g.addNode(2, zigraph.NodeOptions{
+            .label = "Sugiyama",
+            .lines = layout_lines,
         });
 
-        const vlm_lines: []const []const u8 = &.{ "(thumbnail ->", " 2-pass extract)" };
-        try g.addNode(12, zigraph.NodeOptions{
-            .label = "VLM pipeline",
-            .lines = vlm_lines,
+        const term_lines: []const []const u8 = &.{ "Buffer2D", "box-drawing", "ANSI color" };
+        try g.addNode(3, zigraph.NodeOptions{
+            .label = "Terminal",
+            .lines = term_lines,
         });
 
-        const downstream_lines: []const []const u8 = &.{ "quest matching", "search, recs" };
-        try g.addNode(13, zigraph.NodeOptions{
-            .label = "Downstream",
-            .lines = downstream_lines,
+        const svg_lines: []const []const u8 = &.{ "splines", "gradients" };
+        try g.addNode(4, zigraph.NodeOptions{
+            .label = "SVG",
+            .lines = svg_lines,
         });
 
-        try g.addDiEdge(11, 13);
-        try g.addDiEdge(12, 13);
+        const json_lines: []const []const u8 = &.{"schema v1.2"};
+        try g.addNode(5, zigraph.NodeOptions{
+            .label = "JSON",
+            .lines = json_lines,
+        });
+
+        try g.addDiEdge(1, 2);
+        try g.addDiEdge(2, 3);
+        try g.addDiEdge(2, 4);
+        try g.addDiEdge(2, 5);
+
+        var ir = try zigraph.layout(&g, allocator, .{});
+        defer ir.deinit();
+
+        const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
+            .color_mode = .ansi256,
+            .node_style_fn = &cardNodeStyle,
+        });
+        defer allocator.free(output);
+        std.debug.print("{s}\n", .{output});
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 3) Zig allocator hierarchy
+    // ─────────────────────────────────────────────────────────────
+    {
+        printSection("3) Zig allocator hierarchy");
+
+        var g = zigraph.Graph.init(allocator);
+        defer g.deinit();
+
+        const gpa_lines: []const []const u8 = &.{ "leak detection", "stack traces" };
+        try g.addNode(1, zigraph.NodeOptions{
+            .label = "GeneralPurpose",
+            .lines = gpa_lines,
+        });
+
+        const arena_lines: []const []const u8 = &.{ "bulk free", "no per-item free" };
+        try g.addNode(2, zigraph.NodeOptions{
+            .label = "Arena",
+            .lines = arena_lines,
+        });
+
+        const page_lines: []const []const u8 = &.{"mmap/VirtualAlloc"};
+        try g.addNode(3, zigraph.NodeOptions{
+            .label = "Page Allocator",
+            .lines = page_lines,
+        });
+
+        try g.addDiEdge(1, 2);
+        try g.addDiEdge(1, 3);
 
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();
@@ -122,6 +169,6 @@ pub fn main() !void {
 fn cardNodeStyle(_: zigraph.NodeStyleContext) zigraph.TerminalNodeStyle {
     return .{
         .border = .single_box,
-        .text_color = .{ .ansi256 = 252 }, // light gray
+        .text_color = .{ .ansi256 = 252 },
     };
 }

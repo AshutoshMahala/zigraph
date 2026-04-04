@@ -256,17 +256,25 @@ const zigraph = @import("zigraph");
 const TreeNode = zigraph.terminal.tree.TreeNode;
 
 const nodes = [_]TreeNode{.{
-    .label = "Variant appears in the review queue",
+    .label = "Graph",
+    .description = "input DAG with nodes, edges, subgraphs",
     .children = &.{
-        .{ .label = "Reviewer sees thumbnail + all metadata" },
-        .{ .label = "Can approve, flag, or edit individual fields" },
+        .{ .label = "Cycle breaking", .description = "DFS-based back-edge detection" },
         .{
-            .label = "Corrections tracked as structured feedback",
-            .extra_lines = &.{"(field, extracted_value, corrected_value)"},
+            .label = "Layering",
+            .children = &.{
+                .{ .label = "longest_path", .description = "simple, fast (default)" },
+                .{ .label = "network_simplex", .description = "optimal" },
+            },
         },
-        .{ .label = "Bulk operations: Cmd+click multiple", .blank_above = true },
-        .{ .label = "Copy to siblings: share data across variants" },
-        .{ .label = "Status: unreviewed -> approved / flagged", .blank_above = true },
+        .{
+            .label = "Crossing reduction",
+            .extra_lines = &.{"(median heuristic + adjacent exchange)"},
+            .blank_above = true,
+        },
+        .{ .label = "Positioning" },
+        .{ .label = "Routing", .blank_above = true },
+        .{ .label = "LayoutIR", .description = "stable contract for renderers", .blank_above = true },
     },
 }};
 const output = try zigraph.terminal.tree.render(&nodes, allocator, .{});
@@ -276,16 +284,19 @@ std.debug.print("{s}\n", .{output});
 
 Output:
 ```text
-Variant appears in the review queue
-├─ Reviewer sees thumbnail + all metadata
-├─ Can approve, flag, or edit individual fields
-├─ Corrections tracked as structured feedback
-│   (field, extracted_value, corrected_value)
+Graph ── input DAG with nodes, edges, subgraphs
+├─ Cycle breaking ── DFS-based back-edge detection
+├─ Layering
+│   ├─ longest_path ── simple, fast (default)
+│   └─ network_simplex ── optimal
 │
-├─ Bulk operations: Cmd+click multiple
-├─ Copy to siblings: share data across variants
+├─ Crossing reduction
+│   (median heuristic + adjacent exchange)
+├─ Positioning
 │
-└─ Status: unreviewed -> approved / flagged
+├─ Routing
+│
+└─ LayoutIR ── stable contract for renderers
 ```
 
 Features:
@@ -305,46 +316,64 @@ const zigraph = @import("zigraph");
 var graph = zigraph.Graph.init(allocator);
 defer graph.deinit();
 
-const catalog_lines = [_][]const u8{ "Game (price)", "Brand info" };
+const parse_lines: []const []const u8 = &.{ "tokenize", "build AST" };
 try graph.addNode(1, zigraph.NodeOptions{
-    .label = "Catalog",
-    .lines = &catalog_lines,
+    .label = "Parser",
+    .lines = parse_lines,
 });
 
-const mesh_lines = [_][]const u8{ "(dims +", " geometry)" };
+const sema_lines: []const []const u8 = &.{ "type checking", "comptime eval" };
 try graph.addNode(2, zigraph.NodeOptions{
-    .label = "Mesh",
-    .lines = &mesh_lines,
+    .label = "Semantic Analysis",
+    .lines = sema_lines,
 });
-try graph.addNode(3, "Consumer");
-try graph.addDiEdge(1, 3);
+
+const codegen_lines: []const []const u8 = &.{ "LLVM IR", "machine code" };
+try graph.addNode(3, zigraph.NodeOptions{
+    .label = "Code Generation",
+    .lines = codegen_lines,
+});
+
+try graph.addDiEdge(1, 2);
 try graph.addDiEdge(2, 3);
 
-var ir = try zigraph.layout(&graph, allocator, .{});
-defer ir.deinit();
-const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
+var ir = try zigraph.layout(&graph, allocator, .{
     .node_style_fn = &(struct {
         fn f(_: zigraph.terminal.NodeStyleContext) zigraph.terminal.TerminalNodeStyle {
             return .{ .border = .single_box };
         }
     }.f),
 });
+defer ir.deinit();
+const output = try zigraph.terminal.render(&ir, allocator);
 defer allocator.free(output);
 std.debug.print("{s}\n", .{output});
 ```
 
 Output:
 ```text
-┌────────────┐   ┌──────────┐
-│  Catalog   │   │   Mesh   │
-├────────────┤   ├──────────┤
-│Game (price)│   │(dims +   │
-│Brand info  │   │ geometry)│
-└────────────┘   └──────────┘
-       │               │
-       └───────┬───────┘
-               ↓
-          [Consumer]
+    ┌─────────┐
+    │ Parser  │
+    ├─────────┤
+    │tokenize │
+    │build AST│
+    └─────────┘
+         │
+         ↓
+┌─────────────────┐
+│Semantic Analysis│
+├─────────────────┤
+│type checking    │
+│comptime eval    │
+└─────────────────┘
+         │
+         ↓
+ ┌───────────────┐
+ │Code Generation│
+ ├───────────────┤
+ │LLVM IR        │
+ │machine code   │
+ └───────────────┘
 ```
 
 Card nodes auto-compute their dimensions from content — height is `lines.len + 4` (top border + header + separator + content lines + bottom border), width is `max(label, longest line) + 2`.
