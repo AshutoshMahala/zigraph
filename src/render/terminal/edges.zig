@@ -338,12 +338,14 @@ fn paintBusEdge(
             max_x = @max(max_x, sx);
         }
 
-        // 3. Horizontal bus line at h_y
+        // 3. Horizontal bus line at h_y (excluding endpoints — junctions handle those)
         {
             const cc = ec.at(h_y);
-            var x = min_x;
-            while (x <= max_x) : (x += 1) {
-                drawLineCell(buffer, x, h_y, false, cc, arm);
+            if (max_x > min_x + 1) {
+                var x = min_x + 1;
+                while (x < max_x) : (x += 1) {
+                    drawLineCell(buffer, x, h_y, false, cc, arm);
+                }
             }
         }
 
