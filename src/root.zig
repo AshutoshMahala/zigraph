@@ -256,6 +256,8 @@ pub const Routing = enum {
     direct,
     /// Spline routing (smooth bezier curves)
     spline,
+    /// Bus-style fan-out routing (shared horizontal row for siblings)
+    bus,
 };
 
 /// Top-level algorithm selection.
@@ -1382,6 +1384,12 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             allocator,
             .{},
             reversed_edges,
+        ),
+        .bus => try routing.direct.routeBus(
+            g,
+            result.nodes.items,
+            &result.id_to_index,
+            allocator,
         ),
     };
     // Note: we don't defer deinit on paths - ownership transfers to result.edges
