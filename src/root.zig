@@ -928,6 +928,7 @@ fn propagateEdgeLabels(result: *LayoutIR(usize), g: *const Graph, allocator: std
                     edge.from_y + 1;
                 edge_x_at_label = edge.from_x;
             },
+            .bus => {},
         }
 
         const label_width = orig_label.len + 2;

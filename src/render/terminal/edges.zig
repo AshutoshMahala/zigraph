@@ -112,6 +112,7 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Color, weigh
         .spline => {
             paintSplineEdge(buffer, edge, ec, arm, marker_end, marker_start);
         },
+        .bus => {},
     }
 }
 
