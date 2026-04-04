@@ -42,6 +42,8 @@
 - **Subgraphs (clusters)** — Hierarchical grouping with visual boundaries, nested subgraphs
 - **Cycle breaking** — Automatic back-edge detection for cyclic graphs (DFS-based)
 - **Directed & undirected edges** — `addDiEdge` / `addUnDiEdge` with per-edge arrow control
+- **Tree renderer** — Standalone `├─└─` hierarchical text diagrams with descriptions, grouping, and multi-line items
+- **Card nodes** — Multi-line box nodes with header + content lines, natively in graph layouts
 - **Three renderers** — Unicode (terminal), SVG (with splines), JSON (for tooling)
 - **Edge labels** — Annotate edges with text, rendered in all output formats
 - **Pluggable algorithms** — Bring your own crossing reduction, positioning, routing
@@ -244,6 +246,108 @@ try graph.putSubgraphs(&.{auth}).inside(services); // nest auth inside services
 Both Sugiyama and FDG layouts are subgraph-aware:
 - **Sugiyama**: Contiguous level enforcement, block-based crossing reduction, subgraph padding, bounding box computation
 - **FDG**: Cohesion force pulls subgraph members toward group centroid
+
+## Tree Renderer
+
+Render hierarchical data as `├─└─` text diagrams — no graph engine needed:
+
+```zig
+const zigraph = @import("zigraph");
+const TreeNode = zigraph.terminal.tree.TreeNode;
+
+const nodes = [_]TreeNode{.{
+    .label = "Variant appears in the review queue",
+    .children = &.{
+        .{ .label = "Reviewer sees thumbnail + all metadata" },
+        .{ .label = "Can approve, flag, or edit individual fields" },
+        .{
+            .label = "Corrections tracked as structured feedback",
+            .extra_lines = &.{"(field, extracted_value, corrected_value)"},
+        },
+        .{ .label = "Bulk operations: Cmd+click multiple", .blank_above = true },
+        .{ .label = "Copy to siblings: share data across variants" },
+        .{ .label = "Status: unreviewed -> approved / flagged", .blank_above = true },
+    },
+}};
+const output = try zigraph.terminal.tree.render(&nodes, allocator, .{});
+defer allocator.free(output);
+std.debug.print("{s}\n", .{output});
+```
+
+Output:
+```text
+Variant appears in the review queue
+├─ Reviewer sees thumbnail + all metadata
+├─ Can approve, flag, or edit individual fields
+├─ Corrections tracked as structured feedback
+│   (field, extracted_value, corrected_value)
+│
+├─ Bulk operations: Cmd+click multiple
+├─ Copy to siblings: share data across variants
+│
+└─ Status: unreviewed -> approved / flagged
+```
+
+Features:
+- **Descriptions** — `description: "text"` adds ` ── text` after the label
+- **Multi-line items** — `extra_lines` for continuation text indented under the branch line
+- **Visual grouping** — `blank_above: true` inserts a blank `│` line for separation
+- **ASCII fallback** — `.{ .char_set = .ascii }` for `+-` and `` `- `` instead of Unicode
+- **Streaming** — `renderStreaming()` writes to any `Writer` without allocation
+
+## Card Nodes
+
+Multi-line box nodes that work natively in graph layouts:
+
+```zig
+const zigraph = @import("zigraph");
+
+var graph = zigraph.Graph.init(allocator);
+defer graph.deinit();
+
+const catalog_lines = [_][]const u8{ "Game (price)", "Brand info" };
+try graph.addNode(1, zigraph.NodeOptions{
+    .label = "Catalog",
+    .lines = &catalog_lines,
+});
+
+const mesh_lines = [_][]const u8{ "(dims +", " geometry)" };
+try graph.addNode(2, zigraph.NodeOptions{
+    .label = "Mesh",
+    .lines = &mesh_lines,
+});
+try graph.addNode(3, "Consumer");
+try graph.addDiEdge(1, 3);
+try graph.addDiEdge(2, 3);
+
+var ir = try zigraph.layout(&graph, allocator, .{});
+defer ir.deinit();
+const output = try zigraph.terminal.renderWithConfig(&ir, allocator, .{
+    .node_style_fn = &(struct {
+        fn f(_: zigraph.terminal.NodeStyleContext) zigraph.terminal.TerminalNodeStyle {
+            return .{ .border = .single_box };
+        }
+    }.f),
+});
+defer allocator.free(output);
+std.debug.print("{s}\n", .{output});
+```
+
+Output:
+```text
+┌────────────┐   ┌──────────┐
+│  Catalog   │   │   Mesh   │
+├────────────┤   ├──────────┤
+│Game (price)│   │(dims +   │
+│Brand info  │   │ geometry)│
+└────────────┘   └──────────┘
+       │               │
+       └───────┬───────┘
+               ↓
+          [Consumer]
+```
+
+Card nodes auto-compute their dimensions from content — height is `lines.len + 4` (top border + header + separator + content lines + bottom border), width is `max(label, longest line) + 2`.
 
 ## Directed & Undirected Edges
 
@@ -529,10 +633,10 @@ The terminal renderer supports ANSI 256 / truecolor output with box-drawing char
 | <img src="assets/gallery/terminal_07_record_nodes.png" width="280"> | <img src="assets/gallery/terminal_08_db_diagram.png" width="280"> | <img src="assets/gallery/terminal_10_interactive_tui.png" width="280"> |
 | ER-style multi-row record boxes | CRM schema with PK/FK color coding | Click-to-select with hit-testing |
 
-| 11 — Text Attributes |
-|:---:|
-| <img src="assets/gallery/terminal_11_text_attrs.png" width="280"> |
-| Bold, dim, italic, underline |
+| 11 — Text Attributes | 12 — Tree Renderer | 13 — Card Nodes |
+|:---:|:---:|:---:|
+| <img src="assets/gallery/terminal_11_text_attrs.png" width="280"> | <img src="assets/gallery/terminal_12_tree_demo.png" width="280"> | <img src="assets/gallery/terminal_13_card_demo.png" width="280"> |
+| Bold, dim, italic, underline | `├─└─` hierarchical text with grouping | Multi-line box nodes in graph layouts |
 
 <details>
 <summary><strong>Run individual examples</strong></summary>
@@ -549,6 +653,8 @@ zig build run-terminal-db-diagram        # ER diagram
 zig build run-streaming                  # Streaming render
 zig build run-tui                        # Interactive TUI
 zig build run-terminal-text-attrs        # Text attributes
+zig build run-terminal-tree-demo         # Tree renderer
+zig build run-terminal-card-demo         # Card nodes
 ```
 </details>
 
@@ -571,6 +677,8 @@ zig build run-fdg-bench    # FDG performance benchmarks
 zig build run-stress       # Stress test suite
 zig build run-benchmark    # Sugiyama benchmarks
 zig build run-svg-gallery  # All SVG gallery examples at once
+zig build run-terminal-tree-demo   # Tree renderer (├─└─ hierarchical text)
+zig build run-terminal-card-demo   # Card nodes (multi-line boxes in graphs)
 ```
 
 ## License
