@@ -76,6 +76,9 @@ pub fn LayoutNode(comptime Coord: type) type {
         kind: NodeKind = .explicit,
         /// For dummy nodes: the edge index this dummy belongs to
         edge_index: ?usize = null,
+        /// Multi-line card content (empty = standard single-line node).
+        /// Borrowed from the Graph node — valid as long as the Graph is alive.
+        lines: []const []const u8 = &.{},
     };
 }
 
