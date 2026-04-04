@@ -135,6 +135,9 @@ pub fn EdgePath(comptime Coord: type) type {
             /// True for the first/stem edge that draws the trunk + horizontal bus.
             /// False for non-stem edges that only draw vertical drops to children.
             is_stem: bool,
+            /// Optional allocator for owned sibling_xs (only set on stem edge).
+            /// When set, deinit will free the sibling_xs slice.
+            allocator: ?Allocator = null,
         },
 
         const Self = @This();
@@ -148,6 +151,11 @@ pub fn EdgePath(comptime Coord: type) type {
         pub fn deinit(self: *Self) void {
             switch (self.*) {
                 .multi_segment => |*ms| ms.waypoints.deinit(ms.allocator),
+                .bus => |*b| {
+                    if (b.allocator) |alloc| {
+                        alloc.free(b.sibling_xs[0..b.sibling_count]);
+                    }
+                },
                 else => {},
             }
         }
