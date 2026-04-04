@@ -172,11 +172,21 @@ pub const RenderPlan = struct {
 
         const level_ir_ys = try alloc.alloc(usize, num_levels);
         const level_max_height = try alloc.alloc(usize, num_levels);
+        // Track how much height the IR already allocates per level
+        // (from node.height — 1 for regular nodes, lines.len+4 for cards).
+        const level_ir_height = try alloc.alloc(usize, num_levels);
         @memset(level_ir_ys, 0);
         @memset(level_max_height, 1);
+        @memset(level_ir_height, 1);
 
         for (layout_ir.getNodes()) |node| {
             level_ir_ys[node.level] = node.y;
+
+            // Track the IR-allocated height (max node.height in each level)
+            if (node.height > level_ir_height[node.level]) {
+                level_ir_height[node.level] = node.height;
+            }
+
             if (node.kind == .dummy) continue;
             const ns = config.node_style_fn(.{
                 .node_id = node.id,
@@ -187,16 +197,20 @@ pub const RenderPlan = struct {
                 .is_implicit = node.kind == .implicit,
                 .arena = alloc,
             });
+            // Rendered height: card nodes use lines.len+4, regular nodes
+            // use the border height (1 or 3).
             const border_h: usize = ns.border.height();
-            const node_h: usize = if (node.lines.len > 0) node.lines.len + 4 else border_h;
-            const h = @max(border_h, node_h);
+            const h: usize = if (node.lines.len > 0) node.lines.len + 4 else border_h;
             if (h > level_max_height[node.level]) level_max_height[node.level] = h;
         }
 
         const cumulative_extra = try alloc.alloc(usize, num_levels + 1);
         cumulative_extra[0] = 0;
         for (0..num_levels) |l| {
-            cumulative_extra[l + 1] = cumulative_extra[l] + (level_max_height[l] -| 1);
+            // Extra = rendered_height - ir_allocated_height (clamped to 0).
+            // For regular nodes: ir_height=1, rendered=3 → extra=2.
+            // For card nodes: ir_height=6, rendered=6 → extra=0.
+            cumulative_extra[l + 1] = cumulative_extra[l] + (level_max_height[l] -| level_ir_height[l]);
         }
         const total_extra = cumulative_extra[num_levels];
         const height = ir_height + total_extra;
