@@ -100,3 +100,86 @@ test "tree: empty children array" {
     defer allocator.free(output);
     try std.testing.expectEqualStrings("Leaf\n", output);
 }
+
+test "tree: extra continuation lines" {
+    const allocator = std.testing.allocator;
+    const nodes = [_]TreeNode{.{
+        .label = "Root",
+        .children = &.{
+            .{
+                .label = "Corrections tracked as structured feedback",
+                .extra_lines = &.{"(field, extracted_value, corrected_value)"},
+            },
+            .{ .label = "Last item" },
+        },
+    }};
+    const output = try tree.render(&nodes, allocator, .{});
+    defer allocator.free(output);
+    // Continuation line should appear with │ prefix
+    try std.testing.expect(std.mem.indexOf(u8, output, "(field, extracted_value, corrected_value)") != null);
+    // The continuation line should have │ (pipe) somewhere before it
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x82   (field") != null); // │   (field...
+}
+
+test "tree: blank_above inserts visual gap" {
+    const allocator = std.testing.allocator;
+    const nodes = [_]TreeNode{.{
+        .label = "Root",
+        .children = &.{
+            .{ .label = "Group 1 item" },
+            .{ .label = "Group 2 item", .blank_above = true },
+            .{ .label = "Group 2 another" },
+        },
+    }};
+    const output = try tree.render(&nodes, allocator, .{});
+    defer allocator.free(output);
+    // Should have a blank line with just │ before "Group 2 item"
+    // Find "Group 1 item" and "Group 2 item" and check there's extra space
+    const g1_pos = std.mem.indexOf(u8, output, "Group 1 item").?;
+    const g2_pos = std.mem.indexOf(u8, output, "Group 2 item").?;
+    // The gap between them should be larger than a single newline
+    try std.testing.expect(g2_pos - g1_pos > "Group 1 item\n".len + 5);
+}
+
+test "tree: description text" {
+    const allocator = std.testing.allocator;
+    const nodes = [_]TreeNode{.{
+        .label = "Root",
+        .children = &.{
+            .{ .label = "Config", .description = "base64 encoded JSON" },
+        },
+    }};
+    const output = try tree.render(&nodes, allocator, .{});
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Config \xe2\x94\x80\xe2\x94\x80 base64 encoded JSON") != null);
+}
+
+test "tree: full review queue example" {
+    const allocator = std.testing.allocator;
+    const nodes = [_]TreeNode{.{
+        .label = "Variant appears in the review queue (split-panel UI)",
+        .children = &.{
+            .{ .label = "Reviewer sees thumbnail + all metadata sections" },
+            .{ .label = "Can approve, flag, or edit individual fields" },
+            .{
+                .label = "Corrections tracked as structured feedback",
+                .extra_lines = &.{"(field, extracted_value, corrected_value)"},
+            },
+            .{ .label = "Bulk operations: Cmd+click multiple", .blank_above = true },
+            .{ .label = "Copy to siblings: share catalog/game data across color variants" },
+            .{ .label = "Status: unreviewed -> approved / flagged", .blank_above = true },
+        },
+    }};
+    const output = try tree.render(&nodes, allocator, .{});
+    defer allocator.free(output);
+
+    // All items present
+    try std.testing.expect(std.mem.indexOf(u8, output, "Variant appears") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Reviewer sees") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Corrections tracked") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "(field, extracted_value") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Bulk operations") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "Status: unreviewed") != null);
+    // Last item uses └─
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x94\xe2\x94\x80 Status") != null);
+}
