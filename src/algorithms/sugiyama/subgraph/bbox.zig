@@ -12,6 +12,9 @@ const ir_mod = @import("../../../core/ir.zig");
 const common = @import("common.zig");
 const default_padding = common.default_padding;
 
+/// Gap between parent and child subgraph borders.
+const PARENT_CHILD_H_GAP: usize = 1;
+
 /// Compute subgraph bounding boxes and append them to the layout IR.
 ///
 /// Processes the subgraph tree bottom-up:
@@ -109,13 +112,14 @@ pub fn computeBoundingBoxes(
             }
         }
 
-        // Expand parent's accumulator
+        // Expand parent's accumulator (with gap between parent and child borders)
         if (sg.parent_id) |pid| {
             if (g.subgraph_id_to_index.get(pid)) |parent_idx| {
                 has_content[parent_idx] = true;
-                min_x[parent_idx] = @min(min_x[parent_idx], min_x[sg_idx]);
+                const child_min_x = if (min_x[sg_idx] >= PARENT_CHILD_H_GAP) min_x[sg_idx] - PARENT_CHILD_H_GAP else 0;
+                min_x[parent_idx] = @min(min_x[parent_idx], child_min_x);
                 min_y[parent_idx] = @min(min_y[parent_idx], min_y[sg_idx]);
-                max_x[parent_idx] = @max(max_x[parent_idx], max_x[sg_idx]);
+                max_x[parent_idx] = @max(max_x[parent_idx], max_x[sg_idx] + PARENT_CHILD_H_GAP);
                 max_y[parent_idx] = @max(max_y[parent_idx], max_y[sg_idx]);
             }
         }

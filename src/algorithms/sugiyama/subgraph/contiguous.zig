@@ -133,6 +133,79 @@ pub fn enforceContiguousLevels(
     assignment.max_level = new_max;
 }
 
+/// Promote subgraph root and isolated nodes closer to their siblings.
+///
+/// After longest-path layering, root nodes (no incoming edges) get level 0 even
+/// when they belong to subgraphs whose other members are deep in the hierarchy.
+/// This creates long dangling edges inside subgraph boxes.
+///
+/// This function:
+/// 1. Moves root nodes with outgoing edges to `min(child_levels) - 1`
+/// 2. Moves isolated nodes (no edges) to the minimum level of their subgraph peers
+///
+/// Safe to call before topological repair — only moves nodes DOWN (to higher
+/// levels), never violating edge constraints.
+pub fn promoteSubgraphRoots(
+    g: *const Graph,
+    assignment: *LayerAssignment,
+    _: Allocator,
+) !void {
+    const node_count = g.nodeCount();
+    if (node_count == 0) return;
+
+    const sg_count = g.subgraphCount();
+    if (sg_count == 0) return;
+
+    // For each node in a subgraph, check if it's a root or isolated
+    for (0..node_count) |node_idx| {
+        const node_id = g.nodes.items[node_idx].id;
+        const node_sg = g.nodeSubgraph(node_id) orelse continue;
+        _ = node_sg;
+
+        const has_parents = g.parents.items[node_idx].items.len > 0;
+        const has_children = g.children.items[node_idx].items.len > 0;
+
+        if (has_parents) continue; // Not a root — skip
+
+        if (has_children) {
+            // Root with outgoing edges: move to min(child_levels) - 1
+            var min_child_level: usize = std.math.maxInt(usize);
+            for (g.children.items[node_idx].items) |child_idx| {
+                min_child_level = @min(min_child_level, assignment.levels[child_idx]);
+            }
+            if (min_child_level > 0 and min_child_level != std.math.maxInt(usize)) {
+                const new_level = min_child_level - 1;
+                if (new_level > assignment.levels[node_idx]) {
+                    assignment.levels[node_idx] = new_level;
+                }
+            }
+        } else {
+            // Isolated node (no edges): move to min level of subgraph peers
+            var min_peer_level: usize = std.math.maxInt(usize);
+            var has_peers = false;
+            const this_sg = g.nodeSubgraph(g.nodes.items[node_idx].id) orelse continue;
+            for (0..node_count) |other_idx| {
+                if (other_idx == node_idx) continue;
+                const other_id = g.nodes.items[other_idx].id;
+                const other_sg = g.nodeSubgraph(other_id) orelse continue;
+                if (other_sg != this_sg) continue;
+                min_peer_level = @min(min_peer_level, assignment.levels[other_idx]);
+                has_peers = true;
+            }
+            if (has_peers and min_peer_level > assignment.levels[node_idx]) {
+                assignment.levels[node_idx] = min_peer_level;
+            }
+        }
+    }
+
+    // Update max_level
+    var new_max: usize = 0;
+    for (assignment.levels[0..node_count]) |l| {
+        new_max = @max(new_max, l);
+    }
+    assignment.max_level = new_max;
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

@@ -735,19 +735,55 @@ fn fixupReversedEdges(result: *LayoutIR(usize), reversed_edges: ?[]const bool) v
 
 /// Step 7: Stagger horizontal_y for corner-path edges.
 ///
-/// Groups corner edges by from_y and assigns sequential row slots
-/// so no two horizontal segments share the same row.
+/// Groups corner edges by from_y, then sorts each group so that edges
+/// reaching farthest horizontally exit closest to the source node (lowest
+/// h_y / slot 0). This reduces edge crossings: wide-spanning edges clear
+/// over the top, while short-reach edges tuck underneath.
 fn staggerCornerEdges(result: *LayoutIR(usize)) void {
-    for (result.edges.items, 0..) |*edge, i| {
-        if (edge.path != .corner) continue;
+    const edges = result.edges.items;
+    const n = edges.len;
+    if (n == 0) return;
+
+    // Collect indices of corner edges, grouped by from_y.
+    // We process them in groups: for each unique from_y, sort by
+    // horizontal distance descending, then assign slots.
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        if (edges[i].path != .corner) continue;
+        const group_from_y = edges[i].from_y;
+
+        // Assign slot based on how many wider-reaching edges share this from_y.
+        // An edge is "wider" if its absolute horizontal distance is greater.
+        const my_dist = if (edges[i].to_x >= edges[i].from_x)
+            edges[i].to_x - edges[i].from_x
+        else
+            edges[i].from_x - edges[i].to_x;
+
         var slot: usize = 0;
-        for (result.edges.items[0..i]) |prev| {
-            if (prev.path == .corner and prev.from_y == edge.from_y) {
+        for (edges[0..n]) |*prev| {
+            if (@intFromPtr(prev) == @intFromPtr(&edges[i])) continue;
+            if (prev.path != .corner) continue;
+            if (prev.from_y != group_from_y) continue;
+            // Count edges that go farther than this one (they get lower slots)
+            const prev_dist = if (prev.to_x >= prev.from_x)
+                prev.to_x - prev.from_x
+            else
+                prev.from_x - prev.to_x;
+            if (prev_dist > my_dist) {
                 slot += 1;
+            } else if (prev_dist == my_dist) {
+                // Tiebreaker: edge going further left gets lower slot
+                if (prev.to_x < edges[i].to_x) {
+                    slot += 1;
+                }
             }
         }
-        const available = if (edge.to_y > edge.from_y + 1) edge.to_y - edge.from_y - 1 else 1;
-        edge.path.corner.horizontal_y = edge.from_y + (slot % available);
+
+        const available = if (edges[i].to_y > edges[i].from_y + 1)
+            edges[i].to_y - edges[i].from_y - 1
+        else
+            1;
+        edges[i].path.corner.horizontal_y = edges[i].from_y + (slot % available);
     }
 }
 
@@ -860,7 +896,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
     };
     defer layer_assignment.deinit();
 
-    // Step 1a: Apply pin.y constraints — override levels for pinned nodes,
+    // Step 1a: Apply pin.y constraints and enforce subgraph contiguity,
     // then repair topological ordering so all edges still flow downward.
     {
         // Phase 1: Apply pin.y hints
@@ -871,6 +907,11 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
                 layer_assignment.levels[node_idx] = pinned_level;
                 layer_assignment.max_level = @max(layer_assignment.max_level, pinned_level);
             }
+        }
+
+        // Phase 1b: Enforce contiguous level spans for subgraph members.
+        if (g.hasSubgraphs()) {
+            try subgraph_layout.enforceContiguousLevels(g, &layer_assignment, allocator);
         }
 
         // Phase 2: Topological repair — ensure every edge u→v has level[u] < level[v].
@@ -961,9 +1002,20 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         }
     }
 
-    // Step 1b: Enforce contiguous level spans for subgraph members
+    // Step 1b: Promote subgraph root/isolated nodes closer to siblings.
+    // Eliminates long dangling edges inside subgraph boxes caused by root
+    // nodes at level 0 when their subgraph peers are deep in the hierarchy.
+    // Runs AFTER topological repair so peer levels are finalized.
+    // Only moves nodes DOWN (higher level numbers), so edge constraints remain valid.
     if (g.hasSubgraphs()) {
-        try subgraph_layout.enforceContiguousLevels(g, &layer_assignment, allocator);
+        try subgraph_layout.promoteSubgraphRoots(g, &layer_assignment, allocator);
+
+        // Re-compact levels after promotion may have left gaps
+        var new_max: usize = 0;
+        for (0..g.nodeCount()) |ni| {
+            new_max = @max(new_max, layer_assignment.levels[ni]);
+        }
+        layer_assignment.max_level = new_max;
     }
 
     // Step 2: Build virtual levels (includes dummy nodes for skip-level edges)
@@ -1132,6 +1184,41 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         const total_extra_y = cumulative_y[cumulative_y.len - 1];
         real_positions.total_height += total_extra_y;
         virtual_positions.total_height += total_extra_y;
+    }
+
+    // Step 4e: Refine + compact subgraphs, then fix overlaps
+    if (g.subgraphCount() >= 2) {
+        // Build node widths array from graph
+        const node_widths = try allocator.alloc(usize, g.nodeCount());
+        defer allocator.free(node_widths);
+        for (0..g.nodeCount()) |ni| {
+            node_widths[ni] = if (g.nodeAt(ni)) |n| n.width else 1;
+        }
+
+        // Step 4e-i: Refine x-positions + compact subgraphs (3 rounds)
+        try subgraph_layout.refineAndCompact(
+            g,
+            real_positions.x,
+            real_positions.level,
+            node_widths,
+            g.nodeCount(),
+            allocator,
+        );
+
+        // Step 4e-ii: Fix remaining subgraph overlaps
+        const extra_w = try subgraph_layout.fixSubgraphOverlaps(
+            g,
+            real_positions.x,
+            real_positions.level,
+            node_widths,
+            g.nodeCount(),
+            allocator,
+        );
+        real_positions.total_width += extra_w;
+        // Update center_x to match shifted x positions
+        for (0..g.nodeCount()) |ni| {
+            real_positions.center_x[ni] = real_positions.x[ni] + node_widths[ni] / 2;
+        }
     }
 
     // Step 5: Build LayoutIR

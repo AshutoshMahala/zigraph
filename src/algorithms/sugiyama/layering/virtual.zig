@@ -430,12 +430,17 @@ pub fn computeVirtualPositionsWithHints(
         }
 
         // Second pass: center each level
-        for (x_positions.items, 0..) |*level_x, level_idx| {
-            const level_width = level_widths[level_idx];
-            if (level_width < max_width) {
-                const offset = (max_width - level_width) / 2;
-                for (level_x.items) |*x| {
-                    x.* += offset;
+        // Skip centering when subgraphs are present — per-level centering
+        // destroys vertical alignment across subgraph boundaries (causes zig-zag).
+        const center_levels = !g.hasSubgraphs();
+        if (center_levels) {
+            for (x_positions.items, 0..) |*level_x, level_idx| {
+                const level_width = level_widths[level_idx];
+                if (level_width < max_width) {
+                    const offset = (max_width - level_width) / 2;
+                    for (level_x.items) |*x| {
+                        x.* += offset;
+                    }
                 }
             }
         }

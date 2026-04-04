@@ -174,6 +174,24 @@ pub fn build(b: *std.Build) void {
     const run_stress_step = b.step("run-stress", "Run the stress test suite");
     run_stress_step.dependOn(&run_stress.step);
 
+    // ascii-dag stress port
+    const asciidag_stress_example = b.addExecutable(.{
+        .name = "asciidag_stress",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/asciidag_stress.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(asciidag_stress_example);
+
+    const run_asciidag_stress = b.addRunArtifact(asciidag_stress_example);
+    const run_asciidag_stress_step = b.step("run-asciidag-stress", "Run the ascii-dag stress port");
+    run_asciidag_stress_step.dependOn(&run_asciidag_stress.step);
+
     // Error handling example
     const error_example = b.addExecutable(.{
         .name = "error_handling",
