@@ -1385,11 +1385,13 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             .{},
             reversed_edges,
         ),
-        .bus => try routing.direct.routeBus(
+        .bus => try routing.direct.routeBusWithDummies(
             g,
             result.nodes.items,
             &result.id_to_index,
+            &dummy_positions,
             allocator,
+            reversed_edges,
         ),
     };
     // Note: we don't defer deinit on paths - ownership transfers to result.edges
