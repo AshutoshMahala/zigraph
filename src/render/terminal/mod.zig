@@ -151,6 +151,7 @@ pub const drawDirectManhattan = edge_render.drawDirectManhattan;
 pub const RenderPlan = plan_mod.RenderPlan;
 pub const NodePlan = plan_mod.NodePlan;
 pub const HitResult = plan_mod.HitResult;
+pub const tree = @import("tree.zig");
 
 // ── Force test inclusion for submodules ─────────────────────────────────────
 
@@ -164,6 +165,8 @@ comptime {
     _ = subgraph_render;
     _ = plan_mod;
     _ = @import("render_tests.zig");
+    _ = @import("tree.zig");
+    _ = @import("tree_tests.zig");
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
