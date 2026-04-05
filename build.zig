@@ -834,4 +834,23 @@ pub fn build(b: *std.Build) void {
     if (b.args) |a| run_cli.addArgs(a);
     const run_cli_step = b.step("run-cli", "Run the zigraph CLI");
     run_cli_step.dependOn(&run_cli.step);
+
+    // DSL demo example
+    const dsl_demo = b.addExecutable(.{
+        .name = "dsl_demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/dsl_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+                .{ .name = "dsl", .module = dsl_mod },
+            },
+        }),
+    });
+    b.installArtifact(dsl_demo);
+
+    const run_dsl_demo = b.addRunArtifact(dsl_demo);
+    const run_dsl_demo_step = b.step("run-dsl-demo", "Run the DSL demo example");
+    run_dsl_demo_step.dependOn(&run_dsl_demo.step);
 }
