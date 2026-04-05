@@ -27,6 +27,21 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
 
+    const dsl_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dsl/mod.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    const run_dsl_tests = b.addRunArtifact(dsl_tests);
+    const dsl_test_step = b.step("test-dsl", "Run DSL unit tests");
+    dsl_test_step.dependOn(&run_dsl_tests.step);
+    test_step.dependOn(&run_dsl_tests.step);
+
     // Long-running stress/fuzz harness
     const fuzz_harness = b.addExecutable(.{
         .name = "fuzz_harness",
