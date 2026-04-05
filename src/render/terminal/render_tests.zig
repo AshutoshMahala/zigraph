@@ -383,7 +383,7 @@ test "lookupChar: dashed → light for junction resolution" {
 
 test "mergeJunctionWeighted: heavy vertical crossing light horizontal" {
     // Heavy │ + light ─ → mixed crossing
-    const result = mergeJunctionWeighted('┃', .{ .left = .light, .right = .light });
+    const result = mergeJunctionWeighted('┃', .{ .left = .light, .right = .light }, .flat);
     const dw = decomposeChar(result);
     try std.testing.expectEqual(ArmWeight.heavy, dw.up);
     try std.testing.expectEqual(ArmWeight.heavy, dw.down);
@@ -392,7 +392,7 @@ test "mergeJunctionWeighted: heavy vertical crossing light horizontal" {
 }
 
 test "mergeJunctionWeighted: light vertical crossing heavy horizontal" {
-    const result = mergeJunctionWeighted('│', .{ .left = .heavy, .right = .heavy });
+    const result = mergeJunctionWeighted('│', .{ .left = .heavy, .right = .heavy }, .flat);
     const dw = decomposeChar(result);
     try std.testing.expectEqual(ArmWeight.light, dw.up);
     try std.testing.expectEqual(ArmWeight.light, dw.down);
@@ -402,17 +402,17 @@ test "mergeJunctionWeighted: light vertical crossing heavy horizontal" {
 
 test "mergeJunctionWeighted: marker chars are protected" {
     // Arrow char should not be overwritten
-    try std.testing.expectEqual(@as(u21, '↓'), mergeJunctionWeighted('↓', .{ .left = .heavy, .right = .heavy }));
-    try std.testing.expectEqual(@as(u21, '↑'), mergeJunctionWeighted('↑', .{ .up = .light, .down = .light }));
+    try std.testing.expectEqual(@as(u21, '↓'), mergeJunctionWeighted('↓', .{ .left = .heavy, .right = .heavy }, .flat));
+    try std.testing.expectEqual(@as(u21, '↑'), mergeJunctionWeighted('↑', .{ .up = .light, .down = .light }, .flat));
 }
 
 test "mergeJunctionWeighted: space + heavy vertical" {
-    try std.testing.expectEqual(CP_HV_V_LINE, mergeJunctionWeighted(' ', .{ .up = .heavy, .down = .heavy }));
+    try std.testing.expectEqual(CP_HV_V_LINE, mergeJunctionWeighted(' ', .{ .up = .heavy, .down = .heavy }, .flat));
 }
 
 test "mergeJunctionWeighted: double horiz + light down = ╤" {
     // This is the key subgraph border crossing case
-    try std.testing.expectEqual(CP_MIX_T_DOWN_DH, mergeJunctionWeighted(CP_SG_H, .{ .down = .light }));
+    try std.testing.expectEqual(CP_MIX_T_DOWN_DH, mergeJunctionWeighted(CP_SG_H, .{ .down = .light }, .flat));
 }
 
 test "ArmWeight.merge: heavier weight wins" {
@@ -1959,4 +1959,35 @@ test "terminal render: card node with lines" {
     try std.testing.expect(std.mem.indexOf(u8, output, "Game (price)") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Brand info") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Consumer") != null);
+}
+
+// ── Topic: Crossing style tests ──────────────────────────────────────────────
+
+test "mergeJunctionWeighted: arc crossing style" {
+    // Vertical line exists, horizontal crosses it → should produce arc
+    const result = mergeJunctionWeighted('│', .{ .left = .light, .right = .light }, .arc);
+    try std.testing.expectEqual(@as(u21, 0x2312), result); // ⌒
+}
+
+test "mergeJunctionWeighted: gap crossing style" {
+    // Vertical line exists, horizontal crosses it → should produce space
+    const result = mergeJunctionWeighted('│', .{ .left = .light, .right = .light }, .gap);
+    try std.testing.expectEqual(@as(u21, ' '), result);
+}
+
+test "mergeJunctionWeighted: flat crossing style unchanged" {
+    const result = mergeJunctionWeighted('│', .{ .left = .light, .right = .light }, .flat);
+    try std.testing.expectEqual(@as(u21, '┼'), result);
+}
+
+test "mergeJunctionWeighted: arc does not affect T-junctions" {
+    // T-junction (3-way) should be unchanged even with arc style
+    const result = mergeJunctionWeighted('│', .{ .right = .light }, .arc);
+    try std.testing.expectEqual(@as(u21, '├'), result);
+}
+
+test "mergeJunctionWeighted: arc with heavy crossing" {
+    // Heavy vertical + light horizontal → should still produce arc
+    const result = mergeJunctionWeighted(CP_HV_V_LINE, .{ .left = .light, .right = .light }, .arc);
+    try std.testing.expectEqual(@as(u21, 0x2312), result);
 }

@@ -334,7 +334,7 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
 
     // Z1: Paint edges
     for (plan.edge_plans) |ep| {
-        edge_render.paintEdge(&buffer, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start);
+        edge_render.paintEdge(&buffer, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start, config.crossing_style);
     }
 
     // Z2: Dummy node cleanup

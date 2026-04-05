@@ -16,6 +16,7 @@ const LineWeight = config_mod.LineWeight;
 const MarkerShape = config_mod.MarkerShape;
 const CellColor = config_mod.CellColor;
 const Color = config_mod.Color;
+const CrossingStyle = config_mod.CrossingStyle;
 const resolveColor = config_mod.resolveColor;
 const resolveColorAt = config_mod.resolveColorAt;
 const j = @import("junctions.zig");
@@ -80,7 +81,7 @@ pub const EdgeColor = struct {
 /// Paint an edge onto the buffer.
 /// Color, weight, and markers come from the style function.
 /// Accepts a `Color` union to support per-cell gradient interpolation.
-pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Color, weight: LineWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Color, weight: LineWeight, marker_end: MarkerShape, marker_start: MarkerShape, crossing_style: CrossingStyle) void {
     const ec = EdgeColor.init(color, edge.from_y, edge.to_y);
     const arm = ArmWeight.fromLineWeight(weight);
     switch (edge.path) {
@@ -93,27 +94,27 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Color, weigh
             if (x0 == x1 and y0 == y1) return; // degenerate
 
             if (x0 == x1) {
-                drawDirectVertical(buffer, x0, y0, y1, ec, weight, edge.directed, marker_end);
+                drawDirectVertical(buffer, x0, y0, y1, ec, weight, edge.directed, marker_end, crossing_style);
             } else if (y0 == y1) {
-                drawDirectHorizontal(buffer, y0, x0, x1, ec, weight, edge.directed, marker_end);
+                drawDirectHorizontal(buffer, y0, x0, x1, ec, weight, edge.directed, marker_end, crossing_style);
             } else {
-                drawDirectManhattan(buffer, x0, y0, x1, y1, ec, weight, edge.directed, edge.reversed, marker_end, marker_start);
+                drawDirectManhattan(buffer, x0, y0, x1, y1, ec, weight, edge.directed, edge.reversed, marker_end, marker_start, crossing_style);
             }
         },
         .corner => |corner| {
-            paintCornerEdge(buffer, edge, corner.horizontal_y, ec, arm, marker_end, marker_start);
+            paintCornerEdge(buffer, edge, corner.horizontal_y, ec, arm, marker_end, marker_start, crossing_style);
         },
         .side_channel => |sc| {
-            paintSideChannelEdge(buffer, edge, sc.channel_x, sc.start_y, sc.end_y, ec, arm, marker_end, marker_start);
+            paintSideChannelEdge(buffer, edge, sc.channel_x, sc.start_y, sc.end_y, ec, arm, marker_end, marker_start, crossing_style);
         },
         .multi_segment => {
-            paintMultiSegmentEdge(buffer, edge, ec, arm, marker_end, marker_start);
+            paintMultiSegmentEdge(buffer, edge, ec, arm, marker_end, marker_start, crossing_style);
         },
         .spline => {
-            paintSplineEdge(buffer, edge, ec, arm, marker_end, marker_start);
+            paintSplineEdge(buffer, edge, ec, arm, marker_end, marker_start, crossing_style);
         },
         .bus => |bus| {
-            paintBusEdge(buffer, edge, bus, ec, arm, marker_end, marker_start);
+            paintBusEdge(buffer, edge, bus, ec, arm, marker_end, marker_start, crossing_style);
         },
     }
 }
@@ -121,7 +122,7 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Color, weigh
 // ── Directional draw helpers ────────────────────────────────────────────────
 
 /// Draw a pure-vertical direct edge between y_from and y_to at column x.
-pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, ec: EdgeColor, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
+pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usize, ec: EdgeColor, weight: LineWeight, directed: bool, marker_end: MarkerShape, crossing_style: CrossingStyle) void {
     if (y_from == y_to) return;
     const lo = @min(y_from, y_to);
     const hi = @max(y_from, y_to);
@@ -138,13 +139,13 @@ pub fn drawDirectVertical(buffer: *Buffer2D, x: usize, y_from: usize, y_to: usiz
         if (arrow_ch != null and y == arrow_y) {
             buffer.setWithColor(x, y, arrow_ch.?, ec.at(y));
         } else {
-            drawLineCell(buffer, x, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x, y, true, ec.at(y), arm, crossing_style);
         }
     }
 }
 
 /// Draw a pure-horizontal direct edge between x_from and x_to at row y.
-pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, ec: EdgeColor, weight: LineWeight, directed: bool, marker_end: MarkerShape) void {
+pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: usize, ec: EdgeColor, weight: LineWeight, directed: bool, marker_end: MarkerShape, crossing_style: CrossingStyle) void {
     if (x_from == x_to) return;
     const lo = @min(x_from, x_to);
     const hi = @max(x_from, x_to);
@@ -162,21 +163,21 @@ pub fn drawDirectHorizontal(buffer: *Buffer2D, y: usize, x_from: usize, x_to: us
         if (arrow_ch != null and x == arrow_x) {
             buffer.setWithColor(x, y, arrow_ch.?, cc);
         } else {
-            drawLineCell(buffer, x, y, false, cc, arm);
+            drawLineCell(buffer, x, y, false, cc, arm, crossing_style);
         }
     }
 }
 
 /// Draw a Manhattan Z-shaped route between (x0,y0) and (x1,y1).
 /// Route: (x0,y0) → (x0,mid_y) → (x1,mid_y) → (x1,y1)
-pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, ec: EdgeColor, weight: LineWeight, directed: bool, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape) void {
+pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y1: usize, ec: EdgeColor, weight: LineWeight, directed: bool, reversed: bool, marker_end: MarkerShape, marker_start: MarkerShape, crossing_style: CrossingStyle) void {
     const lo_y = @min(y0, y1);
     const hi_y = @max(y0, y1);
     const mid_y = lo_y + (hi_y - lo_y) / 2;
     const arm = ArmWeight.fromLineWeight(weight);
 
     // --- Segment 1: vertical at x0 between y0 and mid_y (exclusive of both) ---
-    drawVerticalSegment(buffer, x0, @min(y0, mid_y), @max(y0, mid_y), ec, arm);
+    drawVerticalSegment(buffer, x0, @min(y0, mid_y), @max(y0, mid_y), ec, arm, crossing_style);
 
     // --- Corner 1 at (x0, mid_y) ---
     {
@@ -187,7 +188,7 @@ pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y
             .down = if (y0 > mid_y) arm else .none,
             .right = if (x1 > x0) arm else .none,
             .left = if (x1 < x0) arm else .none,
-        }), cc);
+        }, crossing_style), cc);
     }
 
     // --- Segment 2: horizontal at mid_y (exclusive of x0 and x1) ---
@@ -198,7 +199,7 @@ pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y
         if (hi_x > lo_x + 1) {
             var x = lo_x + 1;
             while (x < hi_x) : (x += 1) {
-                drawLineCell(buffer, x, mid_y, false, cc, arm);
+                drawLineCell(buffer, x, mid_y, false, cc, arm, crossing_style);
             }
         }
     }
@@ -212,11 +213,11 @@ pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y
             .down = if (y1 > mid_y) arm else .none,
             .right = if (x0 > x1) arm else .none,
             .left = if (x0 < x1) arm else .none,
-        }), cc);
+        }, crossing_style), cc);
     }
 
     // --- Segment 3: vertical at x1 between mid_y and y1 (exclusive of both) ---
-    drawVerticalSegment(buffer, x1, @min(mid_y, y1), @max(mid_y, y1), ec, arm);
+    drawVerticalSegment(buffer, x1, @min(mid_y, y1), @max(mid_y, y1), ec, arm, crossing_style);
 
     // --- Arrow ---
     if (directed) {
@@ -226,7 +227,7 @@ pub fn drawDirectManhattan(buffer: *Buffer2D, x0: usize, y0: usize, x1: usize, y
 
 // ── Private path-type helpers ───────────────────────────────────────────────
 
-fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape, crossing_style: CrossingStyle) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
     const min_x = @min(x1, x2);
@@ -240,10 +241,10 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
             if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x1, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x1, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x1, y, true, ec.at(y), arm, crossing_style);
             }
         } else {
-            drawLineCell(buffer, x1, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x1, y, true, ec.at(y), arm, crossing_style);
         }
     }
 
@@ -253,7 +254,7 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
         var x = min_x;
         while (x <= max_x) : (x += 1) {
             if (x != x1 and x != x2) {
-                drawLineCell(buffer, x, h_y, false, cc, arm);
+                drawLineCell(buffer, x, h_y, false, cc, arm, crossing_style);
             }
         }
     }
@@ -266,7 +267,7 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
             .up = arm,
             .right = if (x1 < x2) arm else .none,
             .left = if (x1 > x2) arm else .none,
-        }), cc);
+        }, crossing_style), cc);
     }
 
     // Corner at target x
@@ -277,7 +278,7 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
             .down = arm,
             .right = if (x1 > x2) arm else .none,
             .left = if (x1 < x2) arm else .none,
-        }), cc);
+        }, crossing_style), cc);
     }
 
     // Vertical from horizontal to target
@@ -287,10 +288,10 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
             if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x2, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x2, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x2, y, true, ec.at(y), arm, crossing_style);
             }
         } else {
-            drawLineCell(buffer, x2, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x2, y, true, ec.at(y), arm, crossing_style);
         }
     }
 }
@@ -308,6 +309,7 @@ fn paintBusEdge(
     arm: ArmWeight,
     marker_end: MarkerShape,
     marker_start: MarkerShape,
+    crossing_style: CrossingStyle,
 ) void {
     const h_y = bus.horizontal_y;
 
@@ -322,10 +324,10 @@ fn paintBusEdge(
                 if (markerChar(marker_start, .up, arm)) |ch| {
                     buffer.setWithColor(trunk_x, y, ch, ec.at(y));
                 } else {
-                    drawLineCell(buffer, trunk_x, y, true, ec.at(y), arm);
+                    drawLineCell(buffer, trunk_x, y, true, ec.at(y), arm, crossing_style);
                 }
             } else {
-                drawLineCell(buffer, trunk_x, y, true, ec.at(y), arm);
+                drawLineCell(buffer, trunk_x, y, true, ec.at(y), arm, crossing_style);
             }
         }
 
@@ -344,7 +346,7 @@ fn paintBusEdge(
             if (max_x > min_x + 1) {
                 var x = min_x + 1;
                 while (x < max_x) : (x += 1) {
-                    drawLineCell(buffer, x, h_y, false, cc, arm);
+                    drawLineCell(buffer, x, h_y, false, cc, arm, crossing_style);
                 }
             }
         }
@@ -364,7 +366,7 @@ fn paintBusEdge(
                     }
                     break :blk .none;
                 },
-            }), cc);
+            }, crossing_style), cc);
         }
 
         // 5. Junctions at each child drop-off point
@@ -376,7 +378,7 @@ fn paintBusEdge(
                 .down = arm,
                 .left = if (child_x > min_x) arm else .none,
                 .right = if (child_x < max_x) arm else .none,
-            }), cc);
+            }, crossing_style), cc);
         }
     }
 
@@ -389,16 +391,16 @@ fn paintBusEdge(
                 if (markerChar(marker_end, .down, arm)) |ch| {
                     buffer.setWithColor(edge.to_x, y2, ch, ec.at(y2));
                 } else {
-                    drawLineCell(buffer, edge.to_x, y2, true, ec.at(y2), arm);
+                    drawLineCell(buffer, edge.to_x, y2, true, ec.at(y2), arm, crossing_style);
                 }
             } else {
-                drawLineCell(buffer, edge.to_x, y2, true, ec.at(y2), arm);
+                drawLineCell(buffer, edge.to_x, y2, true, ec.at(y2), arm, crossing_style);
             }
         }
     }
 }
 
-fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize, start_y: usize, end_y: usize, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize, start_y: usize, end_y: usize, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape, crossing_style: CrossingStyle) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
 
@@ -411,10 +413,10 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
             if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x1, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x1, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x1, y, true, ec.at(y), arm, crossing_style);
             }
         } else {
-            drawLineCell(buffer, x1, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x1, y, true, ec.at(y), arm, crossing_style);
         }
     }
 
@@ -425,14 +427,14 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
         const cc = ec.at(start_y);
         var x = min_x1;
         while (x <= max_x1) : (x += 1) {
-            drawLineCell(buffer, x, start_y, false, cc, arm);
+            drawLineCell(buffer, x, start_y, false, cc, arm, crossing_style);
         }
     }
 
     // Vertical in channel
     y = start_y + 1;
     while (y < end_y) : (y += 1) {
-        drawLineCell(buffer, ch_x, y, true, ec.at(y), arm);
+        drawLineCell(buffer, ch_x, y, true, ec.at(y), arm, crossing_style);
     }
 
     // Horizontal at end_y
@@ -442,7 +444,7 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
         const cc = ec.at(end_y);
         var x = min_x2;
         while (x <= max_x2) : (x += 1) {
-            drawLineCell(buffer, x, end_y, false, cc, arm);
+            drawLineCell(buffer, x, end_y, false, cc, arm, crossing_style);
         }
     }
 
@@ -453,15 +455,15 @@ fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize,
             if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x2, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x2, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x2, y, true, ec.at(y), arm, crossing_style);
             }
         } else {
-            drawLineCell(buffer, x2, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x2, y, true, ec.at(y), arm, crossing_style);
         }
     }
 }
 
-fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape, crossing_style: CrossingStyle) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
     const h_y = edge.from_y + 1;
@@ -476,10 +478,10 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeCol
             if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x1, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x1, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x1, y, true, ec.at(y), arm, crossing_style);
             }
         } else {
-            drawLineCell(buffer, x1, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x1, y, true, ec.at(y), arm, crossing_style);
         }
     }
 
@@ -489,7 +491,7 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeCol
         var x = min_x;
         while (x <= max_x) : (x += 1) {
             if (x != x1 and x != x2) {
-                drawLineCell(buffer, x, h_y, false, cc, arm);
+                drawLineCell(buffer, x, h_y, false, cc, arm, crossing_style);
             }
         }
     }
@@ -502,7 +504,7 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeCol
             .up = arm,
             .right = if (x1 < x2) arm else .none,
             .left = if (x1 > x2) arm else .none,
-        }), cc);
+        }, crossing_style), cc);
     }
 
     // Corner at target x
@@ -513,7 +515,7 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeCol
             .down = arm,
             .right = if (x1 > x2) arm else .none,
             .left = if (x1 < x2) arm else .none,
-        }), cc);
+        }, crossing_style), cc);
     }
 
     // Vertical from horizontal to target
@@ -523,15 +525,15 @@ fn paintMultiSegmentEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeCol
             if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x2, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x2, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x2, y, true, ec.at(y), arm, crossing_style);
             }
         } else {
-            drawLineCell(buffer, x2, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x2, y, true, ec.at(y), arm, crossing_style);
         }
     }
 }
 
-fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
+fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape, crossing_style: CrossingStyle) void {
     const x = edge.from_x;
     // Assumes top-down layout: reversed marker points upward.
     var y = edge.from_y;
@@ -540,16 +542,16 @@ fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeColor, ar
             if (markerChar(marker_start, .up, arm)) |ch| {
                 buffer.setWithColor(x, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x, y, true, ec.at(y), arm, crossing_style);
             }
         } else if (!edge.reversed and edge.directed and y == edge.to_y - 1) {
             if (markerChar(marker_end, .down, arm)) |ch| {
                 buffer.setWithColor(x, y, ch, ec.at(y));
             } else {
-                drawLineCell(buffer, x, y, true, ec.at(y), arm);
+                drawLineCell(buffer, x, y, true, ec.at(y), arm, crossing_style);
             }
         } else {
-            drawLineCell(buffer, x, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x, y, true, ec.at(y), arm, crossing_style);
         }
     }
     // Handle horizontal offset with corner if needed
@@ -560,7 +562,7 @@ fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeColor, ar
         const cc = ec.at(mid_y);
         var hx = min_x;
         while (hx <= max_x) : (hx += 1) {
-            drawLineCell(buffer, hx, mid_y, false, cc, arm);
+            drawLineCell(buffer, hx, mid_y, false, cc, arm, crossing_style);
         }
     }
 }
@@ -569,7 +571,7 @@ fn paintSplineEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ec: EdgeColor, ar
 
 /// Draw a single line cell (vertical or horizontal), handling weight variants
 /// and subgraph border crossings via weight-aware junction merging.
-fn drawLineCell(buffer: *Buffer2D, x: usize, y: usize, vertical: bool, color: CellColor, arm: ArmWeight) void {
+fn drawLineCell(buffer: *Buffer2D, x: usize, y: usize, vertical: bool, color: CellColor, arm: ArmWeight, crossing_style: CrossingStyle) void {
     const new_dirs = DirWeights{
         .up = if (vertical) arm else .none,
         .down = if (vertical) arm else .none,
@@ -577,15 +579,15 @@ fn drawLineCell(buffer: *Buffer2D, x: usize, y: usize, vertical: bool, color: Ce
         .left = if (!vertical) arm else .none,
     };
     const cur = buffer.get(x, y);
-    buffer.setWithColor(x, y, mergeJunctionWeighted(cur, new_dirs), color);
+    buffer.setWithColor(x, y, mergeJunctionWeighted(cur, new_dirs, crossing_style), color);
 }
 
 /// Draw a vertical segment between (x, lo+1) and (x, hi-1) — exclusive of both endpoints.
-fn drawVerticalSegment(buffer: *Buffer2D, x: usize, lo: usize, hi: usize, ec: EdgeColor, arm: ArmWeight) void {
+fn drawVerticalSegment(buffer: *Buffer2D, x: usize, lo: usize, hi: usize, ec: EdgeColor, arm: ArmWeight, crossing_style: CrossingStyle) void {
     if (hi > lo + 1) {
         var y = lo + 1;
         while (y < hi) : (y += 1) {
-            drawLineCell(buffer, x, y, true, ec.at(y), arm);
+            drawLineCell(buffer, x, y, true, ec.at(y), arm, crossing_style);
         }
     }
 }
