@@ -21,6 +21,7 @@ Thumbs.db
 
 # Personal dev notes (not for release)
 .dev/
+.worktrees/
 temp/
 review/
 
