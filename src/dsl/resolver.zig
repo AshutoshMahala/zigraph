@@ -819,6 +819,35 @@ test "card block defaults all nodes to card shape" {
     }
 }
 
+test "multiplicity property resolved" {
+    // Parse: server: { multiple: true }
+    // Resolve and check the server node has a "multiple" property with value "true"
+    const src = "server: { multiple: true }";
+    const out = try testResolve(src);
+    defer freeAstDoc(out.doc);
+    defer freeResolveResult(out.result);
+    defer @constCast(&out.err_list).deinit();
+
+    try std.testing.expect(!out.err_list.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), out.result.blocks.len);
+
+    const blk = out.result.blocks[0];
+    try std.testing.expectEqual(@as(usize, 1), blk.nodes.len);
+
+    const node = blk.nodes[0];
+    try std.testing.expectEqualStrings("server", node.id);
+
+    // Verify the "multiple" property flowed through the style cascade
+    var found_multiple = false;
+    for (node.properties) |prop| {
+        if (std.mem.eql(u8, prop.key, "multiple")) {
+            try std.testing.expectEqualStrings("true", prop.value);
+            found_multiple = true;
+        }
+    }
+    try std.testing.expect(found_multiple);
+}
+
 test "var substitution in labels" {
     const src = "vars { env: production }\nserver: \"${env} server\"\nserver -> db";
     const out = try testResolve(src);
