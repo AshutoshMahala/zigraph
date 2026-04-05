@@ -18,6 +18,7 @@ pub const ResolvedProperty = struct {
 pub const ResolvedNode = struct {
     id: []const u8,
     label: []const u8,
+    label_owned: bool = false,
     shape: ast.Shape,
     card_fields: ?[]const []const u8,
     properties: []ResolvedProperty,
@@ -29,6 +30,7 @@ pub const ResolvedEdge = struct {
     to: []const u8,
     op: ast.EdgeOp,
     label: ?[]const u8,
+    label_owned: bool = false,
     properties: []ResolvedProperty,
     loc: Loc,
 };
@@ -524,11 +526,15 @@ pub fn resolve(
         // Apply var substitution on node and edge labels
         if (doc_vars_map.count() > 0) {
             for (resolved.nodes) |*node| {
+                const orig = node.label;
                 node.label = try substituteVars(allocator, node.label, &doc_vars_map);
+                node.label_owned = node.label.ptr != orig.ptr;
             }
             for (resolved.edges) |*edge| {
                 if (edge.label) |lbl| {
-                    edge.label = try substituteVars(allocator, lbl, &doc_vars_map);
+                    const new_lbl = try substituteVars(allocator, lbl, &doc_vars_map);
+                    edge.label = new_lbl;
+                    edge.label_owned = new_lbl.ptr != lbl.ptr;
                 }
             }
         }
@@ -582,11 +588,15 @@ pub fn resolve(
         // Apply var substitution on node and edge labels
         if (blk_vars_map.count() > 0) {
             for (resolved.nodes) |*node| {
+                const orig = node.label;
                 node.label = try substituteVars(allocator, node.label, &blk_vars_map);
+                node.label_owned = node.label.ptr != orig.ptr;
             }
             for (resolved.edges) |*edge| {
                 if (edge.label) |lbl| {
-                    edge.label = try substituteVars(allocator, lbl, &blk_vars_map);
+                    const new_lbl = try substituteVars(allocator, lbl, &blk_vars_map);
+                    edge.label = new_lbl;
+                    edge.label_owned = new_lbl.ptr != lbl.ptr;
                 }
             }
         }
@@ -669,10 +679,14 @@ fn freeResolveResult(result: ResolveResult) void {
     const a = std.testing.allocator;
     for (result.blocks) |blk| {
         for (blk.nodes) |node| {
+            if (node.label_owned) a.free(node.label);
             a.free(node.properties);
         }
         a.free(blk.nodes);
         for (blk.edges) |edge| {
+            if (edge.label_owned) {
+                if (edge.label) |lbl| a.free(lbl);
+            }
             a.free(edge.properties);
         }
         a.free(blk.edges);

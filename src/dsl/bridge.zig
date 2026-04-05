@@ -35,7 +35,7 @@ pub const BuiltTable = struct {
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *BuiltTable) void {
-        _ = self;
+        self.allocator.free(self.rows);
     }
 };
 

@@ -248,12 +248,14 @@ fn freeDoc(allocator: std.mem.Allocator, doc: ast.Document) void {
     allocator.free(doc.styles);
     for (doc.statements) |s| freeStatement(allocator, s);
     allocator.free(doc.statements);
+    allocator.free(doc.vars);
     for (doc.blocks) |blk| {
         allocator.free(blk.directives);
         for (blk.styles) |sr| allocator.free(sr.properties.properties);
         allocator.free(blk.styles);
         for (blk.statements) |s| freeStatement(allocator, s);
         allocator.free(blk.statements);
+        allocator.free(blk.vars);
     }
     allocator.free(doc.blocks);
 }
@@ -272,7 +274,9 @@ fn freeStatement(allocator: std.mem.Allocator, stmt: ast.Statement) void {
             allocator.free(sg.statements);
             if (sg.properties) |pb| allocator.free(pb.properties);
         },
-        .table_headers, .table_row, .vars_block => {},
+        .table_headers => |th| allocator.free(th.fields),
+        .table_row => |tr| allocator.free(tr.fields),
+        .vars_block => {},
     }
 }
 
@@ -294,9 +298,17 @@ fn freeSubgraph(allocator: std.mem.Allocator, sg: resolver.ResolvedSubgraph) voi
 
 fn freeResolveResult(allocator: std.mem.Allocator, result: resolver.ResolveResult) void {
     for (result.blocks) |blk| {
-        for (blk.nodes) |node| allocator.free(node.properties);
+        for (blk.nodes) |node| {
+            if (node.label_owned) allocator.free(node.label);
+            allocator.free(node.properties);
+        }
         allocator.free(blk.nodes);
-        for (blk.edges) |edge| allocator.free(edge.properties);
+        for (blk.edges) |edge| {
+            if (edge.label_owned) {
+                if (edge.label) |lbl| allocator.free(lbl);
+            }
+            allocator.free(edge.properties);
+        }
         allocator.free(blk.edges);
         for (blk.subgraphs) |sg| freeSubgraph(allocator, sg);
         allocator.free(blk.subgraphs);
@@ -317,4 +329,70 @@ test {
     _ = direction;
     _ = tree_bridge;
     _ = imports;
+}
+
+// ── End-to-end integration tests ────────────────────────────────────────────
+
+test "end-to-end: [flow] block renders left-right" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\pipeline [flow] {
+        \\  A -> B -> C
+        \\}
+    ;
+    var result = try parseAndBuild(allocator, source);
+    defer result.deinit();
+    try std.testing.expect(!result.hasErrors());
+    try std.testing.expect(result.graphs.len >= 1);
+    // Check direction is left_right
+    try std.testing.expectEqual(ast.Direction.left_right, result.graphs[0].direction);
+}
+
+test "end-to-end: vars substitution" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\vars {
+        \\  svc: MyService
+        \\}
+        \\server: "${svc}"
+        \\server -> db
+    ;
+    var result = try parseAndBuild(allocator, source);
+    defer result.deinit();
+    try std.testing.expect(!result.hasErrors());
+    try std.testing.expect(result.graphs.len >= 1);
+}
+
+test "end-to-end: [table] block" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\metrics [table] {
+        \\  headers: ID, Name, Status
+        \\  row: 1, Parser, done
+        \\  row: 2, Resolver, planned
+        \\}
+    ;
+    var result = try parseAndBuild(allocator, source);
+    defer result.deinit();
+    try std.testing.expect(!result.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), result.tables.len);
+    try std.testing.expect(result.tables[0].headers != null);
+    try std.testing.expectEqual(@as(usize, 3), result.tables[0].headers.?.len);
+    try std.testing.expectEqual(@as(usize, 2), result.tables[0].rows.len);
+}
+
+test "end-to-end: [tree] block" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\hierarchy [tree] {
+        \\  root -> a
+        \\  root -> b
+        \\  b -> c
+        \\}
+    ;
+    var result = try parseAndBuild(allocator, source);
+    defer result.deinit();
+    try std.testing.expect(!result.hasErrors());
+    try std.testing.expect(result.trees.len >= 1);
+    try std.testing.expect(result.trees[0].roots.len >= 1);
 }
