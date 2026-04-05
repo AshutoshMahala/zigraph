@@ -140,6 +140,7 @@ pub fn buildGraph(allocator: std.mem.Allocator, block: ResolvedBlock) !BuiltGrap
         if (std.mem.eql(u8, block.config.direction, "left-right")) break :blk .left_right
         else if (std.mem.eql(u8, block.config.direction, "bottom-up")) break :blk .bottom_up
         else if (std.mem.eql(u8, block.config.direction, "right-left")) break :blk .right_left
+        else if (block.config.layout == .flow) break :blk .left_right
         else break :blk .top_down;
     };
 
@@ -368,4 +369,60 @@ test "force layout config produces fruchterman_reingold algorithm" {
     defer built.deinit();
 
     try std.testing.expect(built.config.algorithm == .fruchterman_reingold);
+}
+
+test "[flow] block defaults to left-right direction" {
+    const allocator = std.testing.allocator;
+    var err_list = errors_mod.ErrorList.init(allocator);
+    defer err_list.deinit();
+
+    const source = "pipeline [flow] {\n  A -> B\n}";
+    const tokens = try tokenizer_mod.tokenize(allocator, source, &err_list);
+    defer allocator.free(tokens);
+
+    var parser = parser_mod.Parser.init(allocator, tokens, &err_list);
+    const doc = try parser.parse();
+    defer {
+        allocator.free(doc.directives);
+        for (doc.styles) |sr| allocator.free(sr.properties.properties);
+        allocator.free(doc.styles);
+        for (doc.statements) |s| freeAstStatement(s);
+        allocator.free(doc.statements);
+        for (doc.blocks) |blk| {
+            allocator.free(blk.directives);
+            for (blk.styles) |sr| allocator.free(sr.properties.properties);
+            allocator.free(blk.styles);
+            for (blk.statements) |s| freeAstStatement(s);
+            allocator.free(blk.statements);
+        }
+        allocator.free(doc.blocks);
+    }
+
+    const resolve_result = try resolver.resolve(allocator, doc, &err_list);
+    defer {
+        for (resolve_result.blocks) |blk| {
+            for (blk.nodes) |node| allocator.free(node.properties);
+            allocator.free(blk.nodes);
+            for (blk.edges) |edge| allocator.free(edge.properties);
+            allocator.free(blk.edges);
+            for (blk.subgraphs) |sg| freeSubgraph(sg);
+            allocator.free(blk.subgraphs);
+        }
+        allocator.free(resolve_result.blocks);
+    }
+
+    // Find the flow block
+    var flow_block_idx: ?usize = null;
+    for (resolve_result.blocks, 0..) |blk, i| {
+        if (blk.config.layout == .flow) {
+            flow_block_idx = i;
+            break;
+        }
+    }
+    try std.testing.expect(flow_block_idx != null);
+
+    var built = try buildGraph(allocator, resolve_result.blocks[flow_block_idx.?]);
+    defer built.deinit();
+
+    try std.testing.expectEqual(ast.Direction.left_right, built.direction);
 }
