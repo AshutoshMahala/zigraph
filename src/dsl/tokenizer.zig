@@ -27,7 +27,6 @@ pub const TokenKind = enum {
     class,          // .classname
     newline,
     comment,
-    pipe_separator, // | --- (card separator)
     eof,
 };
 
@@ -170,6 +169,15 @@ pub fn tokenize(allocator: std.mem.Allocator, source: []const u8, err_list: *err
             i += 1; col += 1; continue;
         }
 
+        // Numeric identifier (for card fields like 8080, version numbers, etc.)
+        if (std.ascii.isDigit(c)) {
+            const start = i;
+            while (i < source.len and isIdentContinue(source[i])) : (i += 1) {}
+            try tokens.append(allocator, .{ .kind = .identifier, .text = source[start..i], .loc = loc });
+            col += @intCast(i - start);
+            continue;
+        }
+
         // Identifier (including dot-paths like frontend.App)
         if (isIdentStart(c)) {
             const start = i;
@@ -194,7 +202,7 @@ fn matchStr(source: []const u8, pos: usize, needle: []const u8) bool {
 }
 
 fn isIdentStart(c: u8) bool {
-    return std.ascii.isAlphabetic(c) or c == '_' or std.ascii.isDigit(c);
+    return std.ascii.isAlphabetic(c) or c == '_';
 }
 
 fn isIdentContinue(c: u8) bool {

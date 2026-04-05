@@ -217,38 +217,59 @@ pub const Parser = struct {
         // optional label right after the operator: `-> "label"`
         var edge_label: ?[]const u8 = null;
 
-        // collect targets; watch for fan-out (comma) and chaining (another op)
+        // collect targets; watch for fan-out (comma/brace) and chaining (another op)
         var fan_out = false;
 
-        // parse the immediate next node ref
+        // brace fan-out: `A -> { B; C; D }`
         self.skipNewlines();
-        const second = try self.parseNodeRef();
-        try chain.append(self.allocator, second);
-
-        // optional label after the second node ref: `A -> B: "label"`
-        if (self.peek().kind == .colon) {
-            self.advance();
-            if (self.peek().kind == .string) {
-                edge_label = self.peek().text;
-                self.advance();
-            }
-        }
-
-        // fan-out: `A -> B, C, D`
-        if (self.peek().kind == .comma) {
+        if (self.peek().kind == .lbrace) {
             fan_out = true;
-            while (self.peek().kind == .comma) {
-                self.advance(); // consume comma
+            self.advance(); // consume `{`
+            self.skipNewlines();
+            while (self.peek().kind != .rbrace and self.peek().kind != .eof) {
                 self.skipNewlines();
+                if (self.peek().kind == .rbrace) break;
                 const target = try self.parseNodeRef();
                 try chain.append(self.allocator, target);
+                // skip semicolons and newlines between targets
+                if (self.peek().kind == .semicolon) self.advance();
+                self.skipNewlines();
+            }
+            if (self.peek().kind == .rbrace) self.advance();
+        } else {
+            // parse the immediate next node ref
+            const second = try self.parseNodeRef();
+            try chain.append(self.allocator, second);
+
+            // optional label after the second node ref: `A -> B: "label"`
+            if (self.peek().kind == .colon) {
+                self.advance();
+                if (self.peek().kind == .string) {
+                    edge_label = self.peek().text;
+                    self.advance();
+                }
+            }
+
+            // fan-out: `A -> B, C, D`
+            if (self.peek().kind == .comma) {
+                fan_out = true;
+                while (self.peek().kind == .comma) {
+                    self.advance(); // consume comma
+                    self.skipNewlines();
+                    const target = try self.parseNodeRef();
+                    try chain.append(self.allocator, target);
+                }
             }
         }
 
         // chaining: `A -> B -> C` (only when not fan-out)
         if (!fan_out) {
             while (isEdgeOp(self.peek().kind)) {
-                // same operator assumed — advance past it
+                const chain_op = edgeOpFromToken(self.peek().kind);
+                if (chain_op != null and chain_op.? != op) {
+                    try self.err_list.add(self.peek().loc, .unexpected_token, "mixed edge operators in chain; use same operator throughout");
+                    break;
+                }
                 self.advance();
                 self.skipNewlines();
                 const next_node = try self.parseNodeRef();
@@ -923,6 +944,32 @@ test "parse card fields" {
     const nd = result.doc.statements[0].node_decl;
     try std.testing.expect(nd.ref.card_fields != null);
     try std.testing.expectEqual(@as(usize, 3), nd.ref.card_fields.?.len);
+}
+
+test "parse brace fan-out" {
+    const result = try testParse("A -> { B; C; D }");
+    defer freeDoc(result.doc);
+    defer @constCast(&result.err_list).deinit();
+
+    try std.testing.expect(!result.err_list.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), result.doc.statements.len);
+    const edge = result.doc.statements[0].edge;
+    try std.testing.expect(edge.fan_out);
+    // chain: A, B, C, D
+    try std.testing.expectEqual(@as(usize, 4), edge.chain.len);
+    try std.testing.expectEqualStrings("A", edge.chain[0].id);
+    try std.testing.expectEqualStrings("B", edge.chain[1].id);
+    try std.testing.expectEqualStrings("C", edge.chain[2].id);
+    try std.testing.expectEqualStrings("D", edge.chain[3].id);
+}
+
+test "parse mixed operators in chain reports error" {
+    const result = try testParse("A -> B -- C");
+    defer freeDoc(result.doc);
+    defer @constCast(&result.err_list).deinit();
+
+    // Should have an error about mixed operators
+    try std.testing.expect(result.err_list.hasErrors());
 }
 
 test "parse full example" {

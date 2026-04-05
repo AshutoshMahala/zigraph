@@ -73,17 +73,14 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
     }
 
     for (blocks) |blk| {
-        var block_err_list = errors.ErrorList.init(allocator);
-        defer block_err_list.deinit();
-
-        const tokens = try tokenizer.tokenize(allocator, blk.content, &block_err_list);
+        const tokens = try tokenizer.tokenize(allocator, blk.content, &err_list);
         defer allocator.free(tokens);
 
-        var p = parser.Parser.init(allocator, tokens, &block_err_list);
+        var p = parser.Parser.init(allocator, tokens, &err_list);
         const doc = try p.parse();
         defer freeDoc(allocator, doc);
 
-        const resolve_result = try resolver.resolve(allocator, doc, &block_err_list);
+        const resolve_result = try resolver.resolve(allocator, doc, &err_list);
         defer freeResolveResult(allocator, resolve_result);
 
         for (resolve_result.blocks) |rb| {

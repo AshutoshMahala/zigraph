@@ -124,9 +124,12 @@ const Resolver = struct {
         for (directives) |dir| {
             switch (dir.kind) {
                 .layout => {
-                    if (std.mem.eql(u8, dir.value, "dag"))   cfg.layout = .dag
-                    else if (std.mem.eql(u8, dir.value, "tree"))  cfg.layout = .tree
-                    else if (std.mem.eql(u8, dir.value, "force")) cfg.layout = .force;
+                    if (std.mem.eql(u8, dir.value, "dag") or std.mem.eql(u8, dir.value, "sugiyama"))
+                        cfg.layout = .dag
+                    else if (std.mem.eql(u8, dir.value, "tree"))
+                        cfg.layout = .tree
+                    else if (std.mem.eql(u8, dir.value, "force") or std.mem.eql(u8, dir.value, "fruchterman_reingold"))
+                        cfg.layout = .force;
                     // unknown layout values silently ignored (parser already warned)
                 },
                 .direction => cfg.direction = dir.value,
@@ -664,7 +667,8 @@ test "resolve multiple blocks with layout inheritance" {
     // 1 default block + 1 named block
     try std.testing.expectEqual(@as(usize, 2), out.result.blocks.len);
 
-    // Default block uses file-level layout (sugiyama → treated as dag since unknown value, stays dag)
+    // Default block uses file-level layout (sugiyama → dag alias)
+    try std.testing.expectEqual(ast.Layout.dag, out.result.blocks[0].config.layout);
     // Named block uses force
     const named = out.result.blocks[1];
     try std.testing.expectEqualStrings("modules", named.name);
