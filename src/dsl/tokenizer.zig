@@ -68,11 +68,11 @@ pub fn tokenize(allocator: std.mem.Allocator, source: []const u8, err_list: *err
 
         // @ directive
         if (c == '@') {
-            const start = i;
             i += 1;
+            const start = i;
             while (i < source.len and (std.ascii.isAlphabetic(source[i]) or source[i] == '_')) : (i += 1) {}
             try tokens.append(allocator, .{ .kind = .at_keyword, .text = source[start..i], .loc = loc });
-            col += @intCast(i - start);
+            col += @intCast(i - start + 1);
             continue;
         }
 
@@ -248,7 +248,7 @@ test "tokenize directive and string" {
     defer std.testing.allocator.free(tokens);
     try std.testing.expect(!err_list.hasErrors());
     try std.testing.expectEqual(TokenKind.at_keyword, tokens[0].kind);
-    try std.testing.expectEqualStrings("@layout", tokens[0].text);
+    try std.testing.expectEqualStrings("layout", tokens[0].text);
     try std.testing.expectEqual(TokenKind.identifier, tokens[1].kind);
     try std.testing.expectEqual(TokenKind.newline, tokens[2].kind);
     try std.testing.expectEqual(TokenKind.identifier, tokens[3].kind);
@@ -320,4 +320,68 @@ test "tokenize braces and named block" {
     try std.testing.expectEqualStrings("dag", tokens[2].text);
     try std.testing.expectEqual(TokenKind.rbracket, tokens[3].kind);
     try std.testing.expectEqual(TokenKind.lbrace, tokens[4].kind);
+}
+
+test "tokenize vars keyword" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const tokens = try tokenize(allocator, "vars {", &err_list);
+    defer allocator.free(tokens);
+    try std.testing.expectEqual(TokenKind.identifier, tokens[0].kind);
+    try std.testing.expectEqualStrings("vars", tokens[0].text);
+    try std.testing.expectEqual(TokenKind.lbrace, tokens[1].kind);
+}
+
+test "tokenize headers keyword" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const tokens = try tokenize(allocator, "headers: ID, Name", &err_list);
+    defer allocator.free(tokens);
+    try std.testing.expectEqual(TokenKind.identifier, tokens[0].kind);
+    try std.testing.expectEqualStrings("headers", tokens[0].text);
+    try std.testing.expectEqual(TokenKind.colon, tokens[1].kind);
+}
+
+test "tokenize row keyword" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const tokens = try tokenize(allocator, "row: 1, Parser, done", &err_list);
+    defer allocator.free(tokens);
+    try std.testing.expectEqual(TokenKind.identifier, tokens[0].kind);
+    try std.testing.expectEqualStrings("row", tokens[0].text);
+}
+
+test "tokenize @import directive" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const tokens = try tokenize(allocator, "@import \"styles.zgraph\"", &err_list);
+    defer allocator.free(tokens);
+    try std.testing.expectEqual(TokenKind.at_keyword, tokens[0].kind);
+    try std.testing.expectEqualStrings("import", tokens[0].text);
+    try std.testing.expectEqual(TokenKind.string, tokens[1].kind);
+    try std.testing.expectEqualStrings("styles.zgraph", tokens[1].text);
+}
+
+test "tokenize @border directive" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const tokens = try tokenize(allocator, "@border heavy", &err_list);
+    defer allocator.free(tokens);
+    try std.testing.expectEqual(TokenKind.at_keyword, tokens[0].kind);
+    try std.testing.expectEqualStrings("border", tokens[0].text);
+}
+
+test "tokenize @align directive" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const tokens = try tokenize(allocator, "@align right, left, center", &err_list);
+    defer allocator.free(tokens);
+    try std.testing.expectEqual(TokenKind.at_keyword, tokens[0].kind);
+    try std.testing.expectEqualStrings("align", tokens[0].text);
 }

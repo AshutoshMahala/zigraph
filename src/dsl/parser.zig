@@ -125,7 +125,7 @@ pub const Parser = struct {
 
             if (tok.kind == .at_keyword) {
                 const kw = tok.text;
-                if (std.mem.eql(u8, kw, "@style")) {
+                if (std.mem.eql(u8, kw, "style")) {
                     const rule = try self.parseStyleRule();
                     try styles.append(self.allocator, rule);
                 } else {
@@ -630,10 +630,10 @@ pub const Parser = struct {
         self.advance();
 
         const kind = blk: {
-            if (std.mem.eql(u8, tok.text, "@layout"))    break :blk ast.DirectiveKind.layout;
-            if (std.mem.eql(u8, tok.text, "@theme"))     break :blk ast.DirectiveKind.theme;
-            if (std.mem.eql(u8, tok.text, "@direction")) break :blk ast.DirectiveKind.direction;
-            if (std.mem.eql(u8, tok.text, "@spacing"))   break :blk ast.DirectiveKind.spacing;
+            if (std.mem.eql(u8, tok.text, "layout"))    break :blk ast.DirectiveKind.layout;
+            if (std.mem.eql(u8, tok.text, "theme"))     break :blk ast.DirectiveKind.theme;
+            if (std.mem.eql(u8, tok.text, "direction")) break :blk ast.DirectiveKind.direction;
+            if (std.mem.eql(u8, tok.text, "spacing"))   break :blk ast.DirectiveKind.spacing;
             try self.err_list.add(tok.loc, .unknown_directive, "unknown directive");
             return error.ParseError;
         };
@@ -656,7 +656,7 @@ pub const Parser = struct {
 
     fn parseStyleRule(self: *Parser) anyerror!ast.StyleRule {
         const loc = self.peek().loc;
-        if (self.peek().kind != .at_keyword or !std.mem.eql(u8, self.peek().text, "@style")) {
+        if (self.peek().kind != .at_keyword or !std.mem.eql(u8, self.peek().text, "style")) {
             try self.err_list.add(loc, .unexpected_token, "expected '@style'");
             return error.ParseError;
         }
@@ -739,7 +739,7 @@ pub const Parser = struct {
 
             const tok = self.peek();
             if (tok.kind == .at_keyword) {
-                if (std.mem.eql(u8, tok.text, "@style")) {
+                if (std.mem.eql(u8, tok.text, "style")) {
                     const rule = try self.parseStyleRule();
                     try styles.append(self.allocator, rule);
                 } else {
