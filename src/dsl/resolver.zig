@@ -330,27 +330,22 @@ const Resolver = struct {
         node_map: *std.StringHashMapUnmanaged(ResolvedNode),
         edges_list: *std.ArrayListUnmanaged(ResolvedEdge),
     ) !void {
-        const props = try self.cascadeEdgeProperties(e.classes, e.properties);
-
         if (e.fan_out) {
-            // chain[0] → chain[1..] all as individual edges
             if (e.chain.len < 2) return;
             const src = e.chain[0];
             try self.ensureNode(src.id, src.loc, node_map);
             for (e.chain[1..]) |tgt| {
                 try self.ensureNode(tgt.id, tgt.loc, node_map);
-                // Duplicate props slice for each edge — share the same slice since it's read-only
                 try edges_list.append(self.allocator, .{
                     .from       = src.id,
                     .to         = tgt.id,
                     .op         = e.operator,
                     .label      = e.label,
-                    .properties = props,
+                    .properties = try self.cascadeEdgeProperties(e.classes, e.properties),
                     .loc        = e.loc,
                 });
             }
         } else {
-            // linear chain: adjacent pairs
             var i: usize = 0;
             while (i + 1 < e.chain.len) : (i += 1) {
                 const src = e.chain[i];
@@ -362,7 +357,7 @@ const Resolver = struct {
                     .to         = tgt.id,
                     .op         = e.operator,
                     .label      = e.label,
-                    .properties = props,
+                    .properties = try self.cascadeEdgeProperties(e.classes, e.properties),
                     .loc        = e.loc,
                 });
             }
@@ -581,8 +576,6 @@ fn freeResolveResult(result: ResolveResult) void {
         }
         a.free(blk.nodes);
         for (blk.edges) |edge| {
-            // properties slice may be shared across fan-out edges; free once per unique pointer
-            // For simplicity, free each — they are distinct slices from cascadeEdgeProperties
             a.free(edge.properties);
         }
         a.free(blk.edges);

@@ -1,13 +1,20 @@
-//! Direction transform for the zgraph DSL.
+//! Post-layout direction transform for the zgraph DSL.
 //!
-//! The layout engine (Sugiyama) always produces top-down flow.
-//! This module rotates or flips the coordinate space of the IR in-place
-//! to support other flow directions.
+//! The Sugiyama layout engine always produces top-down coordinates.
+//! This module repositions nodes and edges in the IR to achieve
+//! left-right, bottom-up, or right-left flow.
 //!
-//! Phase 1 limitation: edge path internals (corner, side_channel, etc.) are
-//! reset to `.direct` for non-top-down directions because the path types
-//! encode assumptions about the flow axis. Full path rotation is a Phase 2
-//! improvement.
+//! For left-right and right-left, positions are recomputed from each
+//! node's `level` (column) and `level_position` (row) metadata, with
+//! edges routed from the right side of source nodes to the left side
+//! of target nodes. The terminal renderer's `.direct` path handles
+//! horizontal, vertical, and Manhattan (L-shaped) routing automatically.
+//!
+//! Known limitation: cross-row edges in horizontal modes arrive with
+//! a vertical final segment (down-arrow instead of right-arrow). This
+//! is inherent to the core terminal renderer's Manhattan routing, which
+//! always ends with a vertical segment. The edge connectivity is correct;
+//! only the arrow glyph direction is affected.
 
 const std = @import("std");
 const zigraph = @import("zigraph");
@@ -15,77 +22,71 @@ const ast = @import("ast.zig");
 
 const IR = zigraph.LayoutIR(usize);
 
-/// Apply a direction transform to the laid-out IR, mutating it in-place.
-/// The layout engine always produces top-down flow. This function rotates
-/// the coordinate space for other directions.
+/// Reposition IR nodes and edges for the requested flow direction.
+/// Mutates the IR in-place. Top-down is a no-op (layout default).
 pub fn applyDirection(ir: *IR, direction: ast.Direction) void {
     switch (direction) {
-        .top_down => return, // default, no transform
+        .top_down => return,
         .left_right => applyLeftRight(ir),
         .bottom_up => applyBottomUp(ir),
         .right_left => applyRightLeft(ir),
     }
 }
 
+/// Recompute positions so levels flow left-to-right as columns.
 fn applyLeftRight(ir: *IR) void {
-    // Swap X↔Y for all nodes
-    for (ir.nodes.items) |*node| {
-        const old_x = node.x;
-        const old_y = node.y;
-        const old_w = node.width;
-        const old_h = node.height;
-        const old_cx = node.center_x;
-        const old_cy = node.center_y;
-        node.x = old_y;
-        node.y = old_x;
-        node.width = old_h;
-        node.height = old_w;
-        node.center_x = old_cy;
-        node.center_y = old_cx;
+    const edge_gap: usize = 3;
+    const row_gap: usize = 1;
+
+    var max_w: usize = 1;
+    var max_h: usize = 1;
+    for (ir.nodes.items) |node| {
+        if (node.width > max_w) max_w = node.width;
+        if (node.height > max_h) max_h = node.height;
     }
 
-    // Swap X↔Y for all edges; reset path to direct (Phase 1 limitation)
+    const col_stride = max_w + edge_gap;
+    const row_stride = max_h + row_gap;
+
+    for (ir.nodes.items) |*node| {
+        node.x = node.level * col_stride;
+        node.y = node.level_position * row_stride;
+        node.center_x = node.x + node.width / 2;
+        node.center_y = node.y + node.height / 2;
+    }
+
     for (ir.edges.items) |*edge| {
-        const old_fx = edge.from_x;
-        const old_fy = edge.from_y;
-        const old_tx = edge.to_x;
-        const old_ty = edge.to_y;
-        const old_lx = edge.label_x;
-        const old_ly = edge.label_y;
-        edge.from_x = old_fy;
-        edge.from_y = old_fx;
-        edge.to_x = old_ty;
-        edge.to_y = old_tx;
-        edge.label_x = old_ly;
-        edge.label_y = old_lx;
-        // Reset path to direct — path internals encode top-down assumptions
+        if (ir.nodeById(edge.from_id)) |src| {
+            if (ir.nodeById(edge.to_id)) |tgt| {
+                edge.from_x = src.x + src.width;
+                edge.from_y = src.center_y;
+                edge.to_x = tgt.x;
+                edge.to_y = tgt.center_y;
+                edge.label_x = (edge.from_x + edge.to_x) / 2;
+                edge.label_y = (edge.from_y + edge.to_y) / 2;
+            }
+        }
         edge.path.deinit();
         edge.path = .{ .direct = {} };
     }
 
-    // Swap X↔Y for subgraphs
     for (ir.subgraphs.items) |*sg| {
         const old_x = sg.x;
-        const old_y = sg.y;
         const old_w = sg.width;
-        const old_h = sg.height;
-        sg.x = old_y;
+        sg.x = sg.y;
         sg.y = old_x;
-        sg.width = old_h;
+        sg.width = sg.height;
         sg.height = old_w;
     }
 
-    // Swap IR dimensions
-    const old_w = ir.width;
-    ir.width = ir.height;
-    ir.height = old_w;
+    recalcDimensions(ir);
 }
 
+/// Flip the Y axis so flow goes bottom-to-top.
 fn applyBottomUp(ir: *IR) void {
     const max_y = ir.height;
 
     for (ir.nodes.items) |*node| {
-        // Flip so that high-Y items go to the top. Guard against underflow.
         const bottom = node.y + node.height;
         node.y = if (max_y >= bottom) max_y - bottom else 0;
         node.center_y = if (max_y >= node.center_y) max_y - node.center_y else 0;
@@ -95,7 +96,6 @@ fn applyBottomUp(ir: *IR) void {
         edge.from_y = if (max_y >= edge.from_y) max_y - edge.from_y else 0;
         edge.to_y = if (max_y >= edge.to_y) max_y - edge.to_y else 0;
         edge.label_y = if (max_y >= edge.label_y) max_y - edge.label_y else 0;
-        // Reset path to direct — path internals encode top-down assumptions
         edge.path.deinit();
         edge.path = .{ .direct = {} };
     }
@@ -104,14 +104,12 @@ fn applyBottomUp(ir: *IR) void {
         const bottom = sg.y + sg.height;
         sg.y = if (max_y >= bottom) max_y - bottom else 0;
     }
-    // Height is unchanged (dimensions stay the same; content is flipped)
 }
 
+/// Left-right positioning, then mirror the X axis for right-to-left flow.
 fn applyRightLeft(ir: *IR) void {
-    // First swap X↔Y (like left-right); this also updates ir.width/ir.height
     applyLeftRight(ir);
 
-    // Then flip X axis in the new coordinate space
     const max_x = ir.width;
 
     for (ir.nodes.items) |*node| {
@@ -124,36 +122,45 @@ fn applyRightLeft(ir: *IR) void {
         edge.from_x = if (max_x >= edge.from_x) max_x - edge.from_x else 0;
         edge.to_x = if (max_x >= edge.to_x) max_x - edge.to_x else 0;
         edge.label_x = if (max_x >= edge.label_x) max_x - edge.label_x else 0;
-        // Paths are already .direct from applyLeftRight; no deinit needed
     }
 
     for (ir.subgraphs.items) |*sg| {
         const right = sg.x + sg.width;
         sg.x = if (max_x >= right) max_x - right else 0;
     }
-    // Width is unchanged
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
+fn recalcDimensions(ir: *IR) void {
+    var max_w: usize = 0;
+    var max_h: usize = 0;
+    for (ir.nodes.items) |node| {
+        const r = node.x + node.width;
+        const b = node.y + node.height;
+        if (r > max_w) max_w = r;
+        if (b > max_h) max_h = b;
+    }
+    for (ir.subgraphs.items) |sg| {
+        const r = sg.x + sg.width;
+        const b = sg.y + sg.height;
+        if (r > max_w) max_w = r;
+        if (b > max_h) max_h = b;
+    }
+    ir.width = max_w;
+    ir.height = max_h;
+}
 
-test "applyDirection top_down is a no-op" {
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+test "top_down is a no-op" {
     const allocator = std.testing.allocator;
     var ir = IR.init(allocator);
     defer ir.deinit();
 
     try ir.addNode(.{
-        .id = 1,
-        .label = "A",
-        .x = 10,
-        .y = 20,
-        .width = 6,
-        .height = 2,
-        .center_x = 13,
-        .center_y = 21,
-        .level = 0,
-        .level_position = 0,
+        .id = 1, .label = "A",
+        .x = 10, .y = 20, .width = 6, .height = 2,
+        .center_x = 13, .center_y = 21,
+        .level = 0, .level_position = 0,
     });
     ir.setDimensions(80, 40);
 
@@ -165,80 +172,84 @@ test "applyDirection top_down is a no-op" {
     try std.testing.expectEqual(@as(usize, 40), ir.height);
 }
 
-test "applyDirection left_right swaps width and height" {
-    const allocator = std.testing.allocator;
-    var ir = IR.init(allocator);
-    defer ir.deinit();
-
-    try ir.addNode(.{
-        .id = 1,
-        .label = "A",
-        .x = 5,
-        .y = 10,
-        .width = 4,
-        .height = 2,
-        .center_x = 7,
-        .center_y = 11,
-        .level = 0,
-        .level_position = 0,
-    });
-    ir.setDimensions(80, 40);
-
-    applyDirection(&ir, .left_right);
-
-    // IR dimensions should be swapped
-    try std.testing.expectEqual(@as(usize, 40), ir.width);
-    try std.testing.expectEqual(@as(usize, 80), ir.height);
-
-    // Node x/y should be swapped
-    const node = &ir.nodes.items[0];
-    try std.testing.expectEqual(@as(usize, 10), node.x); // old y
-    try std.testing.expectEqual(@as(usize, 5), node.y);  // old x
-    try std.testing.expectEqual(@as(usize, 2), node.width);  // old height
-    try std.testing.expectEqual(@as(usize, 4), node.height); // old width
-    try std.testing.expectEqual(@as(usize, 11), node.center_x); // old center_y
-    try std.testing.expectEqual(@as(usize, 7), node.center_y);  // old center_x
-}
-
-test "applyDirection left_right swaps edge endpoints and resets path" {
+test "left_right places levels as columns" {
     const allocator = std.testing.allocator;
     var ir = IR.init(allocator);
     defer ir.deinit();
 
     try ir.addNode(.{
         .id = 1, .label = "A",
-        .x = 0, .y = 0, .width = 4, .height = 2,
-        .center_x = 2, .center_y = 1,
+        .x = 0, .y = 0, .width = 3, .height = 1,
+        .center_x = 1, .center_y = 0,
         .level = 0, .level_position = 0,
     });
-    try ir.addEdge(.{
-        .from_id = 1, .to_id = 2,
-        .from_x = 10, .from_y = 20,
-        .to_x = 30, .to_y = 40,
-        .label_x = 15, .label_y = 25,
-        .path = .{ .corner = .{ .horizontal_y = 30 } },
-        .edge_index = 0,
+    try ir.addNode(.{
+        .id = 2, .label = "B",
+        .x = 0, .y = 3, .width = 3, .height = 1,
+        .center_x = 1, .center_y = 3,
+        .level = 1, .level_position = 0,
     });
-    ir.setDimensions(80, 40);
+    ir.setDimensions(3, 4);
 
     applyDirection(&ir, .left_right);
 
-    const edge = &ir.edges.items[0];
-    try std.testing.expectEqual(@as(usize, 20), edge.from_x); // old from_y
-    try std.testing.expectEqual(@as(usize, 10), edge.from_y); // old from_x
-    try std.testing.expectEqual(@as(usize, 40), edge.to_x);   // old to_y
-    try std.testing.expectEqual(@as(usize, 30), edge.to_y);   // old to_x
-    try std.testing.expectEqual(@as(usize, 25), edge.label_x); // old label_y
-    try std.testing.expectEqual(@as(usize, 15), edge.label_y); // old label_x
-    try std.testing.expect(edge.path == .direct);
+    // col_stride = 3 (max width) + 3 (edge gap) = 6
+    const a = &ir.nodes.items[0];
+    try std.testing.expectEqual(@as(usize, 0), a.x);
+    try std.testing.expectEqual(@as(usize, 0), a.y);
+    try std.testing.expectEqual(@as(usize, 3), a.width);
+    try std.testing.expectEqual(@as(usize, 1), a.height);
+
+    const b = &ir.nodes.items[1];
+    try std.testing.expectEqual(@as(usize, 6), b.x);
+    try std.testing.expectEqual(@as(usize, 0), b.y);
+
+    try std.testing.expectEqual(@as(usize, 9), ir.width);
+    try std.testing.expectEqual(@as(usize, 1), ir.height);
 }
 
-test "applyDirection bottom_up flips Y axis" {
+test "left_right routes edges horizontally" {
     const allocator = std.testing.allocator;
     var ir = IR.init(allocator);
     defer ir.deinit();
 
-    // Node at y=0, height=2 with max_y=40 → flipped y = 40 - (0+2) = 38
+    try ir.addNode(.{
+        .id = 1, .label = "A",
+        .x = 0, .y = 0, .width = 3, .height = 1,
+        .center_x = 1, .center_y = 0,
+        .level = 0, .level_position = 0,
+    });
+    try ir.addNode(.{
+        .id = 2, .label = "B",
+        .x = 0, .y = 3, .width = 3, .height = 1,
+        .center_x = 1, .center_y = 3,
+        .level = 1, .level_position = 0,
+    });
+    try ir.addEdge(.{
+        .from_id = 1, .to_id = 2,
+        .from_x = 1, .from_y = 1,
+        .to_x = 1, .to_y = 3,
+        .label_x = 1, .label_y = 2,
+        .path = .{ .corner = .{ .horizontal_y = 2 } },
+        .edge_index = 0,
+    });
+    ir.setDimensions(3, 4);
+
+    applyDirection(&ir, .left_right);
+
+    const edge = &ir.edges.items[0];
+    try std.testing.expectEqual(@as(usize, 3), edge.from_x);
+    try std.testing.expectEqual(@as(usize, 0), edge.from_y);
+    try std.testing.expectEqual(@as(usize, 6), edge.to_x);
+    try std.testing.expectEqual(@as(usize, 0), edge.to_y);
+    try std.testing.expect(edge.path == .direct);
+}
+
+test "bottom_up flips Y axis" {
+    const allocator = std.testing.allocator;
+    var ir = IR.init(allocator);
+    defer ir.deinit();
+
     try ir.addNode(.{
         .id = 1, .label = "A",
         .x = 5, .y = 0, .width = 4, .height = 2,
@@ -249,12 +260,11 @@ test "applyDirection bottom_up flips Y axis" {
 
     applyDirection(&ir, .bottom_up);
 
-    // Dimensions unchanged
     try std.testing.expectEqual(@as(usize, 80), ir.width);
     try std.testing.expectEqual(@as(usize, 40), ir.height);
 
     const node = &ir.nodes.items[0];
-    try std.testing.expectEqual(@as(usize, 5), node.x);   // x unchanged
-    try std.testing.expectEqual(@as(usize, 38), node.y);  // 40 - (0+2) = 38
-    try std.testing.expectEqual(@as(usize, 39), node.center_y); // 40 - 1 = 39
+    try std.testing.expectEqual(@as(usize, 5), node.x);
+    try std.testing.expectEqual(@as(usize, 38), node.y);
+    try std.testing.expectEqual(@as(usize, 39), node.center_y);
 }

@@ -16,11 +16,19 @@ pub const EdgeOp = enum {
 
 pub const Layout = enum { dag, tree, force };
 
+/// Flow direction for the rendered graph.
+///
+/// The layout engine always produces top-down coordinates. The direction
+/// transform (see `direction.zig`) repositions nodes and edges after layout
+/// to achieve the requested flow orientation.
+///
+/// Usage in DSL: `@direction left-right`
+/// Usage in CLI: `zigraph render -d left-right`
 pub const Direction = enum {
-    top_down,   // default — no transform
-    left_right, // swap X↔Y (flow goes left to right)
-    bottom_up,  // flip Y axis
-    right_left, // swap X↔Y then flip X axis
+    top_down,
+    left_right,
+    bottom_up,
+    right_left,
 };
 
 pub const Shape = enum {
