@@ -164,6 +164,7 @@ comptime {
     _ = subgraph_render;
     _ = plan_mod;
     _ = @import("render_tests.zig");
+    _ = @import("table_tests.zig");
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
