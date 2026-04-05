@@ -446,6 +446,46 @@ const Resolver = struct {
 };
 
 // ============================================================
+// Var substitution helper
+// ============================================================
+
+/// Replace all `${name}` occurrences in `text` with values from `vars_map`.
+/// Returns the original slice (without allocation) when no `${` is present.
+/// Otherwise returns a newly allocated slice owned by `allocator`.
+fn substituteVars(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    vars_map: *const std.StringHashMap([]const u8),
+) ![]const u8 {
+    // Fast path: no substitution markers
+    if (std.mem.indexOf(u8, text, "${") == null) return text;
+
+    var result: std.ArrayListUnmanaged(u8) = .{};
+    var i: usize = 0;
+    while (i < text.len) {
+        if (i + 1 < text.len and text[i] == '$' and text[i + 1] == '{') {
+            const start = i + 2;
+            const end = std.mem.indexOfScalarPos(u8, text, start, '}') orelse {
+                try result.append(allocator, text[i]);
+                i += 1;
+                continue;
+            };
+            const var_name = text[start..end];
+            if (vars_map.get(var_name)) |value| {
+                try result.appendSlice(allocator, value);
+            } else {
+                try result.appendSlice(allocator, text[i .. end + 1]);
+            }
+            i = end + 1;
+        } else {
+            try result.append(allocator, text[i]);
+            i += 1;
+        }
+    }
+    return result.toOwnedSlice(allocator);
+}
+
+// ============================================================
 // Public entry point
 // ============================================================
 
@@ -471,9 +511,27 @@ pub fn resolve(
 
     var blocks_list: std.ArrayListUnmanaged(ResolvedBlock) = .{};
 
+    // Build document-level vars map
+    var doc_vars_map = std.StringHashMap([]const u8).init(allocator);
+    defer doc_vars_map.deinit();
+    for (doc.vars) |v| {
+        try doc_vars_map.put(v.key, v.value);
+    }
+
     // 3. Bare statements → __default__ block (only if non-empty)
     if (doc.statements.len > 0) {
         const resolved = try r.resolveStatements(doc.statements);
+        // Apply var substitution on node and edge labels
+        if (doc_vars_map.count() > 0) {
+            for (resolved.nodes) |*node| {
+                node.label = try substituteVars(allocator, node.label, &doc_vars_map);
+            }
+            for (resolved.edges) |*edge| {
+                if (edge.label) |lbl| {
+                    edge.label = try substituteVars(allocator, lbl, &doc_vars_map);
+                }
+            }
+        }
         try blocks_list.append(allocator, .{
             .name      = "__default__",
             .config    = file_config,
@@ -505,6 +563,31 @@ pub fn resolve(
         if (block_config.layout == .card) {
             for (resolved.nodes) |*node| {
                 if (node.shape == .rect) node.shape = .card;
+            }
+        }
+
+        // Build block-level vars map (block vars override doc vars)
+        var blk_vars_map = std.StringHashMap([]const u8).init(allocator);
+        defer blk_vars_map.deinit();
+        // Start with doc-level vars
+        var doc_it = doc_vars_map.iterator();
+        while (doc_it.next()) |entry| {
+            try blk_vars_map.put(entry.key_ptr.*, entry.value_ptr.*);
+        }
+        // Override with block-level vars
+        for (blk.vars) |v| {
+            try blk_vars_map.put(v.key, v.value);
+        }
+
+        // Apply var substitution on node and edge labels
+        if (blk_vars_map.count() > 0) {
+            for (resolved.nodes) |*node| {
+                node.label = try substituteVars(allocator, node.label, &blk_vars_map);
+            }
+            for (resolved.edges) |*edge| {
+                if (edge.label) |lbl| {
+                    edge.label = try substituteVars(allocator, lbl, &blk_vars_map);
+                }
             }
         }
 
@@ -562,12 +645,14 @@ fn freeAstDoc(doc: ast.Document) void {
     a.free(doc.styles);
     for (doc.statements) |s| freeAstStatement(s);
     a.free(doc.statements);
+    a.free(doc.vars);
     for (doc.blocks) |blk| {
         a.free(blk.directives);
         for (blk.styles) |sr| a.free(sr.properties.properties);
         a.free(blk.styles);
         for (blk.statements) |s| freeAstStatement(s);
         a.free(blk.statements);
+        a.free(blk.vars);
     }
     a.free(doc.blocks);
 }
@@ -732,4 +817,35 @@ test "card block defaults all nodes to card shape" {
     for (blk.nodes) |node| {
         try std.testing.expectEqual(ast.Shape.card, node.shape);
     }
+}
+
+test "var substitution in labels" {
+    const src = "vars { env: production }\nserver: \"${env} server\"\nserver -> db";
+    const out = try testResolve(src);
+    defer @constCast(&out.err_list).deinit();
+    defer freeAstDoc(out.doc);
+
+    try std.testing.expect(!out.err_list.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), out.result.blocks.len);
+
+    const blk = out.result.blocks[0];
+    // Find the server node and verify its label has been substituted
+    var found_server = false;
+    for (blk.nodes) |node| {
+        if (std.mem.eql(u8, node.id, "server")) {
+            try std.testing.expectEqualStrings("production server", node.label);
+            // Free the substituted label (allocated by substituteVars)
+            std.testing.allocator.free(node.label);
+            found_server = true;
+        }
+        std.testing.allocator.free(node.properties);
+    }
+    try std.testing.expect(found_server);
+    for (blk.edges) |edge| {
+        std.testing.allocator.free(edge.properties);
+    }
+    std.testing.allocator.free(blk.nodes);
+    std.testing.allocator.free(blk.edges);
+    std.testing.allocator.free(blk.subgraphs);
+    std.testing.allocator.free(out.result.blocks);
 }
