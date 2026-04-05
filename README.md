@@ -46,6 +46,7 @@
 - **Edge labels** — Annotate edges with text, rendered in all output formats
 - **Pluggable algorithms** — Bring your own crossing reduction, positioning, routing
 - **Embedded-first** — Explicit allocators, ~40KB WASM target
+- **Table renderer** — Standalone formatted Unicode/ASCII tables with borders, alignment, and headers
 
 ## Installation
 
@@ -551,6 +552,46 @@ zig build run-tui                        # Interactive TUI
 zig build run-terminal-text-attrs        # Text attributes
 ```
 </details>
+
+## Table Renderer
+
+Render tabular data as formatted Unicode tables — no graph engine needed:
+
+```zig
+const zigraph = @import("zigraph");
+const table = zigraph.terminal.table;
+
+const headers: []const []const u8 = &.{ "Task", "Component", "Status" };
+const rows: []const []const []const u8 = &.{
+    &.{ "1", "Tokenizer", "done" },
+    &.{ "2", "Parser", "in progress" },
+    &.{ "3", "Resolver", "planned" },
+};
+const output = try table.render(headers, rows, allocator, .{});
+defer allocator.free(output);
+std.debug.print("{s}\n", .{output});
+```
+
+Output:
+```text
+┌──────┬───────────┬─────────────┐
+│ Task │ Component │ Status      │
+├──────┼───────────┼─────────────┤
+│ 1    │ Tokenizer │ done        │
+├──────┼───────────┼─────────────┤
+│ 2    │ Parser    │ in progress │
+├──────┼───────────┼─────────────┤
+│ 3    │ Resolver  │ planned     │
+└──────┴───────────┴─────────────┘
+```
+
+Features:
+- **Border styles** — `.single` (default), `.heavy` (`┏━┓`), `.double` (`╔═╗`), `.none` (borderless)
+- **Column alignment** — per-column `.left`, `.center`, `.right` via `alignment` config
+- **Optional headers** — pass `null` for headerless tables
+- **ASCII fallback** — `.{ .char_set = .ascii }` for `+-|` borders
+- **Streaming** — `renderStreaming()` writes to any `Writer` without allocation
+- **Graph integration** — `paintTable()` writes to `Buffer2D` for use as graph node content
 
 ## Examples
 
