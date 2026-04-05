@@ -18,6 +18,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Buffer2D = @import("buffer.zig").Buffer2D;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -287,6 +288,329 @@ fn renderBordered(
 
     // Bottom border
     try writeHorizontalRule(writer, bc.bl, bc.bh, bc.bt, bc.br, col_widths);
+}
+
+// ── Dimension helpers ─────────────────────────────────────────────────────────
+
+/// Compute the rendered width (in terminal columns) of a bordered or borderless table.
+///
+/// For bordered tables: `(num_cols + 1) + sum(col_width + 2)` — one border/separator
+/// per column plus the final right border, with one space of padding on each side.
+///
+/// For borderless tables: `sum(col_widths) + 2 * (num_cols - 1)` — columns joined
+/// by two-space gaps.
+pub fn tableWidth(
+    headers: ?[]const []const u8,
+    rows: []const []const []const u8,
+    config: TableConfig,
+) usize {
+    const num_cols: usize = blk: {
+        if (headers) |h| break :blk h.len;
+        if (rows.len > 0) break :blk rows[0].len;
+        return 0;
+    };
+    if (num_cols == 0) return 0;
+    const ncols = @min(num_cols, MAX_COLS);
+
+    var col_widths: [MAX_COLS]usize = [_]usize{0} ** MAX_COLS;
+    if (headers) |h| {
+        for (0..ncols) |c| col_widths[c] = @max(col_widths[c], h[c].len);
+    }
+    for (rows) |row| {
+        const rc = @min(row.len, ncols);
+        for (0..rc) |c| col_widths[c] = @max(col_widths[c], row[c].len);
+    }
+
+    if (config.border == .none) {
+        // sum of col widths + 2-space gaps between columns
+        var w: usize = 0;
+        for (0..ncols) |c| w += col_widths[c];
+        w += 2 * (ncols - 1);
+        return w;
+    } else {
+        // (num_cols + 1) border chars + sum(col_width + 2) padded content
+        var w: usize = ncols + 1;
+        for (0..ncols) |c| w += col_widths[c] + 2;
+        return w;
+    }
+}
+
+/// Compute the rendered height (in terminal rows) of a bordered or borderless table.
+///
+/// For bordered tables:
+///   - With headers: `top + header + header_sep + data_rows + row_seps + bottom`
+///     = 4 + rows.len + max(0, rows.len - 1)
+///   - Without headers (rows > 0): `top + data_rows + row_seps + bottom`
+///     = 2 + rows.len + (rows.len - 1) = rows.len * 2 + 1
+///   - No headers and no rows: 0 (nothing rendered)
+///
+/// For borderless tables: `(1 if headers present) + rows.len`.
+pub fn tableHeight(
+    headers: ?[]const []const u8,
+    rows: []const []const []const u8,
+    config: TableConfig,
+) usize {
+    // Determine whether there is any column count to render
+    const has_cols: bool = blk: {
+        if (headers) |h| break :blk h.len > 0;
+        if (rows.len > 0) break :blk rows[0].len > 0;
+        break :blk false;
+    };
+    if (!has_cols) return 0;
+
+    if (config.border == .none) {
+        const header_rows: usize = if (headers != null) 1 else 0;
+        return header_rows + rows.len;
+    }
+
+    // Bordered
+    if (headers != null) {
+        // top + header + header_sep + data + seps + bottom
+        if (rows.len == 0) return 4; // top + hdr + hdr_sep + bottom
+        return 4 + rows.len + (rows.len - 1);
+    } else {
+        if (rows.len == 0) return 0;
+        // top + rows + row_seps + bottom
+        return 2 + rows.len + (rows.len - 1);
+    }
+}
+
+/// Paint a table into a Buffer2D at offset (ox, oy).
+///
+/// Writes the same content as `renderBordered` / `renderBorderless` but places
+/// individual codepoints into the buffer rather than serialising to a writer.
+/// The caller is responsible for allocating a buffer large enough:
+/// width >= ox + tableWidth(...) and height >= oy + tableHeight(...).
+pub fn paintTable(
+    buffer: *Buffer2D,
+    ox: usize,
+    oy: usize,
+    headers: ?[]const []const u8,
+    rows: []const []const []const u8,
+    config: TableConfig,
+) void {
+    const num_cols: usize = blk: {
+        if (headers) |h| break :blk h.len;
+        if (rows.len > 0) break :blk rows[0].len;
+        return;
+    };
+    if (num_cols == 0) return;
+    const ncols = @min(num_cols, MAX_COLS);
+
+    var col_widths: [MAX_COLS]usize = [_]usize{0} ** MAX_COLS;
+    if (headers) |h| {
+        for (0..ncols) |c| col_widths[c] = @max(col_widths[c], h[c].len);
+    }
+    for (rows) |row| {
+        const rc = @min(row.len, ncols);
+        for (0..rc) |c| col_widths[c] = @max(col_widths[c], row[c].len);
+    }
+
+    if (config.border == .none) {
+        paintBorderlessIntoBuffer(buffer, ox, oy, headers, rows, config, col_widths[0..ncols]);
+    } else {
+        paintBorderedIntoBuffer(buffer, ox, oy, headers, rows, config, col_widths[0..ncols]);
+    }
+}
+
+/// Decode the first UTF-8 codepoint from a non-empty string slice.
+/// Returns a space on empty input or decode error.
+fn firstCodepoint(s: []const u8) u21 {
+    if (s.len == 0) return ' ';
+    const len = std.unicode.utf8ByteSequenceLength(s[0]) catch return ' ';
+    if (len > s.len) return ' ';
+    return std.unicode.utf8Decode(s[0..len]) catch ' ';
+}
+
+fn paintHorizontalRuleIntoBuffer(
+    buffer: *Buffer2D,
+    x: *usize,
+    y: usize,
+    left: []const u8,
+    fill: []const u8,
+    sep: []const u8,
+    right: []const u8,
+    col_widths: []const usize,
+) void {
+    buffer.set(x.*, y, firstCodepoint(left));
+    x.* += 1;
+    for (col_widths, 0..) |width, c| {
+        const fill_cp = firstCodepoint(fill);
+        var i: usize = 0;
+        while (i < width + 2) : (i += 1) {
+            buffer.set(x.*, y, fill_cp);
+            x.* += 1;
+        }
+        if (c + 1 < col_widths.len) {
+            buffer.set(x.*, y, firstCodepoint(sep));
+        } else {
+            buffer.set(x.*, y, firstCodepoint(right));
+        }
+        x.* += 1;
+    }
+}
+
+fn paintDataRowIntoBuffer(
+    buffer: *Buffer2D,
+    ox: usize,
+    y: usize,
+    row: []const []const u8,
+    config: TableConfig,
+    col_widths: []const usize,
+    bordered: bool,
+) void {
+    const bc = borderChars(config);
+    const ncols = col_widths.len;
+    var x = ox;
+
+    if (bordered) {
+        buffer.set(x, y, firstCodepoint(bc.vl));
+        x += 1;
+    }
+
+    for (0..ncols) |c| {
+        const cell = if (c < row.len) row[c] else "";
+        const width = col_widths[c];
+        const align_ = if (config.alignment) |a| (if (c < a.len) a[c] else .left) else .left;
+
+        if (bordered) {
+            buffer.set(x, y, ' ');
+            x += 1;
+            // Paint cell with alignment
+            const len = cell.len;
+            const pad = if (len < width) width - len else 0;
+            switch (align_) {
+                .left => {
+                    for (cell) |byte| {
+                        buffer.set(x, y, @as(u21, byte));
+                        x += 1;
+                    }
+                    var sp: usize = 0;
+                    while (sp < pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                },
+                .right => {
+                    var sp: usize = 0;
+                    while (sp < pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                    for (cell) |byte| {
+                        buffer.set(x, y, @as(u21, byte));
+                        x += 1;
+                    }
+                },
+                .center => {
+                    const left_pad = pad / 2;
+                    const right_pad = pad - left_pad;
+                    var sp: usize = 0;
+                    while (sp < left_pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                    for (cell) |byte| {
+                        buffer.set(x, y, @as(u21, byte));
+                        x += 1;
+                    }
+                    sp = 0;
+                    while (sp < right_pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                },
+            }
+            buffer.set(x, y, ' ');
+            x += 1;
+            if (c + 1 < ncols) {
+                buffer.set(x, y, firstCodepoint(bc.vc));
+            } else {
+                buffer.set(x, y, firstCodepoint(bc.vr));
+            }
+            x += 1;
+        } else {
+            for (cell) |byte| {
+                buffer.set(x, y, @as(u21, byte));
+                x += 1;
+            }
+            // Pad to column width
+            const len = cell.len;
+            if (len < width) {
+                var sp: usize = 0;
+                while (sp < width - len) : (sp += 1) {
+                    buffer.set(x, y, ' ');
+                    x += 1;
+                }
+            }
+            if (c + 1 < ncols) {
+                buffer.set(x, y, ' ');
+                x += 1;
+                buffer.set(x, y, ' ');
+                x += 1;
+            }
+        }
+    }
+}
+
+fn paintBorderedIntoBuffer(
+    buffer: *Buffer2D,
+    ox: usize,
+    oy: usize,
+    headers: ?[]const []const u8,
+    rows: []const []const []const u8,
+    config: TableConfig,
+    col_widths: []const usize,
+) void {
+    const bc = borderChars(config);
+    var y = oy;
+
+    // Top border
+    var x = ox;
+    paintHorizontalRuleIntoBuffer(buffer, &x, y, bc.tl, bc.th, bc.tt, bc.tr, col_widths);
+    y += 1;
+
+    if (headers) |h| {
+        paintDataRowIntoBuffer(buffer, ox, y, h, config, col_widths, true);
+        y += 1;
+        x = ox;
+        paintHorizontalRuleIntoBuffer(buffer, &x, y, bc.ml, bc.mh, bc.mt, bc.mr, col_widths);
+        y += 1;
+    }
+
+    for (rows, 0..) |row, i| {
+        paintDataRowIntoBuffer(buffer, ox, y, row, config, col_widths, true);
+        y += 1;
+        if (i + 1 < rows.len) {
+            x = ox;
+            paintHorizontalRuleIntoBuffer(buffer, &x, y, bc.ml, bc.mh, bc.mt, bc.mr, col_widths);
+            y += 1;
+        }
+    }
+
+    // Bottom border
+    x = ox;
+    paintHorizontalRuleIntoBuffer(buffer, &x, y, bc.bl, bc.bh, bc.bt, bc.br, col_widths);
+}
+
+fn paintBorderlessIntoBuffer(
+    buffer: *Buffer2D,
+    ox: usize,
+    oy: usize,
+    headers: ?[]const []const u8,
+    rows: []const []const []const u8,
+    config: TableConfig,
+    col_widths: []const usize,
+) void {
+    var y = oy;
+    if (headers) |h| {
+        paintDataRowIntoBuffer(buffer, ox, y, h, config, col_widths, false);
+        y += 1;
+    }
+    for (rows) |row| {
+        paintDataRowIntoBuffer(buffer, ox, y, row, config, col_widths, false);
+        y += 1;
+    }
 }
 
 /// Write a horizontal rule line: left_corner [fill*(width+2) sep]... right_corner

@@ -5,6 +5,7 @@ const table = @import("table.zig");
 const TableConfig = table.TableConfig;
 const Alignment = table.Alignment;
 const Border = table.Border;
+const Buffer2D = @import("buffer.zig").Buffer2D;
 
 // ── Task 1: single row, no headers, borderless ───────────────────────────────
 
@@ -152,4 +153,131 @@ test "table: center alignment" {
 
     // "ab" centered in width 6: 2 spaces left, 2 spaces right → "  ab  "
     try std.testing.expect(std.mem.indexOf(u8, result, "  ab  ") != null);
+}
+
+// ── Task 4: Dimension helpers and paintTable ──────────────────────────────────
+
+test "tableWidth: bordered" {
+    // headers: {"Name","Age"}, rows: {{"Alice","30"}}
+    // col widths: Name=5 (Alice), Age=3 (Age)
+    // width = (2+1) + (5+2) + (3+2) = 3 + 7 + 5 = 15
+    const headers: []const []const u8 = &.{ "Name", "Age" };
+    const rows: []const []const []const u8 = &.{
+        &.{ "Alice", "30" },
+    };
+
+    const w = table.tableWidth(headers, rows, .{ .border = .single });
+    try std.testing.expectEqual(@as(usize, 15), w);
+}
+
+test "tableWidth: borderless" {
+    // rows: {{"ab","cd"}}, col widths both 2, borderless: 2 + 2 + 2*1 = 6
+    const rows: []const []const []const u8 = &.{
+        &.{ "ab", "cd" },
+    };
+
+    const w = table.tableWidth(null, rows, .{ .border = .none });
+    try std.testing.expectEqual(@as(usize, 6), w);
+}
+
+test "tableHeight: with headers" {
+    // 2 headers, 2 data rows → top + hdr + hdr_sep + r1 + sep + r2 + bot = 7
+    const headers: []const []const u8 = &.{ "A", "B" };
+    const rows: []const []const []const u8 = &.{
+        &.{ "1", "2" },
+        &.{ "3", "4" },
+    };
+
+    const h = table.tableHeight(headers, rows, .{ .border = .single });
+    try std.testing.expectEqual(@as(usize, 7), h);
+}
+
+test "tableHeight: without headers" {
+    // 3 data rows, no headers → top + r1 + sep + r2 + sep + r3 + bot = 7
+    const rows: []const []const []const u8 = &.{
+        &.{"a"},
+        &.{"b"},
+        &.{"c"},
+    };
+
+    const h = table.tableHeight(null, rows, .{ .border = .single });
+    try std.testing.expectEqual(@as(usize, 7), h);
+}
+
+test "paintTable: writes to buffer" {
+    const allocator = std.testing.allocator;
+
+    // Single row "hi" at buffer offset (2, 1)
+    const rows: []const []const []const u8 = &.{
+        &.{"hi"},
+    };
+    // tableWidth = (1+1) + (2+2) = 6, tableHeight = 2+1+1 = 3 (top+row+bot)
+    const tw = table.tableWidth(null, rows, .{ .border = .single });
+    const th = table.tableHeight(null, rows, .{ .border = .single });
+
+    const buf_w = tw + 2; // offset 2 in x
+    const buf_h = th + 1; // offset 1 in y
+    var buf = try Buffer2D.init(allocator, buf_w, buf_h);
+    defer buf.deinit(allocator);
+
+    table.paintTable(&buf, 2, 1, null, rows, .{ .border = .single });
+
+    // Top-left corner (┌ = U+250C) should be at (2, 1)
+    try std.testing.expectEqual(@as(u21, '┌'), buf.get(2, 1));
+
+    // 'h' should appear at column 4 (offset 2 + border 1 + space 1 = 4), row 2
+    try std.testing.expectEqual(@as(u21, 'h'), buf.get(4, 2));
+    // 'i' should follow at column 5
+    try std.testing.expectEqual(@as(u21, 'i'), buf.get(5, 2));
+}
+
+// ── Task 5: Edge case tests ───────────────────────────────────────────────────
+
+test "table: single column single row" {
+    const allocator = std.testing.allocator;
+
+    const rows: []const []const []const u8 = &.{
+        &.{"x"},
+    };
+
+    const result = try table.render(null, rows, allocator, .{ .border = .single });
+    defer allocator.free(result);
+
+    // Expect exactly 3 non-empty lines: top border, data row, bottom border
+    var line_count: usize = 0;
+    var it = std.mem.splitScalar(u8, result, '\n');
+    while (it.next()) |line| {
+        if (line.len > 0) line_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), line_count);
+}
+
+test "table: empty rows with headers" {
+    const allocator = std.testing.allocator;
+
+    const headers: []const []const u8 = &.{ "Col1", "Col2" };
+    const rows: []const []const []const u8 = &.{};
+
+    const result = try table.render(headers, rows, allocator, .{ .border = .single });
+    defer allocator.free(result);
+
+    // Expect 4 non-empty lines: top border, header row, header separator, bottom border
+    var line_count: usize = 0;
+    var it = std.mem.splitScalar(u8, result, '\n');
+    while (it.next()) |line| {
+        if (line.len > 0) line_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 4), line_count);
+}
+
+test "table: no headers no rows" {
+    const allocator = std.testing.allocator;
+
+    const rows: []const []const []const u8 = &.{};
+
+    const result = try table.render(null, rows, allocator, .{ .border = .single });
+    defer allocator.free(result);
+
+    // Nothing to render — result should be empty
+    try std.testing.expectEqualStrings("", result);
 }
