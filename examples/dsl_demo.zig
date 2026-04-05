@@ -23,6 +23,12 @@ const source =
     \\}
 ;
 
+const flow_source =
+    \\pipeline [flow] {
+    \\  Input -> Parse -> Transform -> Output
+    \\}
+;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -30,6 +36,9 @@ pub fn main() !void {
 
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
+
+    // ── Demo 1: multi-block DAG source ───────────────────────────────────────
+    try stdout.writeAll("=== Demo 1: Multi-block DAG ===\n\n");
 
     var result = try dsl.parseAndBuild(allocator, source);
     defer result.deinit();
@@ -91,6 +100,47 @@ pub fn main() !void {
             try stdout.print("{s}\n", .{line});
         }
         try stdout.print("... ({d} bytes total)\n", .{json_output.len});
+
+        try stdout.writeByte('\n');
+    }
+
+    // ── Demo 2: [flow] block ──────────────────────────────────────────────────
+    try stdout.writeAll("=== Demo 2: [flow] Block ===\n\n");
+
+    var flow_result = try dsl.parseAndBuild(allocator, flow_source);
+    defer flow_result.deinit();
+
+    if (flow_result.hasErrors()) {
+        for (flow_result.err_list.errors.items) |e| {
+            try stderr.print("{d}:{d}: error: {s}\n", .{ e.loc.line, e.loc.col, e.message });
+        }
+        return error.ParseError;
+    }
+
+    if (flow_result.graphs.len == 0) {
+        try stderr.writeAll("No graphs found in flow input.\n");
+        return;
+    }
+
+    try stdout.print("Parsed {d} graph(s) from flow DSL source.\n\n", .{flow_result.graphs.len});
+
+    for (flow_result.graphs, 0..) |*built, i| {
+        if (flow_result.graphs.len > 1) {
+            try stdout.print("=== Flow Graph {d} ===\n\n", .{i + 1});
+        }
+
+        var ir = try zigraph.layout(&built.graph, allocator, built.config);
+        defer ir.deinit();
+
+        dsl.direction.applyDirection(&ir, built.direction);
+
+        try stdout.writeAll("--- Terminal ---\n");
+        const terminal_output = try zigraph.terminal.render(&ir, allocator);
+        defer allocator.free(terminal_output);
+        try stdout.writeAll(terminal_output);
+        if (!std.mem.endsWith(u8, terminal_output, "\n")) {
+            try stdout.writeByte('\n');
+        }
 
         try stdout.writeByte('\n');
     }
