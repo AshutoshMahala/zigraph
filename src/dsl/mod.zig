@@ -11,15 +11,23 @@ pub const direction = @import("direction.zig");
 pub const tree_bridge = @import("tree_bridge.zig");
 pub const imports = @import("imports.zig");
 pub const BuiltGraph = bridge.BuiltGraph;
+pub const BuiltTable = bridge.BuiltTable;
+pub const TreeResult = tree_bridge.TreeResult;
 
 pub const ParseResult = struct {
     graphs: []BuiltGraph,
+    tables: []BuiltTable,
+    trees: []TreeResult,
     err_list: errors.ErrorList,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *ParseResult) void {
         for (self.graphs) |*g| g.deinit();
         self.allocator.free(self.graphs);
+        for (self.tables) |*t| t.deinit();
+        self.allocator.free(self.tables);
+        for (self.trees) |*t| t.deinit();
+        self.allocator.free(self.trees);
         self.err_list.deinit();
     }
 
@@ -49,13 +57,84 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
         graphs_list.deinit(allocator);
     }
 
+    var tables_list = std.ArrayListUnmanaged(BuiltTable){};
+    errdefer {
+        for (tables_list.items) |*t| t.deinit();
+        tables_list.deinit(allocator);
+    }
+
+    var trees_list = std.ArrayListUnmanaged(TreeResult){};
+    errdefer {
+        for (trees_list.items) |*t| t.deinit();
+        trees_list.deinit(allocator);
+    }
+
+    // resolved blocks: optional __default__ block first, then named blocks
+    // matching doc.blocks order. Track named-block offset.
+    var doc_block_idx: usize = 0;
     for (resolve_result.blocks) |blk| {
-        const built = try bridge.buildGraph(allocator, blk);
-        try graphs_list.append(allocator, built);
+        switch (blk.config.layout) {
+            .table => {
+                // table_headers/table_row are not preserved by the resolver;
+                // use the original AST block's statements and directives.
+                const ast_stmts: []const ast.Statement = if (std.mem.eql(u8, blk.name, "__default__"))
+                    doc.statements
+                else blk_stmts: {
+                    const s = doc.blocks[doc_block_idx].statements;
+                    break :blk_stmts s;
+                };
+                const ast_dirs: []const ast.Directive = if (std.mem.eql(u8, blk.name, "__default__"))
+                    doc.directives
+                else dir_blk: {
+                    const d = doc.blocks[doc_block_idx].directives;
+                    break :dir_blk d;
+                };
+                const built = try bridge.buildTable(allocator, blk.name, ast_stmts, ast_dirs);
+                try tables_list.append(allocator, built);
+            },
+            .tree => {
+                // Build both a BuiltGraph and a TreeResult for tree blocks.
+                const built_graph = try bridge.buildGraph(allocator, blk);
+                try graphs_list.append(allocator, built_graph);
+
+                // Collect node ids/labels and edges for tree_bridge.buildTree
+                var node_ids = std.ArrayListUnmanaged([]const u8){};
+                defer node_ids.deinit(allocator);
+                var node_labels = std.ArrayListUnmanaged([]const u8){};
+                defer node_labels.deinit(allocator);
+                for (blk.nodes) |n| {
+                    try node_ids.append(allocator, n.id);
+                    try node_labels.append(allocator, n.label);
+                }
+                var tree_edges = std.ArrayListUnmanaged(tree_bridge.Edge){};
+                defer tree_edges.deinit(allocator);
+                for (blk.edges) |e| {
+                    try tree_edges.append(allocator, .{ .from = e.from, .to = e.to });
+                }
+                const built_tree = try tree_bridge.buildTree(
+                    allocator,
+                    node_ids.items,
+                    node_labels.items,
+                    tree_edges.items,
+                    &err_list,
+                );
+                try trees_list.append(allocator, built_tree);
+            },
+            else => {
+                // .dag, .force, .card, .flow → buildGraph
+                const built = try bridge.buildGraph(allocator, blk);
+                try graphs_list.append(allocator, built);
+            },
+        }
+        if (!std.mem.eql(u8, blk.name, "__default__")) {
+            doc_block_idx += 1;
+        }
     }
 
     return ParseResult{
         .graphs = try graphs_list.toOwnedSlice(allocator),
+        .tables = try tables_list.toOwnedSlice(allocator),
+        .trees = try trees_list.toOwnedSlice(allocator),
         .err_list = err_list,
         .allocator = allocator,
     };
@@ -75,6 +154,18 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
         graphs_list.deinit(allocator);
     }
 
+    var tables_list = std.ArrayListUnmanaged(BuiltTable){};
+    errdefer {
+        for (tables_list.items) |*t| t.deinit();
+        tables_list.deinit(allocator);
+    }
+
+    var trees_list = std.ArrayListUnmanaged(TreeResult){};
+    errdefer {
+        for (trees_list.items) |*t| t.deinit();
+        trees_list.deinit(allocator);
+    }
+
     for (blocks) |blk| {
         const tokens = try tokenizer.tokenize(allocator, blk.content, &err_list);
         defer allocator.free(tokens);
@@ -86,14 +177,64 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
         const resolve_result = try resolver.resolve(allocator, doc, &err_list);
         defer freeResolveResult(allocator, resolve_result);
 
+        var doc_block_idx: usize = 0;
         for (resolve_result.blocks) |rb| {
-            const built = try bridge.buildGraph(allocator, rb);
-            try graphs_list.append(allocator, built);
+            switch (rb.config.layout) {
+                .table => {
+                    const ast_stmts: []const ast.Statement = if (std.mem.eql(u8, rb.name, "__default__"))
+                        doc.statements
+                    else s: {
+                        break :s doc.blocks[doc_block_idx].statements;
+                    };
+                    const ast_dirs: []const ast.Directive = if (std.mem.eql(u8, rb.name, "__default__"))
+                        doc.directives
+                    else d: {
+                        break :d doc.blocks[doc_block_idx].directives;
+                    };
+                    const built = try bridge.buildTable(allocator, rb.name, ast_stmts, ast_dirs);
+                    try tables_list.append(allocator, built);
+                },
+                .tree => {
+                    const built_graph = try bridge.buildGraph(allocator, rb);
+                    try graphs_list.append(allocator, built_graph);
+
+                    var node_ids = std.ArrayListUnmanaged([]const u8){};
+                    defer node_ids.deinit(allocator);
+                    var node_labels = std.ArrayListUnmanaged([]const u8){};
+                    defer node_labels.deinit(allocator);
+                    for (rb.nodes) |n| {
+                        try node_ids.append(allocator, n.id);
+                        try node_labels.append(allocator, n.label);
+                    }
+                    var tree_edges = std.ArrayListUnmanaged(tree_bridge.Edge){};
+                    defer tree_edges.deinit(allocator);
+                    for (rb.edges) |e| {
+                        try tree_edges.append(allocator, .{ .from = e.from, .to = e.to });
+                    }
+                    const built_tree = try tree_bridge.buildTree(
+                        allocator,
+                        node_ids.items,
+                        node_labels.items,
+                        tree_edges.items,
+                        &err_list,
+                    );
+                    try trees_list.append(allocator, built_tree);
+                },
+                else => {
+                    const built = try bridge.buildGraph(allocator, rb);
+                    try graphs_list.append(allocator, built);
+                },
+            }
+            if (!std.mem.eql(u8, rb.name, "__default__")) {
+                doc_block_idx += 1;
+            }
         }
     }
 
     return ParseResult{
         .graphs = try graphs_list.toOwnedSlice(allocator),
+        .tables = try tables_list.toOwnedSlice(allocator),
+        .trees = try trees_list.toOwnedSlice(allocator),
         .err_list = err_list,
         .allocator = allocator,
     };

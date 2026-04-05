@@ -26,6 +26,56 @@ pub const BuiltGraph = struct {
     }
 };
 
+pub const BuiltTable = struct {
+    name: []const u8,
+    headers: ?[]const []const u8,
+    rows: []const []const []const u8,
+    border: []const u8,
+    alignment: []const u8,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *BuiltTable) void {
+        _ = self;
+    }
+};
+
+/// Build a BuiltTable from raw AST statements and block directives.
+/// The table_headers and table_row statements are not preserved by the resolver,
+/// so this function must be called with the original AST NamedBlock statements.
+pub fn buildTable(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    statements: []const ast.Statement,
+    directives: []const ast.Directive,
+) !BuiltTable {
+    var headers: ?[]const []const u8 = null;
+    var rows_list: std.ArrayListUnmanaged([]const []const u8) = .{};
+
+    var border: []const u8 = "single";
+    var alignment: []const u8 = "";
+    for (directives) |dir| {
+        if (dir.kind == .border) border = dir.value;
+        if (dir.kind == .align_) alignment = dir.value;
+    }
+
+    for (statements) |stmt| {
+        switch (stmt) {
+            .table_headers => |h| { headers = h.fields; },
+            .table_row => |r| { try rows_list.append(allocator, r.fields); },
+            else => {},
+        }
+    }
+
+    return BuiltTable{
+        .name = name,
+        .headers = headers,
+        .rows = try rows_list.toOwnedSlice(allocator),
+        .border = border,
+        .alignment = alignment,
+        .allocator = allocator,
+    };
+}
+
 // ============================================================
 // Bridge: ResolvedBlock → BuiltGraph
 // ============================================================
