@@ -17,6 +17,7 @@ pub const BuiltGraph = struct {
     graph: zigraph.Graph,
     config: zigraph.LayoutConfig,
     id_map: std.StringHashMapUnmanaged(usize),
+    direction: ast.Direction,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *BuiltGraph) void {
@@ -132,10 +133,19 @@ pub fn buildGraph(allocator: std.mem.Allocator, block: ResolvedBlock) !BuiltGrap
         .dag, .tree => zigraph.presets.sugiyama.standard(),
     };
 
+    // Map direction string to enum
+    const direction: ast.Direction = blk: {
+        if (std.mem.eql(u8, block.config.direction, "left-right")) break :blk .left_right
+        else if (std.mem.eql(u8, block.config.direction, "bottom-up")) break :blk .bottom_up
+        else if (std.mem.eql(u8, block.config.direction, "right-left")) break :blk .right_left
+        else break :blk .top_down;
+    };
+
     return BuiltGraph{
         .graph = g,
         .config = config,
         .id_map = id_map,
+        .direction = direction,
         .allocator = allocator,
     };
 }

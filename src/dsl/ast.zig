@@ -16,6 +16,13 @@ pub const EdgeOp = enum {
 
 pub const Layout = enum { dag, tree, force };
 
+pub const Direction = enum {
+    top_down,   // default — no transform
+    left_right, // swap X↔Y (flow goes left to right)
+    bottom_up,  // flip Y axis
+    right_left, // swap X↔Y then flip X axis
+};
+
 pub const Shape = enum {
     rect, circle, diamond, cylinder, person, pill,
     hexagon, parallelogram, queue, cloud, card,

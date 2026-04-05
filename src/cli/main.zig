@@ -18,6 +18,7 @@ const RenderArgs = struct {
     input_file: ?[]const u8 = null,
     output_file: ?[]const u8 = null,
     format: Format = .terminal,
+    direction_override: ?dsl.ast.Direction = null,
 };
 
 const CheckArgs = struct {
@@ -39,13 +40,15 @@ fn printHelp(writer: anytype) !void {
         \\  check <file>           Validate syntax, print OK or errors
         \\
         \\Render options:
-        \\  -f terminal|svg|json   Output format (default: terminal)
-        \\  -o <output>            Write output to file (default: stdout)
+        \\  -f terminal|svg|json                          Output format (default: terminal)
+        \\  -o <output>                                   Write output to file (default: stdout)
+        \\  -d top-down|left-right|bottom-up|right-left   Override flow direction
         \\
         \\Examples:
         \\  zigraph render graph.zgraph
         \\  zigraph render graph.md -f svg -o graph.svg
         \\  echo "A -> B -> C" | zigraph render
+        \\  echo "A -> B -> C" | zigraph render -d left-right
         \\  zigraph check graph.zgraph
         \\
     );
@@ -86,6 +89,15 @@ fn parseArgs(args: []const []const u8) !Command {
                     return error.MissingOutputValue;
                 }
                 render_args.output_file = args[i];
+            } else if (std.mem.eql(u8, arg, "-d")) {
+                i += 1;
+                if (i >= args.len) return error.MissingDirectionValue;
+                const dir_str = args[i];
+                if (std.mem.eql(u8, dir_str, "top-down")) render_args.direction_override = .top_down
+                else if (std.mem.eql(u8, dir_str, "left-right")) render_args.direction_override = .left_right
+                else if (std.mem.eql(u8, dir_str, "bottom-up")) render_args.direction_override = .bottom_up
+                else if (std.mem.eql(u8, dir_str, "right-left")) render_args.direction_override = .right_left
+                else return error.UnknownDirection;
             } else if (arg.len > 0 and arg[0] == '-') {
                 return error.UnknownFlag;
             } else {
@@ -124,6 +136,7 @@ fn renderSource(
     source: []const u8,
     is_markdown: bool,
     format: Format,
+    direction_override: ?dsl.ast.Direction,
     writer: anytype,
 ) !void {
     var result = if (is_markdown)
@@ -153,6 +166,10 @@ fn renderSource(
 
         var ir = try zigraph.layout(&built_graph.graph, allocator, built_graph.config);
         defer ir.deinit();
+
+        // Apply direction transform: CLI flag overrides file-level @direction
+        const dir = direction_override orelse built_graph.direction;
+        dsl.direction.applyDirection(&ir, dir);
 
         switch (format) {
             .terminal => {
@@ -192,10 +209,10 @@ fn cmdRender(allocator: std.mem.Allocator, args: RenderArgs) !void {
         const out_file = try std.fs.cwd().createFile(out_path, .{ .truncate = true });
         defer out_file.close();
         const file_writer = out_file.deprecatedWriter();
-        try renderSource(allocator, source, is_md, args.format, file_writer);
+        try renderSource(allocator, source, is_md, args.format, args.direction_override, file_writer);
     } else {
         const stdout = std.fs.File.stdout().deprecatedWriter();
-        try renderSource(allocator, source, is_md, args.format, stdout);
+        try renderSource(allocator, source, is_md, args.format, args.direction_override, stdout);
     }
 }
 
@@ -248,6 +265,10 @@ pub fn main() !void {
             try stderr.writeAll("error: -f requires a format argument (terminal, svg, json)\n");
         } else if (err == error.MissingOutputValue) {
             try stderr.writeAll("error: -o requires a file path argument\n");
+        } else if (err == error.MissingDirectionValue) {
+            try stderr.writeAll("error: -d requires a direction argument (top-down, left-right, bottom-up, right-left)\n");
+        } else if (err == error.UnknownDirection) {
+            try stderr.writeAll("error: unknown direction (use top-down, left-right, bottom-up, or right-left)\n");
         } else if (err == error.UnknownFlag) {
             try stderr.writeAll("error: unknown flag\n");
         } else {
