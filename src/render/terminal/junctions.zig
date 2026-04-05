@@ -251,6 +251,7 @@ pub fn toAscii(cp: u21) u21 {
         '\u{25CF}', '\u{25CB}' => 'o', // ● ○
         0x21BA => '@', // ↺ self-loop (@ suggests circular/self-referencing)
         0x2312 => '+', // ⌒ (arc crossing)
+        0x2060 => ' ', // gap crossing sentinel
         else => blk: {
             // Box-drawing: decompose into directional arm weights
             const dw = decomposeChar(cp);
@@ -643,6 +644,11 @@ fn lookupCrossing(u: ArmWeight, d: ArmWeight, l: ArmWeight, r: ArmWeight) u21 {
 pub fn mergeJunctionWeighted(current: u21, new_dirs: DirWeights, crossing_style: @import("config.zig").CrossingStyle) u21 {
     if (isMarkerChar(current)) return current;
 
+    // Preserve crossing indicators already placed by a prior edge.
+    // Arc (⌒) and gap (U+2060 word joiner sentinel) are sticky: once a
+    // 4-way crossing is detected and marked, later edges must not overwrite it.
+    if (current == 0x2312 or current == 0x2060) return current;
+
     const existing = decomposeChar(current);
     const merged = existing.mergeWith(new_dirs);
     const ch = lookupChar(merged);
@@ -655,7 +661,7 @@ pub fn mergeJunctionWeighted(current: u21, new_dirs: DirWeights, crossing_style:
         if (eu != .none and ed != .none and el != .none and er != .none) {
             return switch (crossing_style) {
                 .arc => 0x2312, // ⌒
-                .gap => ' ',
+                .gap => 0x2060, // word joiner sentinel (rendered as space)
                 .flat => unreachable,
             };
         }

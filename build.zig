@@ -735,6 +735,23 @@ pub fn build(b: *std.Build) void {
     const run_terminal_card_demo_step = b.step("run-terminal-card-demo", "Run card node demo");
     run_terminal_card_demo_step.dependOn(&run_terminal_card_demo.step);
 
+    const terminal_crossing_styles_exe = b.addExecutable(.{
+        .name = "terminal-crossing-styles",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/terminal/crossing_styles.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(terminal_crossing_styles_exe);
+
+    const run_terminal_crossing_styles = b.addRunArtifact(terminal_crossing_styles_exe);
+    const run_terminal_crossing_styles_step = b.step("run-terminal-crossing-styles", "Run crossing styles demo (flat, arc, gap)");
+    run_terminal_crossing_styles_step.dependOn(&run_terminal_crossing_styles.step);
+
     // ── SVG Gallery Examples ────────────────────────────────────────────────
 
     const svg_gallery = [_]struct { file: []const u8, name: []const u8, desc: []const u8 }{

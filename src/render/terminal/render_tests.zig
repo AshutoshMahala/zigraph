@@ -1970,9 +1970,9 @@ test "mergeJunctionWeighted: arc crossing style" {
 }
 
 test "mergeJunctionWeighted: gap crossing style" {
-    // Vertical line exists, horizontal crosses it → should produce space
+    // Vertical line exists, horizontal crosses it → should produce gap sentinel (U+2060)
     const result = mergeJunctionWeighted('│', .{ .left = .light, .right = .light }, .gap);
-    try std.testing.expectEqual(@as(u21, ' '), result);
+    try std.testing.expectEqual(@as(u21, 0x2060), result);
 }
 
 test "mergeJunctionWeighted: flat crossing style unchanged" {
@@ -1990,4 +1990,16 @@ test "mergeJunctionWeighted: arc with heavy crossing" {
     // Heavy vertical + light horizontal → should still produce arc
     const result = mergeJunctionWeighted(CP_HV_V_LINE, .{ .left = .light, .right = .light }, .arc);
     try std.testing.expectEqual(@as(u21, 0x2312), result);
+}
+
+test "mergeJunctionWeighted: arc crossing is sticky" {
+    // Once ⌒ is placed, subsequent merges must preserve it
+    const result = mergeJunctionWeighted(0x2312, .{ .left = .light, .right = .light }, .arc);
+    try std.testing.expectEqual(@as(u21, 0x2312), result);
+}
+
+test "mergeJunctionWeighted: gap crossing is sticky" {
+    // Once gap sentinel is placed, subsequent merges must preserve it
+    const result = mergeJunctionWeighted(0x2060, .{ .left = .light, .right = .light }, .gap);
+    try std.testing.expectEqual(@as(u21, 0x2060), result);
 }
