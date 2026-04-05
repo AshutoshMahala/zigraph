@@ -18,6 +18,7 @@ pub const ParseResult = struct {
     graphs: []BuiltGraph,
     tables: []BuiltTable,
     trees: []TreeResult,
+    owned_labels: []const []const u8,
     err_list: errors.ErrorList,
     allocator: std.mem.Allocator,
 
@@ -28,6 +29,8 @@ pub const ParseResult = struct {
         self.allocator.free(self.tables);
         for (self.trees) |*t| t.deinit();
         self.allocator.free(self.trees);
+        for (self.owned_labels) |lbl| self.allocator.free(lbl);
+        self.allocator.free(self.owned_labels);
         self.err_list.deinit();
     }
 
@@ -49,6 +52,21 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
     defer freeDoc(allocator, doc);
 
     const resolve_result = try resolver.resolve(allocator, doc, &err_list);
+
+    // Collect owned labels (from var substitution) before freeing resolve result.
+    // These labels are borrowed by BuiltGraph and must outlive it.
+    var owned_labels_list = std.ArrayListUnmanaged([]const u8){};
+    for (resolve_result.blocks) |blk| {
+        for (blk.nodes) |node| {
+            if (node.label_owned) try owned_labels_list.append(allocator, node.label);
+        }
+        for (blk.edges) |edge| {
+            if (edge.label_owned) {
+                if (edge.label) |lbl| try owned_labels_list.append(allocator, lbl);
+            }
+        }
+    }
+
     defer freeResolveResult(allocator, resolve_result);
 
     var graphs_list = std.ArrayListUnmanaged(BuiltGraph){};
@@ -135,6 +153,7 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
         .graphs = try graphs_list.toOwnedSlice(allocator),
         .tables = try tables_list.toOwnedSlice(allocator),
         .trees = try trees_list.toOwnedSlice(allocator),
+        .owned_labels = try owned_labels_list.toOwnedSlice(allocator),
         .err_list = err_list,
         .allocator = allocator,
     };
@@ -235,6 +254,7 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
         .graphs = try graphs_list.toOwnedSlice(allocator),
         .tables = try tables_list.toOwnedSlice(allocator),
         .trees = try trees_list.toOwnedSlice(allocator),
+        .owned_labels = &.{},
         .err_list = err_list,
         .allocator = allocator,
     };
@@ -299,14 +319,12 @@ fn freeSubgraph(allocator: std.mem.Allocator, sg: resolver.ResolvedSubgraph) voi
 fn freeResolveResult(allocator: std.mem.Allocator, result: resolver.ResolveResult) void {
     for (result.blocks) |blk| {
         for (blk.nodes) |node| {
-            if (node.label_owned) allocator.free(node.label);
+            // label_owned labels are tracked in ParseResult.owned_labels — don't free here
             allocator.free(node.properties);
         }
         allocator.free(blk.nodes);
         for (blk.edges) |edge| {
-            if (edge.label_owned) {
-                if (edge.label) |lbl| allocator.free(lbl);
-            }
+            // label_owned labels are tracked in ParseResult.owned_labels — don't free here
             allocator.free(edge.properties);
         }
         allocator.free(blk.edges);

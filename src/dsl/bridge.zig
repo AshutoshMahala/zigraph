@@ -34,14 +34,33 @@ pub const BuiltTable = struct {
     alignment: []const u8,
     allocator: std.mem.Allocator,
 
+    fn freeStringSlice(alloc: std.mem.Allocator, slice: []const []const u8) void {
+        for (slice) |s| alloc.free(s);
+        alloc.free(slice);
+    }
+
     pub fn deinit(self: *BuiltTable) void {
+        if (self.headers) |h| freeStringSlice(self.allocator, h);
+        for (self.rows) |row| freeStringSlice(self.allocator, row);
         self.allocator.free(self.rows);
+        self.allocator.free(self.name);
+        self.allocator.free(self.border);
+        self.allocator.free(self.alignment);
     }
 };
 
 /// Build a BuiltTable from raw AST statements and block directives.
 /// The table_headers and table_row statements are not preserved by the resolver,
 /// so this function must be called with the original AST NamedBlock statements.
+/// Duplicate a slice of strings so it outlives the source AST.
+fn dupeStringSlice(allocator: std.mem.Allocator, src: []const []const u8) ![]const []const u8 {
+    const duped = try allocator.alloc([]const u8, src.len);
+    for (src, 0..) |s, i| {
+        duped[i] = try allocator.dupe(u8, s);
+    }
+    return duped;
+}
+
 pub fn buildTable(
     allocator: std.mem.Allocator,
     name: []const u8,
@@ -60,18 +79,18 @@ pub fn buildTable(
 
     for (statements) |stmt| {
         switch (stmt) {
-            .table_headers => |h| { headers = h.fields; },
-            .table_row => |r| { try rows_list.append(allocator, r.fields); },
+            .table_headers => |h| { headers = try dupeStringSlice(allocator, h.fields); },
+            .table_row => |r| { try rows_list.append(allocator, try dupeStringSlice(allocator, r.fields)); },
             else => {},
         }
     }
 
     return BuiltTable{
-        .name = name,
+        .name = try allocator.dupe(u8, name),
         .headers = headers,
         .rows = try rows_list.toOwnedSlice(allocator),
-        .border = border,
-        .alignment = alignment,
+        .border = try allocator.dupe(u8, border),
+        .alignment = try allocator.dupe(u8, alignment),
         .allocator = allocator,
     };
 }
