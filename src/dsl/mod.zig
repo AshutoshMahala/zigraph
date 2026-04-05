@@ -129,6 +129,7 @@ fn freeStatement(allocator: std.mem.Allocator, stmt: ast.Statement) void {
             allocator.free(sg.statements);
             if (sg.properties) |pb| allocator.free(pb.properties);
         },
+        .table_headers, .table_row, .vars_block => {},
     }
 }
 

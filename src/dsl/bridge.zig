@@ -131,6 +131,8 @@ pub fn buildGraph(allocator: std.mem.Allocator, block: ResolvedBlock) !BuiltGrap
     const config = switch (block.config.layout) {
         .force => zigraph.presets.fdg_presets.standard(),
         .dag, .tree => zigraph.presets.sugiyama.standard(),
+        .card, .flow => zigraph.presets.sugiyama.standard(),
+        .table => zigraph.presets.sugiyama.standard(),
     };
 
     // Map direction string to enum
@@ -247,6 +249,7 @@ fn freeAstStatement(stmt: ast.Statement) void {
             a.free(sg.statements);
             if (sg.properties) |pb| a.free(pb.properties);
         },
+        .table_headers, .table_row, .vars_block => {},
     }
 }
 

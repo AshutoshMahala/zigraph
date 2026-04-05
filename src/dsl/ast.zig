@@ -14,7 +14,7 @@ pub const EdgeOp = enum {
     dotted_undirected,  // -..-
 };
 
-pub const Layout = enum { dag, tree, force };
+pub const Layout = enum { dag, tree, force, card, table, flow };
 
 /// Flow direction for the rendered graph.
 ///
@@ -83,9 +83,12 @@ pub const Statement = union(enum) {
     edge: EdgeStatement,
     node_decl: NodeDecl,
     subgraph: SubgraphDecl,
+    table_headers: struct { fields: []const []const u8, loc: Loc },
+    table_row: struct { fields: []const []const u8, loc: Loc },
+    vars_block: struct { vars: []Property, loc: Loc },
 };
 
-pub const DirectiveKind = enum { layout, theme, direction, spacing };
+pub const DirectiveKind = enum { layout, theme, direction, spacing, import_, border, align_ };
 
 pub const Directive = struct {
     kind: DirectiveKind,
@@ -110,6 +113,7 @@ pub const NamedBlock = struct {
     directives: []Directive,
     styles: []StyleRule,
     statements: []Statement,
+    vars: []Property,
     loc: Loc,
 };
 
@@ -118,6 +122,7 @@ pub const Document = struct {
     styles: []StyleRule,
     statements: []Statement,
     blocks: []NamedBlock,
+    vars: []Property,
 };
 
 test "AST types compile and are usable" {
@@ -126,6 +131,7 @@ test "AST types compile and are usable" {
         .styles = &.{},
         .statements = &.{},
         .blocks = &.{},
+        .vars = &.{},
     };
     try std.testing.expectEqual(@as(usize, 0), doc.directives.len);
 
@@ -135,4 +141,53 @@ test "AST types compile and are usable" {
         .loc = Loc.zero,
     };
     try std.testing.expectEqual(EdgeOp.directed, edge.operator);
+}
+
+test "Phase 2a types are usable" {
+    // Layout enum has new variants
+    const lt: Layout = .card;
+    try std.testing.expectEqual(Layout.card, lt);
+    const lt2: Layout = .table;
+    try std.testing.expectEqual(Layout.table, lt2);
+    const lt3: Layout = .flow;
+    try std.testing.expectEqual(Layout.flow, lt3);
+
+    // DirectiveKind has new variants
+    const dk: DirectiveKind = .import_;
+    try std.testing.expectEqual(DirectiveKind.import_, dk);
+    const dk2: DirectiveKind = .border;
+    try std.testing.expectEqual(DirectiveKind.border, dk2);
+    const dk3: DirectiveKind = .align_;
+    try std.testing.expectEqual(DirectiveKind.align_, dk3);
+
+    // Statement has new variants
+    const stmt = Statement{ .table_headers = .{ .fields = &.{}, .loc = Loc.zero } };
+    try std.testing.expect(stmt == .table_headers);
+
+    const stmt2 = Statement{ .table_row = .{ .fields = &.{}, .loc = Loc.zero } };
+    try std.testing.expect(stmt2 == .table_row);
+
+    const stmt3 = Statement{ .vars_block = .{ .vars = &.{}, .loc = Loc.zero } };
+    try std.testing.expect(stmt3 == .vars_block);
+
+    // Document has vars field
+    const doc = Document{
+        .directives = &.{},
+        .styles = &.{},
+        .statements = &.{},
+        .blocks = &.{},
+        .vars = &.{},
+    };
+    try std.testing.expectEqual(@as(usize, 0), doc.vars.len);
+
+    // NamedBlock has vars field
+    const blk = NamedBlock{
+        .name = "test",
+        .directives = &.{},
+        .styles = &.{},
+        .statements = &.{},
+        .vars = &.{},
+        .loc = Loc.zero,
+    };
+    try std.testing.expectEqual(@as(usize, 0), blk.vars.len);
 }

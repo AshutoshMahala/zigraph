@@ -165,6 +165,7 @@ pub const Parser = struct {
             .styles     = try styles.toOwnedSlice(self.allocator),
             .statements = try statements.toOwnedSlice(self.allocator),
             .blocks     = try blocks.toOwnedSlice(self.allocator),
+            .vars       = &.{},
         };
     }
 
@@ -772,6 +773,7 @@ pub const Parser = struct {
             .directives = try directives.toOwnedSlice(self.allocator),
             .styles     = try styles.toOwnedSlice(self.allocator),
             .statements = try stmts.toOwnedSlice(self.allocator),
+            .vars       = &.{},
             .loc        = loc,
         };
     }
@@ -817,6 +819,7 @@ fn freeStatement(stmt: ast.Statement) void {
             std.testing.allocator.free(sg.statements);
             if (sg.properties) |pb| std.testing.allocator.free(pb.properties);
         },
+        .table_headers, .table_row, .vars_block => {},
     }
 }
 

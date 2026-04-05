@@ -135,6 +135,7 @@ const Resolver = struct {
                 .direction => cfg.direction = dir.value,
                 .spacing   => cfg.spacing   = dir.value,
                 .theme     => cfg.theme     = dir.value,
+                .import_, .border, .align_ => {},
             }
         }
         return cfg;
@@ -313,6 +314,7 @@ const Resolver = struct {
                     _ = sg;
                     // nested subgraph node collection omitted for simplicity
                 },
+                .table_headers, .table_row, .vars_block => {},
             }
         }
 
@@ -424,6 +426,7 @@ const Resolver = struct {
                     const resolved_sg = try self.resolveSubgraph(sg, &node_map, &edges_list);
                     try subgraphs_list.append(self.allocator, resolved_sg);
                 },
+                .table_headers, .table_row, .vars_block => {},
             }
         }
 
@@ -530,6 +533,7 @@ fn freeAstStatement(stmt: ast.Statement) void {
             a.free(sg.statements);
             if (sg.properties) |pb| a.free(pb.properties);
         },
+        .table_headers, .table_row, .vars_block => {},
     }
 }
 
