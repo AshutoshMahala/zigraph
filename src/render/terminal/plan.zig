@@ -770,6 +770,28 @@ fn edgeContains(edge: LayoutEdge, px: usize, py: usize) bool {
             }
             return false;
         },
+        .h_corner => |hc| {
+            const v_x = hc.vertical_x;
+            // Horizontal segment at from_y
+            if (py == from_y) {
+                const x_lo = @min(from_x, v_x);
+                const x_hi = @max(from_x, v_x);
+                if (px >= x_lo and px <= x_hi) return true;
+            }
+            // Vertical segment at v_x
+            if (px == v_x) {
+                const y_lo = @min(from_y, to_y);
+                const y_hi = @max(from_y, to_y);
+                if (py >= y_lo and py <= y_hi) return true;
+            }
+            // Horizontal segment at to_y
+            if (py == to_y) {
+                const x_lo = @min(v_x, to_x);
+                const x_hi = @max(v_x, to_x);
+                if (px >= x_lo and px <= x_hi) return true;
+            }
+            return false;
+        },
         .side_channel => |sc| {
             // Horizontal from source to channel
             if (py == from_y) {
@@ -1037,6 +1059,7 @@ fn transformEdge(edge: LayoutEdge, num_levels: usize, level_ir_ys: []const usize
         .corner => |*c| {
             c.horizontal_y = yTransform(c.horizontal_y, num_levels, level_ir_ys, cumulative_extra);
         },
+        .h_corner => {},
         .side_channel => |*sc| {
             sc.start_y = yTransform(sc.start_y, num_levels, level_ir_ys, cumulative_extra);
             sc.end_y = yTransform(sc.end_y, num_levels, level_ir_ys, cumulative_extra);

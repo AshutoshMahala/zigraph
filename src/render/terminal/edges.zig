@@ -104,6 +104,9 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Color, weigh
         .corner => |corner| {
             paintCornerEdge(buffer, edge, corner.horizontal_y, ec, arm, marker_end, marker_start, crossing_style);
         },
+        .h_corner => |hc| {
+            paintHCornerEdge(buffer, edge, hc.vertical_x, ec, arm, marker_end, marker_start, crossing_style);
+        },
         .side_channel => |sc| {
             paintSideChannelEdge(buffer, edge, sc.channel_x, sc.start_y, sc.end_y, ec, arm, marker_end, marker_start, crossing_style);
         },
@@ -292,6 +295,89 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
             }
         } else {
             drawLineCell(buffer, x2, y, true, ec.at(y), arm, crossing_style);
+        }
+    }
+}
+
+/// Paint a horizontal-first corner edge (H→V→H routing).
+/// Used for left-right layouts where edges should arrive horizontally.
+/// Route: horizontal at from_y → vertical at v_x → horizontal at to_y.
+fn paintHCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, v_x: usize, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape, crossing_style: CrossingStyle) void {
+    const x1 = edge.from_x;
+    const x2 = edge.to_x;
+    const y1 = edge.from_y;
+    const y2 = edge.to_y;
+
+    // --- Segment 1: horizontal at from_y from from_x to v_x ---
+    {
+        const lo_x = @min(x1, v_x);
+        const hi_x = @max(x1, v_x);
+        const cc = ec.at(y1);
+        if (edge.reversed and edge.directed) {
+            // Reversed: marker_start at FROM end, pointing away from target
+            const going_right = v_x > x1;
+            if (markerChar(marker_start, if (going_right) .left else .right, arm)) |ch| {
+                buffer.setWithColor(x1, y1, ch, cc);
+            }
+        }
+        if (hi_x > lo_x + 1) {
+            var x = lo_x + 1;
+            while (x < hi_x) : (x += 1) {
+                drawLineCell(buffer, x, y1, false, ec.at(y1), arm, crossing_style);
+            }
+        }
+    }
+
+    // --- Junction at (v_x, from_y) ---
+    {
+        const cc = ec.at(y1);
+        const cur = buffer.get(v_x, y1);
+        buffer.setWithColor(v_x, y1, mergeJunctionWeighted(cur, .{
+            .up = if (y2 < y1) arm else .none,
+            .down = if (y2 > y1) arm else .none,
+            .right = if (x1 > v_x) arm else .none,
+            .left = if (x1 < v_x) arm else .none,
+        }, crossing_style), cc);
+    }
+
+    // --- Segment 2: vertical at v_x between from_y and to_y ---
+    drawVerticalSegment(buffer, v_x, @min(y1, y2), @max(y1, y2), ec, arm, crossing_style);
+
+    // --- Junction at (v_x, to_y) ---
+    {
+        const cc = ec.at(y2);
+        const cur = buffer.get(v_x, y2);
+        buffer.setWithColor(v_x, y2, mergeJunctionWeighted(cur, .{
+            .up = if (y1 < y2) arm else .none,
+            .down = if (y1 > y2) arm else .none,
+            .right = if (x2 > v_x) arm else .none,
+            .left = if (x2 < v_x) arm else .none,
+        }, crossing_style), cc);
+    }
+
+    // --- Segment 3: horizontal at to_y from v_x to to_x ---
+    {
+        const lo_x = @min(v_x, x2);
+        const hi_x = @max(v_x, x2);
+        if (hi_x > lo_x + 1) {
+            var x = lo_x + 1;
+            while (x < hi_x) : (x += 1) {
+                drawLineCell(buffer, x, y2, false, ec.at(y2), arm, crossing_style);
+            }
+        }
+    }
+
+    // --- Arrow on horizontal segment 3 ---
+    if (!edge.reversed and edge.directed) {
+        const going_right = x2 > v_x;
+        if (going_right and x2 == 0) return;
+        if (!going_right and x2 >= buffer.width) return;
+        const arrow_x = if (going_right) x2 - 1 else x2 + 1;
+        const dir: Direction = if (going_right) .right else .left;
+        if (markerChar(marker_end, dir, arm)) |ch| {
+            if (arrow_x < buffer.width) {
+                buffer.setWithColor(arrow_x, y2, ch, ec.at(y2));
+            }
         }
     }
 }

@@ -7,14 +7,9 @@
 //! For left-right and right-left, positions are recomputed from each
 //! node's `level` (column) and `level_position` (row) metadata, with
 //! edges routed from the right side of source nodes to the left side
-//! of target nodes. The terminal renderer's `.direct` path handles
-//! horizontal, vertical, and Manhattan (L-shaped) routing automatically.
-//!
-//! Known limitation: cross-row edges in horizontal modes arrive with
-//! a vertical final segment (down-arrow instead of right-arrow). This
-//! is inherent to the core terminal renderer's Manhattan routing, which
-//! always ends with a vertical segment. The edge connectivity is correct;
-//! only the arrow glyph direction is affected.
+//! of target nodes. Same-row edges use `.direct` (straight horizontal);
+//! cross-row edges use `.h_corner` (horizontal-vertical-horizontal routing)
+//! so that arrows arrive horizontally.
 
 const std = @import("std");
 const zigraph = @import("zigraph");
@@ -67,7 +62,14 @@ fn applyLeftRight(ir: *IR) void {
             }
         }
         edge.path.deinit();
-        edge.path = .{ .direct = {} };
+        if (edge.from_y == edge.to_y) {
+            // Same row: straight horizontal line
+            edge.path = .{ .direct = {} };
+        } else {
+            // Cross-row: use H-V-H routing so the arrow arrives horizontally
+            const v_x = (edge.from_x + edge.to_x) / 2;
+            edge.path = .{ .h_corner = .{ .vertical_x = v_x } };
+        }
     }
 
     for (ir.subgraphs.items) |*sg| {
@@ -243,6 +245,46 @@ test "left_right routes edges horizontally" {
     try std.testing.expectEqual(@as(usize, 6), edge.to_x);
     try std.testing.expectEqual(@as(usize, 0), edge.to_y);
     try std.testing.expect(edge.path == .direct);
+}
+
+test "left_right cross-row edges use h_corner" {
+    const allocator = std.testing.allocator;
+    var ir = IR.init(allocator);
+    defer ir.deinit();
+
+    try ir.addNode(.{
+        .id = 1, .label = "A",
+        .x = 0, .y = 0, .width = 3, .height = 1,
+        .center_x = 1, .center_y = 0,
+        .level = 0, .level_position = 0,
+    });
+    try ir.addNode(.{
+        .id = 2, .label = "B",
+        .x = 0, .y = 3, .width = 3, .height = 1,
+        .center_x = 1, .center_y = 3,
+        .level = 1, .level_position = 1,
+    });
+    try ir.addEdge(.{
+        .from_id = 1, .to_id = 2,
+        .from_x = 1, .from_y = 1,
+        .to_x = 1, .to_y = 3,
+        .label_x = 1, .label_y = 2,
+        .path = .{ .corner = .{ .horizontal_y = 2 } },
+        .edge_index = 0,
+    });
+    ir.setDimensions(3, 4);
+
+    applyDirection(&ir, .left_right);
+
+    const edge = &ir.edges.items[0];
+    // A is at level 0, pos 0 → x=0, y=0; B is at level 1, pos 1 → x=6, y=2
+    // from_x = 0 + 3 = 3, from_y = 0, to_x = 6, to_y = 2 (row_stride=2, center_y=2)
+    try std.testing.expectEqual(@as(usize, 3), edge.from_x);
+    try std.testing.expectEqual(@as(usize, 0), edge.from_y);
+    try std.testing.expectEqual(@as(usize, 6), edge.to_x);
+    // Cross-row: from_y != to_y, so should use h_corner
+    try std.testing.expect(edge.path == .h_corner);
+    try std.testing.expectEqual(@as(usize, (3 + 6) / 2), edge.path.h_corner.vertical_x);
 }
 
 test "bottom_up flips Y axis" {

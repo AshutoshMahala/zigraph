@@ -120,6 +120,40 @@ fn renderEdgeInner(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: 
             try writeExtraAttrs(writer, style);
             try writer.writeAll("/>\n");
         },
+        .h_corner => |hc| {
+            // Horizontal-first L-shaped path (H→V→H routing)
+            const vert_x = hc.vertical_x * config.char_width + config.padding;
+            if (edge.reversed) {
+                const real_from_x = edge.from_x * config.char_width + config.padding;
+                const real_from_y = edge.from_y * config.line_height + config.padding;
+                const real_to_x = edge.to_x * config.char_width + config.padding;
+                const real_to_y = edge.to_y * config.line_height + config.padding;
+                try writer.print(
+                    \\    <path d="M {d} {d} L {d} {d} L {d} {d} L {d} {d}"
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}
+                , .{
+                    real_to_x, real_to_y,
+                    vert_x, real_to_y,
+                    vert_x, real_from_y,
+                    real_from_x, real_from_y,
+                    style.stroke, config.edge_width, dash,
+                });
+            } else {
+                try writer.print(
+                    \\    <path d="M {d} {d} L {d} {d} L {d} {d} L {d} {d}"
+                    \\          fill="none" stroke="{s}" stroke-width="{d}"{s}
+                , .{
+                    from_x, from_y,
+                    vert_x, from_y,
+                    vert_x, to_y,
+                    to_x, to_y,
+                    style.stroke, config.edge_width, dash,
+                });
+            }
+            try writeMarkerEndAttr(writer, style);
+            try writeExtraAttrs(writer, style);
+            try writer.writeAll("/>\n");
+        },
         .side_channel => |sc| {
             // Side channel routing
             const channel_x = sc.channel_x * config.char_width + config.padding;

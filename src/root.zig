@@ -908,6 +908,10 @@ fn propagateEdgeLabels(result: *LayoutIR(usize), g: *const Graph, allocator: std
                 }
                 edge_x_at_label = edge.to_x;
             },
+            .h_corner => |hc| {
+                label_y = (edge.from_y + edge.to_y) / 2;
+                edge_x_at_label = hc.vertical_x;
+            },
             .side_channel => |sc| {
                 label_y = if (sc.start_y + 1 < sc.end_y)
                     sc.start_y + 1

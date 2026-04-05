@@ -140,6 +140,7 @@ fn serializeImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord),
         switch (edge.path) {
             .direct => try writer.writeAll("{\"type\": \"direct\"}"),
             .corner => |c| try writer.print("{{\"type\": \"corner\", \"horizontal_y\": {d}}}", .{c.horizontal_y}),
+            .h_corner => |hc| try writer.print("{{\"type\": \"h_corner\", \"vertical_x\": {d}}}", .{hc.vertical_x}),
             .side_channel => |sc| try writer.print("{{\"type\": \"side_channel\", \"channel_x\": {d}, \"start_y\": {d}, \"end_y\": {d}}}", .{ sc.channel_x, sc.start_y, sc.end_y }),
             .multi_segment => |ms| {
                 try writer.writeAll("{\"type\": \"multi_segment\", \"waypoints\": [");
@@ -520,6 +521,9 @@ fn parsePath(comptime Coord: type, allocator: Allocator, val: std.json.Value) !i
     if (std.mem.eql(u8, type_str, "direct")) return .direct;
     if (std.mem.eql(u8, type_str, "corner")) {
         return .{ .corner = .{ .horizontal_y = try getInt(Coord, obj, "horizontal_y") } };
+    }
+    if (std.mem.eql(u8, type_str, "h_corner")) {
+        return .{ .h_corner = .{ .vertical_x = try getInt(Coord, obj, "vertical_x") } };
     }
     if (std.mem.eql(u8, type_str, "side_channel")) {
         return .{ .side_channel = .{

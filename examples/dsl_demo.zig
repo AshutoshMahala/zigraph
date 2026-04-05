@@ -56,6 +56,9 @@ pub fn main() !void {
         var ir = try zigraph.layout(&built.graph, allocator, built.config);
         defer ir.deinit();
 
+        // Apply direction transform (left-right, bottom-up, etc.)
+        dsl.direction.applyDirection(&ir, built.direction);
+
         // ── Terminal render ──────────────────────────────────────────────
         try stdout.writeAll("--- Terminal ---\n");
         const terminal_output = try zigraph.terminal.render(&ir, allocator);

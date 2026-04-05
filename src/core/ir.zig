@@ -90,10 +90,17 @@ pub fn EdgePath(comptime Coord: type) type {
         /// Direct vertical connection (nodes are horizontally aligned or adjacent levels)
         direct: void,
 
-        /// L-shaped connection with a horizontal segment
+        /// L-shaped connection with a horizontal segment (vertical-first, for top-down flow)
         corner: struct {
             /// Y coordinate of the horizontal segment
             horizontal_y: Coord,
+        },
+
+        /// L-shaped connection with a vertical segment (horizontal-first, for left-right flow).
+        /// Route: horizontal at from_y → vertical at vertical_x → horizontal at to_y.
+        h_corner: struct {
+            /// X coordinate of the vertical segment
+            vertical_x: Coord,
         },
 
         /// Routed through a side channel (for skip-level edges)
@@ -415,6 +422,9 @@ pub fn LayoutIR(comptime Coord: type) type {
                     .direct => .{ .direct = {} },
                     .corner => |c| .{ .corner = .{
                         .horizontal_y = coordCast(Target, Coord, c.horizontal_y),
+                    } },
+                    .h_corner => |hc| .{ .h_corner = .{
+                        .vertical_x = coordCast(Target, Coord, hc.vertical_x),
                     } },
                     .side_channel => |sc| .{ .side_channel = .{
                         .channel_x = coordCast(Target, Coord, sc.channel_x),
