@@ -735,6 +735,71 @@ fn fixupReversedEdges(result: *LayoutIR(usize), reversed_edges: ?[]const bool) v
 
 /// Step 7: Stagger horizontal_y for corner-path edges.
 ///
+/// Find a safe horizontal_y for a split edge segment, avoiding collisions
+/// with intermediate nodes. Returns a h_y in [min_h_y, max_h_y] that doesn't
+/// cross through any node (other than from_id/to_id) along the horizontal span.
+fn findSafeSplitHorizontalY(
+    initial_h_y: usize,
+    min_h_y: usize,
+    max_h_y: usize,
+    x_from: usize,
+    x_to: usize,
+    nodes: []const ir.LayoutNode(usize),
+    from_id: usize,
+    to_id: usize,
+) usize {
+    const x_lo = @min(x_from, x_to);
+    const x_hi = @max(x_from, x_to);
+
+    // Check if initial h_y is safe
+    if (!splitHorizontalCollides(initial_h_y, x_lo, x_hi, nodes, from_id, to_id)) {
+        return initial_h_y;
+    }
+    // Search outward from initial_h_y
+    var offset: usize = 1;
+    const range = if (max_h_y >= min_h_y) max_h_y - min_h_y + 1 else 1;
+    while (offset <= range) : (offset += 1) {
+        if (initial_h_y >= min_h_y + offset) {
+            const candidate = initial_h_y - offset;
+            if (candidate >= min_h_y and !splitHorizontalCollides(candidate, x_lo, x_hi, nodes, from_id, to_id)) {
+                return candidate;
+            }
+        }
+        {
+            const candidate = initial_h_y + offset;
+            if (candidate <= max_h_y and !splitHorizontalCollides(candidate, x_lo, x_hi, nodes, from_id, to_id)) {
+                return candidate;
+            }
+        }
+    }
+    return initial_h_y;
+}
+
+/// Check if a horizontal segment at h_y from x_lo..x_hi collides with any
+/// real (non-dummy) node other than from_id/to_id.
+fn splitHorizontalCollides(
+    h_y: usize,
+    x_lo: usize,
+    x_hi: usize,
+    nodes: []const ir.LayoutNode(usize),
+    from_id: usize,
+    to_id: usize,
+) bool {
+    for (nodes) |n| {
+        if (n.id == from_id or n.id == to_id) continue;
+        if (n.kind == .dummy) continue;
+        // Node visual area: [y-1, y+height] (includes arrow row above and border below)
+        const node_y_min = if (n.y > 0) n.y - 1 else 0;
+        const node_y_max = n.y + n.height;
+        if (h_y < node_y_min or h_y > node_y_max) continue;
+        // Check x overlap
+        const node_x_max = n.x + n.width;
+        if (x_hi < n.x or x_lo > node_x_max) continue;
+        return true;
+    }
+    return false;
+}
+
 /// Groups corner edges by from_y, then sorts each group so that edges
 /// reaching farthest horizontally exit closest to the source node (lowest
 /// h_y / slot 0). This reduces edge crossings: wide-spanning edges clear
@@ -783,7 +848,19 @@ fn staggerCornerEdges(result: *LayoutIR(usize)) void {
             edges[i].to_y - edges[i].from_y - 1
         else
             1;
-        edges[i].path.corner.horizontal_y = edges[i].from_y + (slot % available);
+        const initial_h_y = edges[i].from_y + (slot % available);
+        const min_h_y = edges[i].from_y + 1;
+        const max_h_y = if (edges[i].to_y > 1) edges[i].to_y - 1 else min_h_y;
+        edges[i].path.corner.horizontal_y = findSafeSplitHorizontalY(
+            initial_h_y,
+            if (min_h_y <= max_h_y) min_h_y else initial_h_y,
+            if (max_h_y >= min_h_y) max_h_y else initial_h_y,
+            edges[i].from_x,
+            edges[i].to_x,
+            result.nodes.items,
+            edges[i].from_id,
+            edges[i].to_id,
+        );
     }
 }
 
@@ -1256,15 +1333,11 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
                 // Get position from virtual positions
                 const x = virtual_positions.x.items[level_idx].items[pos_in_level];
                 // Use per-level Y from real_positions (already accounts for variable heights)
-                var y = if (level_idx < real_positions.level_y.len)
+                // NOTE: level_y already includes cumulative_y from Step 4d, so do NOT add it again
+                const y = if (level_idx < real_positions.level_y.len)
                     real_positions.level_y[level_idx]
                 else
                     level_idx * (1 + effective_level_spacing);
-
-                // Apply subgraph y-offset for this level
-                if (cumulative_y.len > 0 and level_idx < cumulative_y.len) {
-                    y += cumulative_y[level_idx];
-                }
 
                 const dummy_id = dummy_id_base + edge_idx * dummy_id_edge_stride + level_idx;
 
@@ -1347,8 +1420,21 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
                         // Determine path type based on x alignment
                         const edge_path: ir.EdgePath(usize) = if (prev_x == dummy_node.center_x)
                             .direct
-                        else
-                            .{ .corner = .{ .horizontal_y = prev_y + 1 } };
+                        else blk: {
+                            const min_h_y = prev_y + 1;
+                            const max_h_y = if (dummy_node.y > 1) dummy_node.y - 1 else min_h_y;
+                            const h_y = findSafeSplitHorizontalY(
+                                min_h_y,
+                                min_h_y,
+                                max_h_y,
+                                prev_x,
+                                dummy_node.center_x,
+                                result.nodes.items,
+                                prev_id,
+                                dummy_id,
+                            );
+                            break :blk .{ .corner = .{ .horizontal_y = h_y } };
+                        };
 
                         // Add edge from prev to dummy
                         try result.addEdge(.{
@@ -1373,8 +1459,21 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
                 // Final segment from last dummy to target
                 const final_path: ir.EdgePath(usize) = if (prev_x == edge.to_x)
                     .direct
-                else
-                    .{ .corner = .{ .horizontal_y = prev_y + 1 } };
+                else blk: {
+                    const min_h_y = prev_y + 1;
+                    const max_h_y = if (edge.to_y > 1) edge.to_y - 1 else min_h_y;
+                    const h_y = findSafeSplitHorizontalY(
+                        min_h_y,
+                        min_h_y,
+                        max_h_y,
+                        prev_x,
+                        edge.to_x,
+                        result.nodes.items,
+                        prev_id,
+                        edge.to_id,
+                    );
+                    break :blk .{ .corner = .{ .horizontal_y = h_y } };
+                };
 
                 // Add final segment from last dummy to target
                 try result.addEdge(.{

@@ -66,12 +66,18 @@ pub fn route(
             // Reserve 1 row above target for the arrow marker
             const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
             const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
-            const h_y = from_y_edge + (slot % available);
+            const initial_h_y = from_y_edge + (slot % available);
+            const x_lo = @min(from_node.center_x, to_node.center_x);
+            const x_hi = @max(from_node.center_x, to_node.center_x);
+            const h_y = findSafeHorizontalY(initial_h_y, from_y_edge, max_h_y, x_lo, x_hi, nodes, edge.from, edge.to);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         } else blk: {
             const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
             const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
-            const h_y = from_y_edge + (slot % available);
+            const initial_h_y = from_y_edge + (slot % available);
+            const x_lo = @min(from_node.center_x, to_node.center_x);
+            const x_hi = @max(from_node.center_x, to_node.center_x);
+            const h_y = findSafeHorizontalY(initial_h_y, from_y_edge, max_h_y, x_lo, x_hi, nodes, edge.from, edge.to);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         };
 
@@ -197,7 +203,10 @@ pub fn routeWithDummies(
             // don't all land on the same row — reserve 1 row above target for arrows
             const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
             const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
-            const h_y = from_y_edge + (slot % available);
+            const initial_h_y = from_y_edge + (slot % available);
+            const x_lo = @min(from_node.center_x, to_node.center_x);
+            const x_hi = @max(from_node.center_x, to_node.center_x);
+            const h_y = findSafeHorizontalY(initial_h_y, from_y_edge, max_h_y, x_lo, x_hi, nodes, edge_from, edge_to);
             break :blk .{ .corner = .{ .horizontal_y = h_y } };
         };
 
@@ -215,6 +224,69 @@ pub fn routeWithDummies(
     }
 
     return edges;
+}
+
+// ============================================================================
+// Node-collision avoidance for horizontal edge segments
+// ============================================================================
+
+/// Check if placing a horizontal edge segment at `h_y` from x_lo..x_hi
+/// would visually collide with any node (excluding the edge's own source/target).
+fn horizontalCollidesWithNode(
+    h_y: usize,
+    x_lo: usize,
+    x_hi: usize,
+    nodes: []const LayoutNode,
+    from_id: usize,
+    to_id: usize,
+) bool {
+    for (nodes) |n| {
+        if (n.id == from_id or n.id == to_id) continue;
+        if (n.kind == .dummy) continue;
+        // Node's visual area: [y-1, y+height-1] (includes arrow row above)
+        const node_y_min = if (n.y > 0) n.y - 1 else 0;
+        const node_y_max = n.y + n.height;
+        if (h_y < node_y_min or h_y > node_y_max) continue;
+        // Check x overlap
+        const node_x_max = n.x + n.width;
+        if (x_hi < n.x or x_lo > node_x_max) continue;
+        return true;
+    }
+    return false;
+}
+
+/// Find a safe h_y that doesn't collide with any intermediate nodes.
+/// Starts from the initial h_y and searches outward within the valid range.
+fn findSafeHorizontalY(
+    initial_h_y: usize,
+    min_h_y: usize,
+    max_h_y: usize,
+    x_lo: usize,
+    x_hi: usize,
+    nodes: []const LayoutNode,
+    from_id: usize,
+    to_id: usize,
+) usize {
+    if (!horizontalCollidesWithNode(initial_h_y, x_lo, x_hi, nodes, from_id, to_id)) {
+        return initial_h_y;
+    }
+    var offset: usize = 1;
+    const range = if (max_h_y >= min_h_y) max_h_y - min_h_y + 1 else 1;
+    while (offset <= range) : (offset += 1) {
+        if (initial_h_y >= min_h_y + offset) {
+            const candidate = initial_h_y - offset;
+            if (candidate >= min_h_y and !horizontalCollidesWithNode(candidate, x_lo, x_hi, nodes, from_id, to_id)) {
+                return candidate;
+            }
+        }
+        {
+            const candidate = initial_h_y + offset;
+            if (candidate <= max_h_y and !horizontalCollidesWithNode(candidate, x_lo, x_hi, nodes, from_id, to_id)) {
+                return candidate;
+            }
+        }
+    }
+    return initial_h_y;
 }
 
 // ============================================================================
