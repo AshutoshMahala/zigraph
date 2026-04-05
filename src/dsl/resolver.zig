@@ -500,6 +500,14 @@ pub fn resolve(
         block_config = Resolver.resolveConfig(block_config, blk.directives);
 
         const resolved = try block_resolver.resolveStatements(blk.statements);
+
+        // [card] blocks: default all rect nodes to card shape
+        if (block_config.layout == .card) {
+            for (resolved.nodes) |*node| {
+                if (node.shape == .rect) node.shape = .card;
+            }
+        }
+
         try blocks_list.append(allocator, .{
             .name      = blk.name,
             .config    = block_config,
@@ -704,4 +712,24 @@ test "resolve card fields produce card shape" {
     const node = blk.nodes[0];
     try std.testing.expectEqual(ast.Shape.card, node.shape);
     try std.testing.expect(node.card_fields != null);
+}
+
+test "card block defaults all nodes to card shape" {
+    const src = "services [card] {\n  Auth\n  Gateway\n  DB\n}";
+    const out = try testResolve(src);
+    defer freeAstDoc(out.doc);
+    defer freeResolveResult(out.result);
+    defer @constCast(&out.err_list).deinit();
+
+    try std.testing.expect(!out.err_list.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), out.result.blocks.len);
+
+    const blk = out.result.blocks[0];
+    try std.testing.expectEqualStrings("services", blk.name);
+    try std.testing.expectEqual(ast.Layout.card, blk.config.layout);
+    try std.testing.expectEqual(@as(usize, 3), blk.nodes.len);
+
+    for (blk.nodes) |node| {
+        try std.testing.expectEqual(ast.Shape.card, node.shape);
+    }
 }
