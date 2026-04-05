@@ -805,4 +805,33 @@ pub fn build(b: *std.Build) void {
         const individual = b.step(step_name, ex.desc);
         individual.dependOn(&run.step);
     }
+
+    // CLI executable
+    const dsl_mod = b.createModule(.{
+        .root_source_file = b.path("src/dsl/mod.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+        },
+    });
+
+    const cli_exe = b.addExecutable(.{
+        .name = "zigraph",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cli/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+                .{ .name = "dsl", .module = dsl_mod },
+            },
+        }),
+    });
+    b.installArtifact(cli_exe);
+
+    const run_cli = b.addRunArtifact(cli_exe);
+    if (b.args) |a| run_cli.addArgs(a);
+    const run_cli_step = b.step("run-cli", "Run the zigraph CLI");
+    run_cli_step.dependOn(&run_cli.step);
 }
