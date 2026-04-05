@@ -77,6 +77,7 @@ pub const subgraph_presets = config_mod.subgraph_presets;
 pub const node_presets = config_mod.node_presets;
 
 pub const Buffer2D = buffer_mod.Buffer2D;
+pub const table = @import("table.zig");
 pub const LegendEntry = label_render.LegendEntry;
 
 // Junction constants + functions (used by tests and advanced consumers)
