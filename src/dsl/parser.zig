@@ -643,6 +643,9 @@ pub const Parser = struct {
             if (std.mem.eql(u8, tok.text, "theme"))     break :blk ast.DirectiveKind.theme;
             if (std.mem.eql(u8, tok.text, "direction")) break :blk ast.DirectiveKind.direction;
             if (std.mem.eql(u8, tok.text, "spacing"))   break :blk ast.DirectiveKind.spacing;
+            if (std.mem.eql(u8, tok.text, "import"))    break :blk ast.DirectiveKind.import_;
+            if (std.mem.eql(u8, tok.text, "border"))    break :blk ast.DirectiveKind.border;
+            if (std.mem.eql(u8, tok.text, "align"))     break :blk ast.DirectiveKind.align_;
             try self.err_list.add(tok.loc, .unknown_directive, "unknown directive");
             return error.ParseError;
         };
@@ -1258,4 +1261,32 @@ test "parse table block" {
 
     try std.testing.expect(block.statements[2] == .table_row);
     try std.testing.expectEqualStrings("in progress", block.statements[2].table_row.fields[2]);
+}
+
+test "parse @import directive" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const source =
+        \\@import "styles.zgraph"
+        \\A -> B
+    ;
+    const tokens = try tokenizer.tokenize(allocator, source, &err_list);
+    defer allocator.free(tokens);
+    var p = Parser.init(allocator, tokens, &err_list);
+    const doc = try p.parse();
+    defer {
+        allocator.free(doc.directives);
+        for (doc.styles) |sr| allocator.free(sr.properties.properties);
+        allocator.free(doc.styles);
+        for (doc.statements) |stmt| freeStatement(stmt);
+        allocator.free(doc.statements);
+        for (doc.blocks) |blk| freeBlock(blk);
+        allocator.free(doc.blocks);
+        allocator.free(doc.vars);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), doc.directives.len);
+    try std.testing.expectEqual(ast.DirectiveKind.import_, doc.directives[0].kind);
+    try std.testing.expectEqualStrings("styles.zgraph", doc.directives[0].value);
 }
