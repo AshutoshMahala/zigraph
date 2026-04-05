@@ -9,6 +9,7 @@ pub const markdown = @import("markdown.zig");
 pub const errors = @import("errors.zig");
 pub const direction = @import("direction.zig");
 pub const tree_bridge = @import("tree_bridge.zig");
+pub const imports = @import("imports.zig");
 pub const BuiltGraph = bridge.BuiltGraph;
 
 pub const ParseResult = struct {
@@ -174,4 +175,5 @@ test {
     _ = errors;
     _ = direction;
     _ = tree_bridge;
+    _ = imports;
 }
