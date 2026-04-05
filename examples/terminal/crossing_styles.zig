@@ -28,10 +28,6 @@ pub fn main() !void {
         \\
     , .{});
 
-    // Build a K₃,₃-like graph where edge crossings are unavoidable.
-    // Top layer: A, B, C — Bottom layer: D, E, F
-    // Cross-edges force at least one visual crossing in the rendered output.
-
     const styles = [_]struct {
         name: []const u8,
         style: zigraph.terminal.CrossingStyle,
@@ -47,23 +43,19 @@ pub fn main() !void {
         var g = zigraph.Graph.init(allocator);
         defer g.deinit();
 
-        // Top layer
         try g.addNode(1, "A");
         try g.addNode(2, "B");
         try g.addNode(3, "C");
-        // Bottom layer
         try g.addNode(4, "D");
         try g.addNode(5, "E");
         try g.addNode(6, "F");
 
-        // Straight edges to anchor positions
-        try g.addDiEdge(1, 4); // A→D (left to left)
-        try g.addDiEdge(2, 5); // B→E (center to center)
-        try g.addDiEdge(3, 6); // C→F (right to right)
-
-        // Cross-edges that must cross the straight edges
-        try g.addDiEdge(1, 6); // A→F (left to right, crosses B→E and C→F)
-        try g.addDiEdge(3, 4); // C→D (right to left, crosses B→E and A→D)
+        // Straight edges anchor positions; cross-edges force crossings.
+        try g.addDiEdge(1, 4);
+        try g.addDiEdge(2, 5);
+        try g.addDiEdge(3, 6);
+        try g.addDiEdge(1, 6); // A→F crosses B→E
+        try g.addDiEdge(3, 4); // C→D crosses B→E
 
         var ir = try zigraph.layout(&g, allocator, .{});
         defer ir.deinit();

@@ -292,7 +292,6 @@ pub fn serializeBuffer(buffer: *const Buffer2D, writer: anytype, config: Config,
                 }
             }
 
-            // Convert gap-crossing sentinel (U+2060) to a visible space.
             const out_cp: u21 = if (codepoint == 0x2060) ' ' else codepoint;
             var enc_buf: [4]u8 = undefined;
             const len = std.unicode.utf8Encode(out_cp, &enc_buf) catch 1;
@@ -707,7 +706,6 @@ fn emitHtmlBgColor(writer: anytype, cc: CellColor) !void {
 
 /// Emit a single Unicode codepoint as HTML-safe UTF-8.
 fn emitHtmlChar(writer: anytype, cp: u21) !void {
-    // Convert gap-crossing sentinel (U+2060) to a visible space.
     const c = if (cp == 0x2060) @as(u21, ' ') else cp;
     switch (c) {
         '<' => try writer.writeAll("&lt;"),

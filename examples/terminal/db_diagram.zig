@@ -201,7 +201,7 @@ pub fn main() !void {
     // ── Z1: Paint edges (route lines between levels) ──────────────────────────
 
     for (plan.edge_plans) |ep| {
-        T.paintEdge(&buf, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start);
+        T.paintEdge(&buf, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start, .flat);
     }
 
     // ── Z4: Paint header boxes (overwrites edge markers inside box footprint) ─
@@ -387,7 +387,7 @@ pub fn main() !void {
         e.to_y = edge.to_y -| min_y2;
         e.label_x = edge.label_x -| min_x2;
         e.label_y = edge.label_y -| min_y2;
-        T.paintEdge(&buf2, &e, EDGE_COLOR, .light, .arrow, .none);
+        T.paintEdge(&buf2, &e, EDGE_COLOR, .light, .arrow, .none, .flat);
     }
 
     // Shared header style (same colour palette as Sugiyama section)

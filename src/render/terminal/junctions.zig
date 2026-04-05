@@ -644,9 +644,7 @@ fn lookupCrossing(u: ArmWeight, d: ArmWeight, l: ArmWeight, r: ArmWeight) u21 {
 pub fn mergeJunctionWeighted(current: u21, new_dirs: DirWeights, crossing_style: @import("config.zig").CrossingStyle) u21 {
     if (isMarkerChar(current)) return current;
 
-    // Preserve crossing indicators already placed by a prior edge.
-    // Arc (⌒) and gap (U+2060 word joiner sentinel) are sticky: once a
-    // 4-way crossing is detected and marked, later edges must not overwrite it.
+    // Crossing indicators are sticky — don't overwrite with later edges.
     if (current == 0x2312 or current == 0x2060) return current;
 
     const existing = decomposeChar(current);
@@ -661,7 +659,7 @@ pub fn mergeJunctionWeighted(current: u21, new_dirs: DirWeights, crossing_style:
         if (eu != .none and ed != .none and el != .none and er != .none) {
             return switch (crossing_style) {
                 .arc => 0x2312, // ⌒
-                .gap => 0x2060, // word joiner sentinel (rendered as space)
+                .gap => 0x2060, // sentinel, rendered as space
                 .flat => unreachable,
             };
         }
