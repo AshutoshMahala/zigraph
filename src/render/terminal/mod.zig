@@ -78,6 +78,7 @@ pub const subgraph_presets = config_mod.subgraph_presets;
 pub const node_presets = config_mod.node_presets;
 
 pub const Buffer2D = buffer_mod.Buffer2D;
+pub const table = @import("table.zig");
 pub const LegendEntry = label_render.LegendEntry;
 
 // Junction constants + functions (used by tests and advanced consumers)
@@ -171,6 +172,7 @@ comptime {
     _ = @import("tree_tests.zig");
     _ = @import("card.zig");
     _ = @import("card_tests.zig");
+    _ = @import("table_tests.zig");
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
