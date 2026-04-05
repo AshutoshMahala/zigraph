@@ -720,9 +720,12 @@ pub const Parser = struct {
             self.advance(); // consume `[`
             const lt_tok = self.peek();
             if (lt_tok.kind == .identifier) {
-                if (std.mem.eql(u8, lt_tok.text, "dag"))   layout = .dag
+                if (std.mem.eql(u8, lt_tok.text, "dag"))        layout = .dag
                 else if (std.mem.eql(u8, lt_tok.text, "tree"))  layout = .tree
                 else if (std.mem.eql(u8, lt_tok.text, "force")) layout = .force
+                else if (std.mem.eql(u8, lt_tok.text, "card"))  layout = .card
+                else if (std.mem.eql(u8, lt_tok.text, "table")) layout = .table
+                else if (std.mem.eql(u8, lt_tok.text, "flow"))  layout = .flow
                 else try self.err_list.add(lt_tok.loc, .unknown_layout_type, "unknown layout type");
                 self.advance();
             }
@@ -735,6 +738,23 @@ pub const Parser = struct {
             return error.ParseError;
         }
         self.advance();
+
+        // Table blocks use a dedicated body parser
+        if (layout != null and layout.? == .table) {
+            const table_stmts = try self.parseTableBody();
+            var empty_dirs: std.ArrayListUnmanaged(ast.Directive) = .{};
+            var empty_stys: std.ArrayListUnmanaged(ast.StyleRule) = .{};
+            var empty_vars: std.ArrayListUnmanaged(ast.Property) = .{};
+            return ast.NamedBlock{
+                .name       = name_tok.text,
+                .layout     = layout,
+                .directives = try empty_dirs.toOwnedSlice(self.allocator),
+                .styles     = try empty_stys.toOwnedSlice(self.allocator),
+                .statements = table_stmts,
+                .vars       = try empty_vars.toOwnedSlice(self.allocator),
+                .loc        = loc,
+            };
+        }
 
         var directives: std.ArrayListUnmanaged(ast.Directive) = .{};
         var styles: std.ArrayListUnmanaged(ast.StyleRule) = .{};
@@ -794,6 +814,75 @@ pub const Parser = struct {
             .vars       = try block_vars.toOwnedSlice(self.allocator),
             .loc        = loc,
         };
+    }
+
+    // ---------- table body ----------
+
+    fn parseTableBody(self: *Parser) anyerror![]ast.Statement {
+        var stmts: std.ArrayListUnmanaged(ast.Statement) = .{};
+
+        self.skipNewlines();
+        while (self.peek().kind != .rbrace and self.peek().kind != .eof) {
+            self.skipNewlines();
+            if (self.peek().kind == .rbrace or self.peek().kind == .eof) break;
+            if (self.peek().kind == .comment) { self.advance(); continue; }
+
+            const tok = self.peek();
+            if (tok.kind != .identifier) {
+                try self.err_list.add(tok.loc, .unexpected_token, "expected 'headers' or 'row' in table block");
+                self.advance();
+                continue;
+            }
+
+            if (std.mem.eql(u8, tok.text, "headers") and self.peekAt(1).kind == .colon) {
+                const stmt_loc = tok.loc;
+                self.advance(); // consume "headers"
+                self.advance(); // consume ":"
+                const fields = try self.parseCommaSeparatedValues();
+                try stmts.append(self.allocator, .{ .table_headers = .{ .fields = fields, .loc = stmt_loc } });
+            } else if (std.mem.eql(u8, tok.text, "row") and self.peekAt(1).kind == .colon) {
+                const stmt_loc = tok.loc;
+                self.advance(); // consume "row"
+                self.advance(); // consume ":"
+                const fields = try self.parseCommaSeparatedValues();
+                try stmts.append(self.allocator, .{ .table_row = .{ .fields = fields, .loc = stmt_loc } });
+            } else {
+                try self.err_list.add(tok.loc, .unexpected_token, "expected 'headers' or 'row' in table block");
+                self.advance();
+            }
+
+            self.skipNewlines();
+        }
+
+        if (self.peek().kind == .rbrace) {
+            self.advance();
+        } else {
+            try self.err_list.add(self.peek().loc, .unterminated_block, "unterminated table block");
+        }
+
+        return stmts.toOwnedSlice(self.allocator);
+    }
+
+    fn parseCommaSeparatedValues(self: *Parser) anyerror![]const []const u8 {
+        var values: std.ArrayListUnmanaged([]const u8) = .{};
+
+        while (true) {
+            const tok = self.peek();
+            if (tok.kind == .newline or tok.kind == .eof or tok.kind == .rbrace) break;
+            if (tok.kind == .comma) {
+                self.advance();
+                continue;
+            }
+            if (tok.kind == .identifier or tok.kind == .string) {
+                try values.append(self.allocator, tok.text);
+                self.advance();
+                continue;
+            }
+            // skip unexpected tokens
+            self.advance();
+        }
+
+        return values.toOwnedSlice(self.allocator);
     }
 
     // ---------- vars block ----------
@@ -901,7 +990,9 @@ fn freeStatement(stmt: ast.Statement) void {
             std.testing.allocator.free(sg.statements);
             if (sg.properties) |pb| std.testing.allocator.free(pb.properties);
         },
-        .table_headers, .table_row, .vars_block => {},
+        .table_headers => |th| std.testing.allocator.free(th.fields),
+        .table_row     => |tr| std.testing.allocator.free(tr.fields),
+        .vars_block    => {},
     }
 }
 
@@ -1122,4 +1213,49 @@ test "parse vars block" {
     try std.testing.expectEqualStrings("db", doc.vars[1].key);
     try std.testing.expectEqualStrings("PostgreSQL", doc.vars[1].value);
     try std.testing.expectEqual(@as(usize, 1), doc.statements.len);
+}
+
+test "parse table block" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const source =
+        \\metrics [table] {
+        \\  headers: ID, Name, Status
+        \\  row: 1, Parser, done
+        \\  row: 2, Resolver, "in progress"
+        \\}
+    ;
+    const tokens = try tokenizer.tokenize(allocator, source, &err_list);
+    defer allocator.free(tokens);
+    var p = Parser.init(allocator, tokens, &err_list);
+    const doc = try p.parse();
+    defer {
+        allocator.free(doc.directives);
+        for (doc.styles) |sr| allocator.free(sr.properties.properties);
+        allocator.free(doc.styles);
+        for (doc.statements) |stmt| freeStatement(stmt);
+        allocator.free(doc.statements);
+        for (doc.blocks) |blk| freeBlock(blk);
+        allocator.free(doc.blocks);
+        allocator.free(doc.vars);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), doc.blocks.len);
+    const block = doc.blocks[0];
+    try std.testing.expectEqualStrings("metrics", block.name);
+    try std.testing.expect(block.layout != null);
+    try std.testing.expectEqual(ast.Layout.table, block.layout.?);
+
+    // Should have 3 statements: 1 headers + 2 rows
+    try std.testing.expectEqual(@as(usize, 3), block.statements.len);
+    try std.testing.expect(block.statements[0] == .table_headers);
+    try std.testing.expectEqual(@as(usize, 3), block.statements[0].table_headers.fields.len);
+    try std.testing.expectEqualStrings("ID", block.statements[0].table_headers.fields[0]);
+
+    try std.testing.expect(block.statements[1] == .table_row);
+    try std.testing.expectEqualStrings("1", block.statements[1].table_row.fields[0]);
+
+    try std.testing.expect(block.statements[2] == .table_row);
+    try std.testing.expectEqualStrings("in progress", block.statements[2].table_row.fields[2]);
 }
