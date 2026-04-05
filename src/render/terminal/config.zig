@@ -42,6 +42,13 @@ pub const CharSet = enum {
     ascii, // ASCII fallback:                     + - + | + + + + + + +
 };
 
+/// Crossing style for edge intersections.
+pub const CrossingStyle = enum {
+    flat, // ┼ (default, current behavior)
+    arc, // ⌒ (horizontal hops over vertical)
+    gap, // space (horizontal breaks at crossing)
+};
+
 /// Output serialization format.
 pub const OutputFormat = enum {
     raw, // Plain text with optional ANSI escapes (terminal output)
@@ -381,6 +388,9 @@ pub const Config = struct {
 
     /// Character set for output. `.ascii` maps box-drawing to ASCII equivalents.
     char_set: CharSet = .unicode,
+
+    /// How to render edge crossings (4-way intersections).
+    crossing_style: CrossingStyle = .flat,
 
     /// Serialization format. `.html_pre` emits styled HTML instead of ANSI escapes.
     output_format: OutputFormat = .raw,

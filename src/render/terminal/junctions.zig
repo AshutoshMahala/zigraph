@@ -250,6 +250,8 @@ pub fn toAscii(cp: u21) u21 {
         '\u{25C6}', '\u{25C7}' => '*', // ◆ ◇
         '\u{25CF}', '\u{25CB}' => 'o', // ● ○
         0x21BA => '@', // ↺ self-loop (@ suggests circular/self-referencing)
+        0x2312 => '+', // ⌒ (arc crossing)
+        0x2060 => ' ', // gap crossing sentinel
         else => blk: {
             // Box-drawing: decompose into directional arm weights
             const dw = decomposeChar(cp);
@@ -639,13 +641,31 @@ fn lookupCrossing(u: ArmWeight, d: ArmWeight, l: ArmWeight, r: ArmWeight) u21 {
 /// Backward compatibility: the old `mergeJunction(current, from_above, to_below,
 /// to_right, to_left)` signature is preserved below as a wrapper that assumes
 /// `.light` weight.
-pub fn mergeJunctionWeighted(current: u21, new_dirs: DirWeights) u21 {
-    // Protect marker chars: if the cell is a marker, don't merge over it.
+pub fn mergeJunctionWeighted(current: u21, new_dirs: DirWeights, crossing_style: @import("config.zig").CrossingStyle) u21 {
     if (isMarkerChar(current)) return current;
+
+    // Crossing indicators are sticky — don't overwrite with later edges.
+    if (current == 0x2312 or current == 0x2060) return current;
 
     const existing = decomposeChar(current);
     const merged = existing.mergeWith(new_dirs);
-    return lookupChar(merged);
+    const ch = lookupChar(merged);
+
+    if (crossing_style != .flat) {
+        const eu = merged.up.effective();
+        const ed = merged.down.effective();
+        const el = merged.left.effective();
+        const er = merged.right.effective();
+        if (eu != .none and ed != .none and el != .none and er != .none) {
+            return switch (crossing_style) {
+                .arc => 0x2312, // ⌒
+                .gap => 0x2060, // sentinel, rendered as space
+                .flat => unreachable,
+            };
+        }
+    }
+
+    return ch;
 }
 
 /// Legacy mergeJunction — assumes light weight for all new arms.
@@ -656,7 +676,7 @@ pub fn mergeJunction(current: u21, from_above: bool, to_below: bool, to_right: b
         .down = if (to_below) .light else .none,
         .right = if (to_right) .light else .none,
         .left = if (to_left) .light else .none,
-    });
+    }, .flat);
 }
 
 /// Legacy mergeWithDoubleLine — kept for backward compatibility.

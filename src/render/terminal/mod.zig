@@ -61,6 +61,7 @@ pub const LabelPosition = config_mod.LabelPosition;
 pub const Color = config_mod.Color;
 pub const ColorMode = config_mod.ColorMode;
 pub const CharSet = config_mod.CharSet;
+pub const CrossingStyle = config_mod.CrossingStyle;
 pub const OutputFormat = config_mod.OutputFormat;
 pub const CellColor = config_mod.CellColor;
 pub const resolveColor = config_mod.resolveColor;
@@ -291,8 +292,9 @@ pub fn serializeBuffer(buffer: *const Buffer2D, writer: anytype, config: Config,
                 }
             }
 
+            const out_cp: u21 = if (codepoint == 0x2060) ' ' else codepoint;
             var enc_buf: [4]u8 = undefined;
-            const len = std.unicode.utf8Encode(codepoint, &enc_buf) catch 1;
+            const len = std.unicode.utf8Encode(out_cp, &enc_buf) catch 1;
             try writer.writeAll(enc_buf[0..len]);
         }
 
@@ -334,7 +336,7 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
 
     // Z1: Paint edges
     for (plan.edge_plans) |ep| {
-        edge_render.paintEdge(&buffer, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start);
+        edge_render.paintEdge(&buffer, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start, config.crossing_style);
     }
 
     // Z2: Dummy node cleanup
@@ -483,8 +485,10 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
                         }
                     }
 
+                    // Convert gap-crossing sentinel (U+2060) to a visible space.
+                    const out_cp: u21 = if (codepoint == 0x2060) ' ' else codepoint;
                     var buf: [4]u8 = undefined;
-                    const len = std.unicode.utf8Encode(codepoint, &buf) catch 1;
+                    const len = std.unicode.utf8Encode(out_cp, &buf) catch 1;
                     try writer.writeAll(buf[0..len]);
                 }
 
@@ -702,7 +706,8 @@ fn emitHtmlBgColor(writer: anytype, cc: CellColor) !void {
 
 /// Emit a single Unicode codepoint as HTML-safe UTF-8.
 fn emitHtmlChar(writer: anytype, cp: u21) !void {
-    switch (cp) {
+    const c = if (cp == 0x2060) @as(u21, ' ') else cp;
+    switch (c) {
         '<' => try writer.writeAll("&lt;"),
         '>' => try writer.writeAll("&gt;"),
         '&' => try writer.writeAll("&amp;"),
@@ -710,7 +715,7 @@ fn emitHtmlChar(writer: anytype, cp: u21) !void {
         '\'' => try writer.writeAll("&#39;"),
         else => {
             var buf: [4]u8 = undefined;
-            const len = std.unicode.utf8Encode(cp, &buf) catch 1;
+            const len = std.unicode.utf8Encode(c, &buf) catch 1;
             try writer.writeAll(buf[0..len]);
         },
     }
