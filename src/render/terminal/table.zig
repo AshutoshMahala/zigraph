@@ -176,7 +176,9 @@ fn renderBorderless(
     col_widths: []const usize,
 ) !void {
     if (headers) |h| {
+        if (config.header_attrs.bold) try writer.writeAll("\x1b[1m");
         try writeRow(h, writer, config, col_widths, false);
+        if (config.header_attrs.bold) try writer.writeAll("\x1b[0m");
     }
     for (rows) |row| {
         try writeRow(row, writer, config, col_widths, false);
@@ -272,8 +274,10 @@ fn renderBordered(
     try writeHorizontalRule(writer, bc.tl, bc.th, bc.tt, bc.tr, col_widths);
 
     if (headers) |h| {
-        // Header row
+        // Header row – apply header_attrs (bold, etc.) around the row
+        if (config.header_attrs.bold) try writer.writeAll("\x1b[1m");
         try writeRow(h, writer, config, col_widths, true);
+        if (config.header_attrs.bold) try writer.writeAll("\x1b[0m");
         // Header separator
         try writeHorizontalRule(writer, bc.ml, bc.mh, bc.mt, bc.mr, col_widths);
     }
@@ -476,13 +480,19 @@ fn paintDataRowIntoBuffer(
         if (bordered) {
             buffer.set(x, y, ' ');
             x += 1;
-            // Paint cell with alignment
-            const len = cell.len;
-            const pad = if (len < width) width - len else 0;
+            // Paint cell with alignment (iterate UTF-8 codepoints, not bytes)
+            const cell_view = std.unicode.Utf8View.initUnchecked(cell);
+            var cp_count: usize = 0;
+            {
+                var it = cell_view.iterator();
+                while (it.nextCodepoint() != null) cp_count += 1;
+            }
+            const pad = if (cp_count < width) width - cp_count else 0;
             switch (align_) {
                 .left => {
-                    for (cell) |byte| {
-                        buffer.set(x, y, @as(u21, byte));
+                    var it = cell_view.iterator();
+                    while (it.nextCodepoint()) |cp| {
+                        buffer.set(x, y, cp);
                         x += 1;
                     }
                     var sp: usize = 0;
@@ -497,8 +507,9 @@ fn paintDataRowIntoBuffer(
                         buffer.set(x, y, ' ');
                         x += 1;
                     }
-                    for (cell) |byte| {
-                        buffer.set(x, y, @as(u21, byte));
+                    var it = cell_view.iterator();
+                    while (it.nextCodepoint()) |cp| {
+                        buffer.set(x, y, cp);
                         x += 1;
                     }
                 },
@@ -510,8 +521,9 @@ fn paintDataRowIntoBuffer(
                         buffer.set(x, y, ' ');
                         x += 1;
                     }
-                    for (cell) |byte| {
-                        buffer.set(x, y, @as(u21, byte));
+                    var it = cell_view.iterator();
+                    while (it.nextCodepoint()) |cp| {
+                        buffer.set(x, y, cp);
                         x += 1;
                     }
                     sp = 0;
@@ -530,18 +542,58 @@ fn paintDataRowIntoBuffer(
             }
             x += 1;
         } else {
-            for (cell) |byte| {
-                buffer.set(x, y, @as(u21, byte));
-                x += 1;
+            // Borderless: apply alignment the same way as the bordered branch
+            const cell_view = std.unicode.Utf8View.initUnchecked(cell);
+            var cp_count: usize = 0;
+            {
+                var it = cell_view.iterator();
+                while (it.nextCodepoint() != null) cp_count += 1;
             }
-            // Pad to column width
-            const len = cell.len;
-            if (len < width) {
-                var sp: usize = 0;
-                while (sp < width - len) : (sp += 1) {
-                    buffer.set(x, y, ' ');
-                    x += 1;
-                }
+            const pad = if (cp_count < width) width - cp_count else 0;
+            switch (align_) {
+                .left => {
+                    var it = cell_view.iterator();
+                    while (it.nextCodepoint()) |cp| {
+                        buffer.set(x, y, cp);
+                        x += 1;
+                    }
+                    var sp: usize = 0;
+                    while (sp < pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                },
+                .right => {
+                    var sp: usize = 0;
+                    while (sp < pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                    var it = cell_view.iterator();
+                    while (it.nextCodepoint()) |cp| {
+                        buffer.set(x, y, cp);
+                        x += 1;
+                    }
+                },
+                .center => {
+                    const left_pad = pad / 2;
+                    const right_pad = pad - left_pad;
+                    var sp: usize = 0;
+                    while (sp < left_pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                    var it = cell_view.iterator();
+                    while (it.nextCodepoint()) |cp| {
+                        buffer.set(x, y, cp);
+                        x += 1;
+                    }
+                    sp = 0;
+                    while (sp < right_pad) : (sp += 1) {
+                        buffer.set(x, y, ' ');
+                        x += 1;
+                    }
+                },
             }
             if (c + 1 < ncols) {
                 buffer.set(x, y, ' ');
@@ -571,6 +623,9 @@ fn paintBorderedIntoBuffer(
     y += 1;
 
     if (headers) |h| {
+        // NOTE: header_attrs (bold, etc.) are applied in the streaming/string
+        // rendering path but not here — Buffer2D stores raw codepoints and does
+        // not support ANSI text attributes.
         paintDataRowIntoBuffer(buffer, ox, y, h, config, col_widths, true);
         y += 1;
         x = ox;
