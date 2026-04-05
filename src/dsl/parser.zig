@@ -114,6 +114,7 @@ pub const Parser = struct {
         var styles: std.ArrayListUnmanaged(ast.StyleRule) = .{};
         var statements: std.ArrayListUnmanaged(ast.Statement) = .{};
         var blocks: std.ArrayListUnmanaged(ast.NamedBlock) = .{};
+        var doc_vars: std.ArrayListUnmanaged(ast.Property) = .{};
 
         self.skipNewlines();
 
@@ -142,6 +143,14 @@ pub const Parser = struct {
             }
 
             if (tok.kind == .identifier) {
+                // vars block: `vars { key: value ... }`
+                if (std.mem.eql(u8, tok.text, "vars") and self.peekAt(1).kind == .lbrace) {
+                    const parsed_vars = try self.parseVarsBlock();
+                    try doc_vars.appendSlice(self.allocator, parsed_vars);
+                    self.allocator.free(parsed_vars);
+                    self.skipNewlines();
+                    continue;
+                }
                 // named block: `name [layout] { ... }` (no colon before brace)
                 if (self.isNamedBlock()) {
                     const blk = try self.parseNamedBlock();
@@ -165,7 +174,7 @@ pub const Parser = struct {
             .styles     = try styles.toOwnedSlice(self.allocator),
             .statements = try statements.toOwnedSlice(self.allocator),
             .blocks     = try blocks.toOwnedSlice(self.allocator),
-            .vars       = &.{},
+            .vars       = try doc_vars.toOwnedSlice(self.allocator),
         };
     }
 
@@ -730,6 +739,7 @@ pub const Parser = struct {
         var directives: std.ArrayListUnmanaged(ast.Directive) = .{};
         var styles: std.ArrayListUnmanaged(ast.StyleRule) = .{};
         var stmts: std.ArrayListUnmanaged(ast.Statement) = .{};
+        var block_vars: std.ArrayListUnmanaged(ast.Property) = .{};
 
         self.skipNewlines();
         while (self.peek().kind != .rbrace and self.peek().kind != .eof) {
@@ -751,6 +761,14 @@ pub const Parser = struct {
             }
 
             if (tok.kind == .identifier) {
+                // vars block inside named block
+                if (std.mem.eql(u8, tok.text, "vars") and self.peekAt(1).kind == .lbrace) {
+                    const parsed_vars = try self.parseVarsBlock();
+                    try block_vars.appendSlice(self.allocator, parsed_vars);
+                    self.allocator.free(parsed_vars);
+                    self.skipNewlines();
+                    continue;
+                }
                 const stmt = try self.parseStatement();
                 try stmts.append(self.allocator, stmt);
                 self.skipNewlines();
@@ -773,9 +791,72 @@ pub const Parser = struct {
             .directives = try directives.toOwnedSlice(self.allocator),
             .styles     = try styles.toOwnedSlice(self.allocator),
             .statements = try stmts.toOwnedSlice(self.allocator),
-            .vars       = &.{},
+            .vars       = try block_vars.toOwnedSlice(self.allocator),
             .loc        = loc,
         };
+    }
+
+    // ---------- vars block ----------
+
+    fn parseVarsBlock(self: *Parser) anyerror![]ast.Property {
+        // consume "vars"
+        self.advance();
+        self.skipNewlines();
+
+        // consume `{`
+        if (self.peek().kind != .lbrace) {
+            try self.err_list.add(self.peek().loc, .expected_closing_brace, "expected '{' after 'vars'");
+            return error.ParseError;
+        }
+        self.advance();
+
+        var props: std.ArrayListUnmanaged(ast.Property) = .{};
+
+        self.skipNewlines();
+        while (self.peek().kind != .rbrace and self.peek().kind != .eof) {
+            self.skipNewlines();
+            if (self.peek().kind == .rbrace) break;
+
+            const key_tok = self.peek();
+            if (key_tok.kind != .identifier) {
+                try self.err_list.add(key_tok.loc, .expected_identifier, "expected variable key");
+                self.advance();
+                continue;
+            }
+            self.advance();
+
+            if (self.peek().kind != .colon) {
+                try self.err_list.add(self.peek().loc, .unexpected_token, "expected ':' after variable key");
+                self.advance();
+                continue;
+            }
+            self.advance(); // consume `:`
+
+            const val_tok = self.peek();
+            if (val_tok.kind != .identifier and val_tok.kind != .string) {
+                try self.err_list.add(val_tok.loc, .invalid_property_value, "expected variable value");
+                self.advance();
+                continue;
+            }
+            self.advance();
+
+            try props.append(self.allocator, ast.Property{
+                .key   = key_tok.text,
+                .value = val_tok.text,
+                .loc   = key_tok.loc,
+            });
+
+            if (self.peek().kind == .semicolon) self.advance();
+            self.skipNewlines();
+        }
+
+        if (self.peek().kind == .rbrace) {
+            self.advance();
+        } else {
+            try self.err_list.add(self.peek().loc, .unterminated_block, "unterminated vars block");
+        }
+
+        return props.toOwnedSlice(self.allocator);
     }
 };
 
@@ -801,6 +882,7 @@ fn freeDoc(doc: ast.Document) void {
     std.testing.allocator.free(doc.statements);
     for (doc.blocks) |blk| freeBlock(blk);
     std.testing.allocator.free(doc.blocks);
+    std.testing.allocator.free(doc.vars);
 }
 
 fn freeStatement(stmt: ast.Statement) void {
@@ -838,6 +920,7 @@ fn freeBlock(blk: ast.NamedBlock) void {
     std.testing.allocator.free(blk.styles);
     for (blk.statements) |s| freeStatement(s);
     std.testing.allocator.free(blk.statements);
+    std.testing.allocator.free(blk.vars);
 }
 
 test "parse simple edge" {
@@ -1005,4 +1088,38 @@ test "parse full example" {
     // 2 top-level edges + 1 subgraph = 3 statements
     try std.testing.expectEqual(@as(usize, 3), result.doc.statements.len);
     try std.testing.expectEqual(@as(usize, 1), result.doc.blocks.len);
+}
+
+test "parse vars block" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const source =
+        \\vars {
+        \\  env: production
+        \\  db: PostgreSQL
+        \\}
+        \\A -> B
+    ;
+    const tokens = try tokenizer.tokenize(allocator, source, &err_list);
+    defer allocator.free(tokens);
+    var p = Parser.init(allocator, tokens, &err_list);
+    const doc = try p.parse();
+    defer {
+        allocator.free(doc.directives);
+        for (doc.styles) |sr| allocator.free(sr.properties.properties);
+        allocator.free(doc.styles);
+        for (doc.statements) |stmt| freeStatement(stmt);
+        allocator.free(doc.statements);
+        for (doc.blocks) |blk| freeBlock(blk);
+        allocator.free(doc.blocks);
+        allocator.free(doc.vars);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), doc.vars.len);
+    try std.testing.expectEqualStrings("env", doc.vars[0].key);
+    try std.testing.expectEqualStrings("production", doc.vars[0].value);
+    try std.testing.expectEqualStrings("db", doc.vars[1].key);
+    try std.testing.expectEqualStrings("PostgreSQL", doc.vars[1].value);
+    try std.testing.expectEqual(@as(usize, 1), doc.statements.len);
 }
