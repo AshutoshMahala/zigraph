@@ -111,7 +111,7 @@ const DocumentStore = struct {
         if (self.documents.fetchRemove(uri)) |removed| {
             self.allocator.free(removed.value);
             // Reuse existing key
-            self.documents.put(removed.key, owned_text) catch unreachable;
+            try self.documents.put(removed.key, owned_text);
         } else {
             const owned_uri = try self.allocator.dupe(u8, uri);
             errdefer self.allocator.free(owned_uri);

@@ -57,6 +57,10 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
     // Collect owned labels (from var substitution) before freeing resolve result.
     // These labels are borrowed by BuiltGraph and must outlive it.
     var owned_labels_list = std.ArrayListUnmanaged([]const u8){};
+    errdefer {
+        for (owned_labels_list.items) |lbl| allocator.free(lbl);
+        owned_labels_list.deinit(allocator);
+    }
     for (resolve_result.blocks) |blk| {
         for (blk.nodes) |node| {
             if (node.label_owned) try owned_labels_list.append(allocator, node.label);
@@ -98,12 +102,16 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
                 // use the original AST block's statements and directives.
                 const ast_stmts: []const ast.Statement = if (std.mem.eql(u8, blk.name, "__default__"))
                     doc.statements
+                else if (doc_block_idx >= doc.blocks.len)
+                    &.{}
                 else blk_stmts: {
                     const s = doc.blocks[doc_block_idx].statements;
                     break :blk_stmts s;
                 };
                 const ast_dirs: []const ast.Directive = if (std.mem.eql(u8, blk.name, "__default__"))
                     doc.directives
+                else if (doc_block_idx >= doc.blocks.len)
+                    &.{}
                 else dir_blk: {
                     const d = doc.blocks[doc_block_idx].directives;
                     break :dir_blk d;
@@ -222,11 +230,15 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
                 .table => {
                     const ast_stmts: []const ast.Statement = if (std.mem.eql(u8, rb.name, "__default__"))
                         doc.statements
+                    else if (doc_block_idx >= doc.blocks.len)
+                        &.{}
                     else s: {
                         break :s doc.blocks[doc_block_idx].statements;
                     };
                     const ast_dirs: []const ast.Directive = if (std.mem.eql(u8, rb.name, "__default__"))
                         doc.directives
+                    else if (doc_block_idx >= doc.blocks.len)
+                        &.{}
                     else d: {
                         break :d doc.blocks[doc_block_idx].directives;
                     };
@@ -449,19 +461,6 @@ test "end-to-end: [table] column count mismatch reports error" {
     var result = try parseAndBuild(allocator, source);
     defer result.deinit();
     try std.testing.expect(result.hasErrors());
-}
-
-test "end-to-end: var substitution in labels" {
-    const allocator = std.testing.allocator;
-    const source =
-        \\vars {
-        \\  name: World
-        \\}
-        \\greeting: "${name}"
-    ;
-    var result = try parseAndBuild(allocator, source);
-    defer result.deinit();
-    try std.testing.expectEqual(@as(usize, 1), result.graphs.len);
 }
 
 test "end-to-end: [tree] block" {

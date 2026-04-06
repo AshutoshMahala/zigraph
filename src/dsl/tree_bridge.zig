@@ -69,7 +69,7 @@ pub fn buildTree(
             // Already has a parent — report error
             try err_list.add(
                 errors.Loc.zero,
-                errors.DslError.Kind.invalid_property_value,
+                errors.DslError.Kind.tree_validation,
                 "tree validation: node has multiple parents",
             );
         } else {
@@ -91,7 +91,7 @@ pub fn buildTree(
     if (roots_list.items.len == 0) {
         try err_list.add(
             errors.Loc.zero,
-            errors.DslError.Kind.invalid_property_value,
+            errors.DslError.Kind.tree_validation,
             "tree validation: no root nodes found (possible cycle)",
         );
         return TreeResult{

@@ -33,6 +33,7 @@ pub const DslError = struct {
         unknown_layout_type,
         unknown_shape,
         column_count_mismatch,
+        tree_validation,
     };
 
     pub fn format(self: DslError, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {

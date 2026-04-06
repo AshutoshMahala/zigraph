@@ -451,8 +451,8 @@ const Resolver = struct {
 // Var substitution helper
 // ============================================================
 
-/// Apply var substitution to all labels, property values, and card fields
-/// in the resolved block's nodes and edges.
+/// Apply var substitution to node and edge labels.
+/// Property values and card fields are not yet substituted (needs ownership tracking).
 fn applyVarSubstitution(
     allocator: std.mem.Allocator,
     resolved: anytype,
@@ -460,42 +460,15 @@ fn applyVarSubstitution(
     err_list: *errors.ErrorList,
 ) !void {
     for (resolved.nodes) |*node| {
-        // Labels
         const orig = node.label;
         node.label = try substituteVars(allocator, node.label, vars_map, err_list, node.loc);
         node.label_owned = node.label.ptr != orig.ptr;
-
-        // Property values
-        for (node.properties) |*prop| {
-            prop.value = try substituteVars(allocator, prop.value, vars_map, err_list, node.loc);
-        }
-
-        // Card fields
-        if (node.card_fields) |fields| {
-            var needs_sub = false;
-            for (fields) |f| {
-                if (std.mem.indexOf(u8, f, "${") != null) { needs_sub = true; break; }
-            }
-            if (needs_sub) {
-                const new_fields = try allocator.alloc([]const u8, fields.len);
-                for (fields, 0..) |f, fi| {
-                    new_fields[fi] = try substituteVars(allocator, f, vars_map, err_list, node.loc);
-                }
-                node.card_fields = new_fields;
-            }
-        }
     }
     for (resolved.edges) |*edge| {
-        // Labels
         if (edge.label) |lbl| {
             const new_lbl = try substituteVars(allocator, lbl, vars_map, err_list, edge.loc);
             edge.label = new_lbl;
             edge.label_owned = new_lbl.ptr != lbl.ptr;
-        }
-
-        // Property values
-        for (edge.properties) |*prop| {
-            prop.value = try substituteVars(allocator, prop.value, vars_map, err_list, edge.loc);
         }
     }
 }
