@@ -25,9 +25,24 @@ const CheckArgs = struct {
     input_file: []const u8,
 };
 
+const FmtArgs = struct {
+    input_file: ?[]const u8 = null,
+    check_only: bool = false,
+    write_inplace: bool = true,
+};
+
+const WatchArgs = struct {
+    input_file: []const u8,
+    format: Format = .terminal,
+    direction_override: ?dsl.ast.Direction = null,
+    poll_ms: u64 = 500,
+};
+
 const Command = union(enum) {
     render: RenderArgs,
     check: CheckArgs,
+    fmt: FmtArgs,
+    watch: WatchArgs,
     help,
 };
 
@@ -38,18 +53,30 @@ fn printHelp(writer: anytype) !void {
         \\Commands:
         \\  render [file]          Render a .zgraph or .md file (reads stdin if no file given)
         \\  check <file>           Validate syntax, print OK or errors
+        \\  fmt [file]             Format a .zgraph file (reads stdin if no file given)
+        \\  watch <file>           Watch a file and re-render on changes
         \\
         \\Render options:
         \\  -f terminal|svg|json                          Output format (default: terminal)
         \\  -o <output>                                   Write output to file (default: stdout)
         \\  -d top-down|left-right|bottom-up|right-left   Override flow direction
         \\
+        \\Fmt options:
+        \\  --check                Check if file is formatted (exit 1 if not)
+        \\  --stdin                Read from stdin, write to stdout
+        \\
+        \\Watch options:
+        \\  -f terminal|svg|json   Output format (default: terminal)
+        \\  -d <direction>         Override flow direction
+        \\
         \\Examples:
         \\  zigraph render graph.zgraph
         \\  zigraph render graph.md -f svg -o graph.svg
         \\  echo "A -> B -> C" | zigraph render
-        \\  echo "A -> B -> C" | zigraph render -d left-right
         \\  zigraph check graph.zgraph
+        \\  zigraph fmt graph.zgraph
+        \\  zigraph fmt --check graph.zgraph
+        \\  zigraph watch graph.zgraph
         \\
     );
 }
@@ -112,6 +139,57 @@ fn parseArgs(args: []const []const u8) !Command {
             return error.MissingFile;
         }
         return Command{ .check = CheckArgs{ .input_file = args[1] } };
+    }
+
+    if (std.mem.eql(u8, cmd_str, "fmt")) {
+        var fmt_args = FmtArgs{};
+        var i: usize = 1;
+        while (i < args.len) : (i += 1) {
+            const arg = args[i];
+            if (std.mem.eql(u8, arg, "--check")) {
+                fmt_args.check_only = true;
+                fmt_args.write_inplace = false;
+            } else if (std.mem.eql(u8, arg, "--stdin")) {
+                fmt_args.write_inplace = false;
+            } else if (arg.len > 0 and arg[0] == '-') {
+                return error.UnknownFlag;
+            } else {
+                fmt_args.input_file = arg;
+            }
+        }
+        return Command{ .fmt = fmt_args };
+    }
+
+    if (std.mem.eql(u8, cmd_str, "watch")) {
+        if (args.len < 2) {
+            return error.MissingFile;
+        }
+        var watch_args = WatchArgs{ .input_file = args[1] };
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            const arg = args[i];
+            if (std.mem.eql(u8, arg, "-f")) {
+                i += 1;
+                if (i >= args.len) return error.MissingFormatValue;
+                const fmt_str = args[i];
+                if (std.mem.eql(u8, fmt_str, "terminal")) watch_args.format = .terminal
+                else if (std.mem.eql(u8, fmt_str, "svg")) watch_args.format = .svg
+                else if (std.mem.eql(u8, fmt_str, "json")) watch_args.format = .json
+                else return error.UnknownFormat;
+            } else if (std.mem.eql(u8, arg, "-d")) {
+                i += 1;
+                if (i >= args.len) return error.MissingDirectionValue;
+                const dir_str = args[i];
+                if (std.mem.eql(u8, dir_str, "top-down")) watch_args.direction_override = .top_down
+                else if (std.mem.eql(u8, dir_str, "left-right")) watch_args.direction_override = .left_right
+                else if (std.mem.eql(u8, dir_str, "bottom-up")) watch_args.direction_override = .bottom_up
+                else if (std.mem.eql(u8, dir_str, "right-left")) watch_args.direction_override = .right_left
+                else return error.UnknownDirection;
+            } else if (arg.len > 0 and arg[0] == '-') {
+                return error.UnknownFlag;
+            }
+        }
+        return Command{ .watch = watch_args };
     }
 
     return error.UnknownCommand;
@@ -216,6 +294,98 @@ fn cmdRender(allocator: std.mem.Allocator, args: RenderArgs) !void {
     }
 }
 
+fn cmdFmt(allocator: std.mem.Allocator, args: FmtArgs) !void {
+    const source = if (args.input_file) |path|
+        try readFile(allocator, path)
+    else
+        try readStdin(allocator);
+    defer allocator.free(source);
+
+    const formatted = try dsl.formatter.format(allocator, source);
+    defer allocator.free(formatted);
+
+    if (args.check_only) {
+        if (!std.mem.eql(u8, source, formatted)) {
+            const stderr = std.fs.File.stderr().deprecatedWriter();
+            if (args.input_file) |path| {
+                try stderr.print("Would reformat {s}\n", .{path});
+            } else {
+                try stderr.writeAll("Input is not formatted\n");
+            }
+            return error.NotFormatted;
+        }
+        const stdout = std.fs.File.stdout().deprecatedWriter();
+        if (args.input_file) |path| {
+            try stdout.print("Already formatted: {s}\n", .{path});
+        }
+        return;
+    }
+
+    if (args.write_inplace) {
+        if (args.input_file) |path| {
+            // Only write if changed
+            if (!std.mem.eql(u8, source, formatted)) {
+                const file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+                defer file.close();
+                try file.writeAll(formatted);
+                const stderr = std.fs.File.stderr().deprecatedWriter();
+                try stderr.print("Formatted {s}\n", .{path});
+            }
+            return;
+        }
+    }
+
+    // Write to stdout
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    try stdout.writeAll(formatted);
+}
+
+fn cmdWatch(allocator: std.mem.Allocator, args: WatchArgs) !void {
+    const stderr = std.fs.File.stderr().deprecatedWriter();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+
+    try stderr.print("Watching {s} (Ctrl-C to stop)...\n", .{args.input_file});
+
+    var prev_mtime: i128 = 0;
+    var first = true;
+
+    while (true) {
+        const stat = std.fs.cwd().statFile(args.input_file) catch |err| {
+            try stderr.print("error: cannot stat {s}: {s}\n", .{ args.input_file, @errorName(err) });
+            std.Thread.sleep(args.poll_ms * std.time.ns_per_ms);
+            continue;
+        };
+
+        const mtime = stat.mtime;
+        if (mtime != prev_mtime or first) {
+            prev_mtime = mtime;
+            first = false;
+
+            const source = readFile(allocator, args.input_file) catch |err| {
+                try stderr.print("error: cannot read {s}: {s}\n", .{ args.input_file, @errorName(err) });
+                std.Thread.sleep(args.poll_ms * std.time.ns_per_ms);
+                continue;
+            };
+            defer allocator.free(source);
+
+            const is_md = isMarkdownFile(args.input_file);
+
+            // Clear screen (ANSI escape)
+            try stdout.writeAll("\x1b[2J\x1b[H");
+
+            renderSource(allocator, source, is_md, args.format, args.direction_override, stdout) catch |err| {
+                if (err != error.ParseError and err != error.NoGraphs) {
+                    try stderr.print("error: {s}\n", .{@errorName(err)});
+                }
+            };
+
+            try stderr.print("[{s} updated]\n", .{args.input_file});
+        }
+
+        std.Thread.sleep(args.poll_ms * std.time.ns_per_ms);
+    }
+}
+
 fn cmdCheck(allocator: std.mem.Allocator, args: CheckArgs) !void {
     const source = try readFile(allocator, args.input_file);
     defer allocator.free(source);
@@ -298,6 +468,22 @@ pub fn main() !void {
                     const stderr = std.fs.File.stderr().deprecatedWriter();
                     try stderr.print("error: {s}\n", .{@errorName(err)});
                 }
+                std.process.exit(1);
+            };
+        },
+        .fmt => |fmt_args| {
+            cmdFmt(allocator, fmt_args) catch |err| {
+                if (err != error.NotFormatted) {
+                    const stderr = std.fs.File.stderr().deprecatedWriter();
+                    try stderr.print("error: {s}\n", .{@errorName(err)});
+                }
+                std.process.exit(1);
+            };
+        },
+        .watch => |watch_args| {
+            cmdWatch(allocator, watch_args) catch |err| {
+                const stderr = std.fs.File.stderr().deprecatedWriter();
+                try stderr.print("error: {s}\n", .{@errorName(err)});
                 std.process.exit(1);
             };
         },

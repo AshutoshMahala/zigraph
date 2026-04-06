@@ -10,6 +10,7 @@ pub const errors = @import("errors.zig");
 pub const direction = @import("direction.zig");
 pub const tree_bridge = @import("tree_bridge.zig");
 pub const imports = @import("imports.zig");
+pub const formatter = @import("formatter.zig");
 pub const BuiltGraph = bridge.BuiltGraph;
 pub const BuiltTable = bridge.BuiltTable;
 pub const TreeResult = tree_bridge.TreeResult;
@@ -366,6 +367,7 @@ test {
     _ = direction;
     _ = tree_bridge;
     _ = imports;
+    _ = formatter;
 }
 
 // ── End-to-end integration tests ────────────────────────────────────────────
