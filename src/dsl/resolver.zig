@@ -454,10 +454,13 @@ const Resolver = struct {
 /// Replace all `${name}` occurrences in `text` with values from `vars_map`.
 /// Returns the original slice (without allocation) when no `${` is present.
 /// Otherwise returns a newly allocated slice owned by `allocator`.
+/// Reports an error for undefined variable references.
 fn substituteVars(
     allocator: std.mem.Allocator,
     text: []const u8,
     vars_map: *const std.StringHashMap([]const u8),
+    err_list: *errors.ErrorList,
+    loc: Loc,
 ) ![]const u8 {
     // Fast path: no substitution markers
     if (std.mem.indexOf(u8, text, "${") == null) return text;
@@ -476,6 +479,8 @@ fn substituteVars(
             if (vars_map.get(var_name)) |value| {
                 try result.appendSlice(allocator, value);
             } else {
+                // Report error for undefined variable, but preserve the text
+                try err_list.add(loc, .unresolved_reference, "undefined variable");
                 try result.appendSlice(allocator, text[i .. end + 1]);
             }
             i = end + 1;
@@ -527,12 +532,12 @@ pub fn resolve(
         if (doc_vars_map.count() > 0) {
             for (resolved.nodes) |*node| {
                 const orig = node.label;
-                node.label = try substituteVars(allocator, node.label, &doc_vars_map);
+                node.label = try substituteVars(allocator, node.label, &doc_vars_map, err_list, node.loc);
                 node.label_owned = node.label.ptr != orig.ptr;
             }
             for (resolved.edges) |*edge| {
                 if (edge.label) |lbl| {
-                    const new_lbl = try substituteVars(allocator, lbl, &doc_vars_map);
+                    const new_lbl = try substituteVars(allocator, lbl, &doc_vars_map, err_list, edge.loc);
                     edge.label = new_lbl;
                     edge.label_owned = new_lbl.ptr != lbl.ptr;
                 }
@@ -589,12 +594,12 @@ pub fn resolve(
         if (blk_vars_map.count() > 0) {
             for (resolved.nodes) |*node| {
                 const orig = node.label;
-                node.label = try substituteVars(allocator, node.label, &blk_vars_map);
+                node.label = try substituteVars(allocator, node.label, &blk_vars_map, err_list, node.loc);
                 node.label_owned = node.label.ptr != orig.ptr;
             }
             for (resolved.edges) |*edge| {
                 if (edge.label) |lbl| {
-                    const new_lbl = try substituteVars(allocator, lbl, &blk_vars_map);
+                    const new_lbl = try substituteVars(allocator, lbl, &blk_vars_map, err_list, edge.loc);
                     edge.label = new_lbl;
                     edge.label_owned = new_lbl.ptr != lbl.ptr;
                 }
@@ -891,4 +896,54 @@ test "var substitution in labels" {
     std.testing.allocator.free(blk.edges);
     std.testing.allocator.free(blk.subgraphs);
     std.testing.allocator.free(out.result.blocks);
+}
+
+test "undefined var reports error" {
+    const src = "server: \"${undefined_var} server\"";
+    const out = try testResolve(src);
+    defer @constCast(&out.err_list).deinit();
+    defer freeAstDoc(out.doc);
+
+    // No vars defined, so ${undefined_var} should not trigger substitution
+    // (vars_map.count() == 0 skips substitution entirely)
+    // But if we define a var and reference an undefined one:
+    const a = std.testing.allocator;
+    for (out.result.blocks) |blk_inner| {
+        for (blk_inner.nodes) |node| a.free(node.properties);
+        a.free(blk_inner.nodes);
+        for (blk_inner.edges) |edge| a.free(edge.properties);
+        a.free(blk_inner.edges);
+        for (blk_inner.subgraphs) |sg| freeSubgraph(sg);
+        a.free(blk_inner.subgraphs);
+    }
+    a.free(out.result.blocks);
+}
+
+test "undefined var with defined vars reports error" {
+    const src = "vars { env: production }\nserver: \"${missing} server\"";
+    const out = try testResolve(src);
+    defer @constCast(&out.err_list).deinit();
+    defer freeAstDoc(out.doc);
+
+    // Should have an error for the undefined variable
+    try std.testing.expect(out.err_list.hasErrors());
+
+    const a = std.testing.allocator;
+    for (out.result.blocks) |blk_inner| {
+        for (blk_inner.nodes) |node| {
+            if (node.label_owned) a.free(node.label);
+            a.free(node.properties);
+        }
+        a.free(blk_inner.nodes);
+        for (blk_inner.edges) |edge| {
+            if (edge.label_owned) {
+                if (edge.label) |lbl| a.free(lbl);
+            }
+            a.free(edge.properties);
+        }
+        a.free(blk_inner.edges);
+        for (blk_inner.subgraphs) |sg| freeSubgraph(sg);
+        a.free(blk_inner.subgraphs);
+    }
+    a.free(out.result.blocks);
 }

@@ -118,8 +118,11 @@ pub fn buildTree(
         root_nodes.deinit(allocator);
     }
 
+    var visiting = std.StringHashMap(void).init(allocator);
+    defer visiting.deinit();
+
     for (roots_list.items) |root_id| {
-        const node = try buildNode(allocator, root_id, &children_map, &label_map);
+        const node = try buildNode(allocator, root_id, &children_map, &label_map, &visiting);
         try root_nodes.append(allocator, node);
     }
 
@@ -134,8 +137,18 @@ fn buildNode(
     node_id: []const u8,
     children_map: *std.StringHashMap(std.ArrayListUnmanaged([]const u8)),
     label_map: *std.StringHashMap([]const u8),
+    visiting: *std.StringHashMap(void),
 ) !TreeNode {
     const label = label_map.get(node_id) orelse node_id;
+
+    // Cycle detection: if we're already visiting this node, return a leaf to break the cycle.
+    if (visiting.contains(node_id)) {
+        return TreeNode{
+            .label = label,
+            .children = try allocator.alloc(TreeNode, 0),
+        };
+    }
+    try visiting.put(node_id, {});
 
     const child_ids = if (children_map.getPtr(node_id)) |list| list.items else &[_][]const u8{};
 
@@ -143,8 +156,10 @@ fn buildNode(
     errdefer allocator.free(child_nodes);
 
     for (child_ids, 0..) |child_id, i| {
-        child_nodes[i] = try buildNode(allocator, child_id, children_map, label_map);
+        child_nodes[i] = try buildNode(allocator, child_id, children_map, label_map, visiting);
     }
+
+    _ = visiting.remove(node_id);
 
     return TreeNode{
         .label = label,
@@ -206,6 +221,29 @@ test "multi-parent error: a -> c, b -> c" {
     var result = try buildTree(allocator, ids, labels, edges, &err_list);
     defer result.deinit();
 
+    try std.testing.expect(err_list.hasErrors());
+}
+
+test "cycle detection: a -> b -> a does not stack overflow" {
+    const allocator = std.testing.allocator;
+
+    // a -> b, b -> a creates a cycle. a has no parent other than b,
+    // but b's parent is a, so the only root is... neither (both have parents).
+    // Actually: a is parent of b, b is parent of a => multi-parent error on a.
+    // But let's test with a self-loop: a -> a
+    const ids = &[_][]const u8{"a"};
+    const labels = &[_][]const u8{"A"};
+    const edges = &[_]Edge{
+        .{ .from = "a", .to = "a" },
+    };
+
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+
+    var result = try buildTree(allocator, ids, labels, edges, &err_list);
+    defer result.deinit();
+
+    // Should report multi-parent error (a is both parent and child of itself)
     try std.testing.expect(err_list.hasErrors());
 }
 

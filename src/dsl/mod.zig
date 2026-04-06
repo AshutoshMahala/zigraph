@@ -185,6 +185,12 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
         trees_list.deinit(allocator);
     }
 
+    var owned_labels_list = std.ArrayListUnmanaged([]const u8){};
+    errdefer {
+        for (owned_labels_list.items) |lbl| allocator.free(lbl);
+        owned_labels_list.deinit(allocator);
+    }
+
     for (blocks) |blk| {
         const tokens = try tokenizer.tokenize(allocator, blk.content, &err_list);
         defer allocator.free(tokens);
@@ -194,6 +200,19 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
         defer freeDoc(allocator, doc);
 
         const resolve_result = try resolver.resolve(allocator, doc, &err_list);
+
+        // Collect owned labels before freeing resolve result
+        for (resolve_result.blocks) |rb_inner| {
+            for (rb_inner.nodes) |node| {
+                if (node.label_owned) try owned_labels_list.append(allocator, node.label);
+            }
+            for (rb_inner.edges) |edge| {
+                if (edge.label_owned) {
+                    if (edge.label) |lbl| try owned_labels_list.append(allocator, lbl);
+                }
+            }
+        }
+
         defer freeResolveResult(allocator, resolve_result);
 
         var doc_block_idx: usize = 0;
@@ -254,7 +273,7 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
         .graphs = try graphs_list.toOwnedSlice(allocator),
         .tables = try tables_list.toOwnedSlice(allocator),
         .trees = try trees_list.toOwnedSlice(allocator),
-        .owned_labels = &.{},
+        .owned_labels = try owned_labels_list.toOwnedSlice(allocator),
         .err_list = err_list,
         .allocator = allocator,
     };
