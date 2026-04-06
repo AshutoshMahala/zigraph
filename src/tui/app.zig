@@ -6,6 +6,7 @@ const TextBuffer = @import("text_buffer.zig");
 const EditorPane = @import("editor_pane.zig");
 const UndoManager = @import("undo.zig");
 const PreviewPane = @import("preview_pane.zig");
+const StatusBar = @import("status_bar.zig");
 
 const App = @This();
 
@@ -18,7 +19,7 @@ editor_pane: *EditorPane,
 buffer: *TextBuffer,
 undo: *UndoManager,
 preview_pane: *PreviewPane,
-status_text: vxfw.Text,
+status_bar: *StatusBar,
 children: [2]vxfw.SubSurface = undefined,
 
 pub fn create(allocator: std.mem.Allocator) !*App {
@@ -44,6 +45,9 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         preview_pane.renderFromSource(allocator, s);
     }
 
+    const status_bar = try allocator.create(StatusBar);
+    status_bar.* = .{};
+
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
@@ -51,11 +55,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .undo = undo,
         .editor_pane = editor_pane,
         .preview_pane = preview_pane,
-        .status_text = .{
-            .text = "zigraph editor | Ctrl+Q quit | Tab switch focus",
-            .style = .{ .reverse = true },
-            .width_basis = .parent,
-        },
+        .status_bar = status_bar,
         .split = undefined,
     };
     self.split = .{
@@ -73,6 +73,7 @@ pub fn destroy(self: *App) void {
     self.allocator.destroy(self.undo);
     self.buffer.deinit();
     self.allocator.destroy(self.buffer);
+    self.allocator.destroy(self.status_bar);
     self.allocator.destroy(self);
 }
 
@@ -153,12 +154,17 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     );
     const split_surface = try self.split.widget().draw(content_ctx);
 
+    // Update status bar fields from editor state
+    self.status_bar.line = self.editor_pane.cursor_line;
+    self.status_bar.col = self.editor_pane.cursor_col;
+    self.status_bar.modified = self.editor_pane.modified;
+
     // Draw status bar
     const status_ctx = ctx.withConstraints(
         .{ .width = max.width, .height = 1 },
         vxfw.MaxSize.fromSize(.{ .width = max.width, .height = 1 }),
     );
-    const status_surface = try self.status_text.widget().draw(status_ctx);
+    const status_surface = try self.status_bar.widget().draw(status_ctx);
 
     self.children[0] = .{
         .origin = .{ .row = 0, .col = 0 },
