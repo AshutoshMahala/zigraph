@@ -25,8 +25,13 @@ Thumbs.db
 temp/
 review/
 
-# Auto-generated docs (WASM playground)
-docs/
+# Auto-generated docs output
+docs/site/zig-out/
+docs/site/public/
+docs/site/.zig-cache/
+
+# Keep superpowers specs/plans ignored on main (they live on feature branches)
+# docs/superpowers/
 
 # Generated SVG files in root (keep assets/ copies)
 /*.svg
