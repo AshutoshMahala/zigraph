@@ -65,4 +65,5 @@ test {
     _ = @import("text_buffer.zig");
     _ = @import("undo.zig");
     _ = @import("highlighter.zig");
+    _ = @import("source_map.zig");
 }
