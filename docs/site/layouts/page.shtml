@@ -1,0 +1,33 @@
+<extend template="base.shtml">
+<head id="head">
+</head>
+<body id="body">
+  <nav class="top-nav" id="top-nav">
+  </nav>
+  <aside class="sidebar" id="sidebar">
+    <div :html="$page.parentSection().content()"></div>
+  </aside>
+  <main class="content" id="content">
+    <h1 :text="$page.title"></h1>
+    <div :html="$page.content()"></div>
+    <div class="page-nav">
+      <ctx :if="$page.prevPage?()">
+        <a href="$if.link()">
+          &larr; <span :text="$if.title"></span>
+        </a>
+      </ctx>
+      <ctx :if="$page.prevPage?().not()">
+        <span></span>
+      </ctx>
+      <ctx :if="$page.nextPage?()">
+        <a href="$if.link()">
+          <span :text="$if.title"></span> &rarr;
+        </a>
+      </ctx>
+    </div>
+  </main>
+  <aside class="toc" id="toc">
+    <div class="toc-title">On this page</div>
+    <div :html="$page.toc()"></div>
+  </aside>
+</body>
