@@ -38,3 +38,8 @@ subgraph_demo.svg
 tree-sitter-zgraph/src/
 tree-sitter-zgraph/node_modules/
 tree-sitter-zgraph/build/
+
+# VS Code extension build artifacts
+editors/vscode/out/
+editors/vscode/node_modules/
+editors/vscode/*.vsix

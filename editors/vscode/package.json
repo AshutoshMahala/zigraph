@@ -1,0 +1,61 @@
+{
+  "name": "zgraph",
+  "displayName": "zgraph",
+  "description": "Syntax highlighting and LSP support for the zgraph graph description language",
+  "version": "0.1.0",
+  "publisher": "markussagen",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:zgraph"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "zgraph",
+        "aliases": ["zgraph", "ZGraph"],
+        "extensions": [".zgraph"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "zgraph",
+        "scopeName": "source.zgraph",
+        "path": "./syntaxes/zgraph.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "zgraph",
+      "properties": {
+        "zgraph.lsp.path": {
+          "type": "string",
+          "default": "zgraph",
+          "description": "Path to the zgraph binary (must support 'zgraph lsp' subcommand)"
+        },
+        "zgraph.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the zgraph language server"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "package": "vsce package",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  }
+}
