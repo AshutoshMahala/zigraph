@@ -1,0 +1,28 @@
+# Network topology diagram
+
+vars {
+  env: production
+}
+
+network [dag] {
+  @direction left-right
+  @layout sugiyama
+
+  frontend.App -> backend.API [color=blue]
+  backend.API -> db .database
+  db -> cache .cache
+
+  @style node {
+    shape = rect
+  }
+
+  @style .database {
+    shape = cylinder
+  }
+}
+
+metrics [table] {
+  headers: Service, Latency, Status
+  row: API, 120ms, healthy
+  row: DB, 45ms, healthy
+}
