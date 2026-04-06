@@ -22,6 +22,8 @@ pub const ErrorLine = struct {
     message: []const u8,
 };
 
+const SelectionRange = struct { start: usize, end: usize };
+
 buffer: *TextBuffer,
 undo: *UndoManager,
 cursor_line: usize = 0,
@@ -31,6 +33,9 @@ scroll_left: usize = 0,
 focused: bool = true,
 modified: bool = false,
 error_lines: []const ErrorLine = &.{},
+selection_anchor: ?usize = null,
+clipboard: []const u8 = "",
+clipboard_owned: bool = false,
 
 pub fn widget(self: *EditorPane) vxfw.Widget {
     return .{
@@ -48,15 +53,112 @@ fn clampCursorCol(self: *EditorPane) void {
     }
 }
 
+// ── Selection helpers ────────────────────────────────────────────────────
+
+fn selectionRange(self: *const EditorPane) ?SelectionRange {
+    const anchor = self.selection_anchor orelse return null;
+    const cursor = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
+    return if (anchor <= cursor)
+        .{ .start = anchor, .end = cursor }
+    else
+        .{ .start = cursor, .end = anchor };
+}
+
+fn clearSelection(self: *EditorPane) void {
+    self.selection_anchor = null;
+}
+
+fn setClipboard(self: *EditorPane, text: []const u8) void {
+    if (self.clipboard_owned) self.buffer.allocator.free(self.clipboard);
+    self.clipboard = self.buffer.allocator.dupe(u8, text) catch {
+        self.clipboard = "";
+        self.clipboard_owned = false;
+        return;
+    };
+    self.clipboard_owned = true;
+}
+
+pub fn freeClipboard(self: *EditorPane) void {
+    if (self.clipboard_owned) {
+        self.buffer.allocator.free(self.clipboard);
+        self.clipboard = "";
+        self.clipboard_owned = false;
+    }
+}
+
+/// Delete the currently selected range, placing cursor at selection start.
+/// Returns true if a selection was deleted, false if there was none.
+fn deleteSelection(self: *EditorPane) bool {
+    const sel = self.selectionRange() orelse return false;
+    const sel_len = sel.end - sel.start;
+    if (sel_len == 0) {
+        self.clearSelection();
+        return false;
+    }
+    self.undo.deleteText(self.buffer, sel.start, sel_len) catch return false;
+    const lc = self.buffer.positionToLineCol(sel.start);
+    self.cursor_line = lc.line;
+    self.cursor_col = lc.col;
+    self.clearSelection();
+    self.modified = true;
+    return true;
+}
+
+/// Ensure selection_anchor is set before a shift-move; call with current
+/// cursor position before the cursor is moved.
+fn ensureAnchor(self: *EditorPane) void {
+    if (self.selection_anchor == null) {
+        self.selection_anchor = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
+    }
+}
+
+// ── Event handler ────────────────────────────────────────────────────────
+
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
     const self: *EditorPane = @ptrCast(@alignCast(ptr));
     switch (event) {
         .key_press => |key| {
-            if (key.matches(vaxis.Key.up, .{})) {
+            // -- Shift+arrow: extend selection --
+            if (key.matches(vaxis.Key.up, .{ .shift = true })) {
+                self.ensureAnchor();
+                self.cursor_line -|= 1;
+                self.clampCursorCol();
+                ctx.consumeAndRedraw();
+            } else if (key.matches(vaxis.Key.down, .{ .shift = true })) {
+                self.ensureAnchor();
+                const line_count = self.buffer.lineCount();
+                if (line_count > 0 and self.cursor_line < line_count - 1) {
+                    self.cursor_line += 1;
+                }
+                self.clampCursorCol();
+                ctx.consumeAndRedraw();
+            } else if (key.matches(vaxis.Key.left, .{ .shift = true })) {
+                self.ensureAnchor();
+                self.cursor_col -|= 1;
+                ctx.consumeAndRedraw();
+            } else if (key.matches(vaxis.Key.right, .{ .shift = true })) {
+                self.ensureAnchor();
+                self.cursor_col += 1;
+                ctx.consumeAndRedraw();
+            } else if (key.matches(vaxis.Key.home, .{ .shift = true })) {
+                self.ensureAnchor();
+                self.cursor_col = 0;
+                ctx.consumeAndRedraw();
+            } else if (key.matches(vaxis.Key.end, .{ .shift = true })) {
+                self.ensureAnchor();
+                const line = self.buffer.lineAt(self.cursor_line) catch return;
+                defer self.buffer.allocator.free(line);
+                self.cursor_col = line.len;
+                ctx.consumeAndRedraw();
+            }
+            // -- Plain arrows: move and clear selection --
+            else if (key.matches(vaxis.Key.up, .{})) {
+                self.clearSelection();
                 self.cursor_line -|= 1;
                 self.clampCursorCol();
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.down, .{})) {
+                self.clearSelection();
                 const line_count = self.buffer.lineCount();
                 if (line_count > 0 and self.cursor_line < line_count - 1) {
                     self.cursor_line += 1;
@@ -64,24 +166,30 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 self.clampCursorCol();
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.left, .{})) {
+                self.clearSelection();
                 self.cursor_col -|= 1;
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.right, .{})) {
+                self.clearSelection();
                 self.cursor_col += 1;
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.home, .{})) {
+                self.clearSelection();
                 self.cursor_col = 0;
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.end, .{})) {
+                self.clearSelection();
                 const line = self.buffer.lineAt(self.cursor_line) catch return;
                 defer self.buffer.allocator.free(line);
                 self.cursor_col = line.len;
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.page_up, .{})) {
+                self.clearSelection();
                 self.cursor_line -|= 20;
                 self.clampCursorCol();
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.page_down, .{})) {
+                self.clearSelection();
                 const line_count = self.buffer.lineCount();
                 self.cursor_line += 20;
                 if (line_count > 0 and self.cursor_line >= line_count) {
@@ -89,7 +197,117 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 }
                 self.clampCursorCol();
                 ctx.consumeAndRedraw();
-            } else if (key.matches(vaxis.Key.backspace, .{})) {
+            }
+            // -- Ctrl+A: select all --
+            else if (key.matches('a', .{ .ctrl = true })) {
+                self.selection_anchor = 0;
+                const total = self.buffer.totalLen();
+                const lc = self.buffer.positionToLineCol(total);
+                self.cursor_line = lc.line;
+                self.cursor_col = lc.col;
+                ctx.consumeAndRedraw();
+            }
+            // -- Ctrl+C: copy --
+            else if (key.matches('c', .{ .ctrl = true })) {
+                if (self.selectionRange()) |sel| {
+                    const sel_len = sel.end - sel.start;
+                    if (sel_len > 0) {
+                        const text = self.buffer.slice(self.buffer.allocator, sel.start, sel.end) catch return;
+                        defer self.buffer.allocator.free(text);
+                        self.setClipboard(text);
+                    }
+                }
+                ctx.consumeAndRedraw();
+            }
+            // -- Ctrl+X: cut --
+            else if (key.matches('x', .{ .ctrl = true })) {
+                if (self.selectionRange()) |sel| {
+                    const sel_len = sel.end - sel.start;
+                    if (sel_len > 0) {
+                        const text = self.buffer.slice(self.buffer.allocator, sel.start, sel.end) catch return;
+                        defer self.buffer.allocator.free(text);
+                        self.setClipboard(text);
+                        _ = self.deleteSelection();
+                    }
+                }
+                ctx.consumeAndRedraw();
+            }
+            // -- Ctrl+V: paste --
+            else if (key.matches('v', .{ .ctrl = true })) {
+                if (self.clipboard.len > 0) {
+                    _ = self.deleteSelection();
+                    const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
+                    self.undo.insertText(self.buffer, pos, self.clipboard) catch return;
+                    const end_pos = pos + self.clipboard.len;
+                    const lc = self.buffer.positionToLineCol(end_pos);
+                    self.cursor_line = lc.line;
+                    self.cursor_col = lc.col;
+                    self.modified = true;
+                }
+                ctx.consumeAndRedraw();
+            }
+            // -- Ctrl+D: duplicate line --
+            else if (key.matches('d', .{ .ctrl = true })) {
+                const line_content = self.buffer.lineAt(self.cursor_line) catch return;
+                defer self.buffer.allocator.free(line_content);
+                // Find position of end of current line (after the content, at the newline or buffer end)
+                const line_start = self.buffer.lineColToPosition(self.cursor_line, 0);
+                const line_end = line_start + line_content.len;
+                // Build the text to insert: newline + line content
+                var dup_text = self.buffer.allocator.alloc(u8, 1 + line_content.len) catch return;
+                defer self.buffer.allocator.free(dup_text);
+                dup_text[0] = '\n';
+                @memcpy(dup_text[1..], line_content);
+                self.undo.insertText(self.buffer, line_end, dup_text) catch return;
+                self.cursor_line += 1;
+                self.modified = true;
+                self.clearSelection();
+                ctx.consumeAndRedraw();
+            }
+            // -- Ctrl+L: delete line --
+            else if (key.matches('l', .{ .ctrl = true })) {
+                const line_count = self.buffer.lineCount();
+                if (line_count == 0) return;
+                const line_start = self.buffer.lineColToPosition(self.cursor_line, 0);
+                const total = self.buffer.totalLen();
+                // Determine range: include the trailing newline if present
+                var del_end: usize = undefined;
+                if (self.cursor_line + 1 < line_count) {
+                    del_end = self.buffer.lineColToPosition(self.cursor_line + 1, 0);
+                } else {
+                    // Last line: delete from line_start to end, plus preceding newline if not first line
+                    del_end = total;
+                }
+                // If deleting the last line and it's not the only line, also remove the preceding newline
+                var del_start = line_start;
+                if (self.cursor_line + 1 >= line_count and self.cursor_line > 0) {
+                    del_start = line_start - 1; // grab the preceding \n
+                }
+                const del_len = del_end - del_start;
+                if (del_len > 0) {
+                    self.undo.deleteText(self.buffer, del_start, del_len) catch return;
+                    // Reposition cursor
+                    const new_line_count = self.buffer.lineCount();
+                    if (new_line_count == 0) {
+                        self.cursor_line = 0;
+                        self.cursor_col = 0;
+                    } else if (self.cursor_line >= new_line_count) {
+                        self.cursor_line = new_line_count - 1;
+                    }
+                    self.clampCursorCol();
+                    self.modified = true;
+                    self.clearSelection();
+                }
+                ctx.consumeAndRedraw();
+            }
+            // -- Backspace: delete selection or single char --
+            else if (key.matches(vaxis.Key.backspace, .{})) {
+                if (self.selection_anchor != null) {
+                    if (self.deleteSelection()) {
+                        ctx.consumeAndRedraw();
+                        return;
+                    }
+                }
                 const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
                 if (pos > 0) {
                     self.undo.deleteText(self.buffer, pos - 1, 1) catch return;
@@ -99,7 +317,15 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     self.modified = true;
                     ctx.consumeAndRedraw();
                 }
-            } else if (key.matches(vaxis.Key.delete, .{})) {
+            }
+            // -- Delete key: delete selection or single char --
+            else if (key.matches(vaxis.Key.delete, .{})) {
+                if (self.selection_anchor != null) {
+                    if (self.deleteSelection()) {
+                        ctx.consumeAndRedraw();
+                        return;
+                    }
+                }
                 const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
                 if (pos < self.buffer.totalLen()) {
                     self.undo.deleteText(self.buffer, pos, 1) catch return;
@@ -107,6 +333,7 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     ctx.consumeAndRedraw();
                 }
             } else if (key.matches(vaxis.Key.enter, .{})) {
+                _ = self.deleteSelection();
                 const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
                 self.undo.insertText(self.buffer, pos, "\n") catch return;
                 self.cursor_line += 1;
@@ -114,17 +341,21 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 self.modified = true;
                 ctx.consumeAndRedraw();
             } else if (key.matches('z', .{ .ctrl = true })) {
+                self.clearSelection();
                 self.undo.undo(self.buffer) catch return;
                 ctx.consumeAndRedraw();
             } else if (key.matches('y', .{ .ctrl = true })) {
+                self.clearSelection();
                 self.undo.redo(self.buffer) catch return;
                 ctx.consumeAndRedraw();
             } else if (key.matches('z', .{ .ctrl = true, .shift = true })) {
+                self.clearSelection();
                 self.undo.redo(self.buffer) catch return;
                 ctx.consumeAndRedraw();
             } else {
                 if (key.text) |text| {
                     if (text.len > 0 and text[0] >= 0x20) {
+                        _ = self.deleteSelection();
                         const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
                         self.undo.insertText(self.buffer, pos, text) catch return;
                         self.cursor_col += text.len;
@@ -176,6 +407,11 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         return surface;
     }
 
+    // Pre-compute selection line/col bounds to avoid per-character lineColToPosition
+    const sel = self.selectionRange();
+    const sel_start_lc: ?TextBuffer.LineCol = if (sel) |s| self.buffer.positionToLineCol(s.start) else null;
+    const sel_end_lc: ?TextBuffer.LineCol = if (sel) |s| self.buffer.positionToLineCol(s.end) else null;
+
     var row: u16 = 0;
     while (row < max.height) : (row += 1) {
         const buf_line = self.scroll_top + @as(usize, row);
@@ -209,7 +445,19 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
             }
 
             var cell_style = style;
-            if (buf_line == self.cursor_line and ci == self.cursor_col and self.focused) {
+
+            // Selection highlight: check if (buf_line, ci) is within [sel_start_lc, sel_end_lc)
+            if (sel_start_lc) |s_start| {
+                if (sel_end_lc) |s_end| {
+                    const after_start = (buf_line > s_start.line) or (buf_line == s_start.line and ci >= s_start.col);
+                    const before_end = (buf_line < s_end.line) or (buf_line == s_end.line and ci < s_end.col);
+                    if (after_start and before_end) {
+                        cell_style.reverse = true;
+                    }
+                }
+            }
+
+            if (buf_line == self.cursor_line and ci == self.cursor_col and self.focused and sel == null) {
                 cell_style.reverse = true;
             }
 
@@ -220,7 +468,7 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
             col += 1;
         }
 
-        if (buf_line == self.cursor_line and self.cursor_col >= line_content.len and self.focused) {
+        if (buf_line == self.cursor_line and self.cursor_col >= line_content.len and self.focused and sel == null) {
             const cursor_screen_col = gutter_width + @as(u16, @intCast(line_content.len));
             if (cursor_screen_col < total_width) {
                 surface.writeCell(cursor_screen_col, row, .{
@@ -271,7 +519,7 @@ fn writeGutter(surface: *vxfw.Surface, row: u16, line_num: usize, error_lines: [
         }
     }
 
-    // col 0: marker (● for error/warning) or dim space
+    // col 0: marker (for error/warning) or dim space
     if (marker_severity) |sev| {
         const marker_style: vaxis.Cell.Style = if (sev == .err)
             .{ .fg = .{ .index = 1 } }
@@ -418,4 +666,88 @@ test "ErrorLine: gutter marker severity prefers err over warn" {
     }
     try testing.expect(found != null);
     try testing.expect(found.? == .err);
+}
+
+test "selectionRange: returns null when no selection" {
+    var buf = try TextBuffer.init(testing.allocator, "hello\nworld\n");
+    defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
+    const pane = EditorPane{
+        .buffer = &buf,
+        .undo = &um,
+    };
+    try testing.expect(pane.selectionRange() == null);
+}
+
+test "selectionRange: returns correct range" {
+    var buf = try TextBuffer.init(testing.allocator, "hello\nworld\n");
+    defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
+    var pane = EditorPane{
+        .buffer = &buf,
+        .undo = &um,
+        .cursor_line = 0,
+        .cursor_col = 3,
+    };
+    // anchor at position 1 ("e" in "hello"), cursor at col 3 => position 3
+    pane.selection_anchor = 1;
+    const range = pane.selectionRange().?;
+    try testing.expectEqual(@as(usize, 1), range.start);
+    try testing.expectEqual(@as(usize, 3), range.end);
+}
+
+test "selectionRange: reversed anchor and cursor" {
+    var buf = try TextBuffer.init(testing.allocator, "hello\nworld\n");
+    defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
+    var pane = EditorPane{
+        .buffer = &buf,
+        .undo = &um,
+        .cursor_line = 0,
+        .cursor_col = 1,
+    };
+    // anchor past cursor: anchor=4, cursor at col 1 => position 1
+    pane.selection_anchor = 4;
+    const range = pane.selectionRange().?;
+    try testing.expectEqual(@as(usize, 1), range.start);
+    try testing.expectEqual(@as(usize, 4), range.end);
+}
+
+test "setClipboard: stores text" {
+    var buf = try TextBuffer.init(testing.allocator, "hello");
+    defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
+    var pane = EditorPane{
+        .buffer = &buf,
+        .undo = &um,
+    };
+    defer pane.freeClipboard();
+
+    pane.setClipboard("test clipboard");
+    try testing.expectEqualStrings("test clipboard", pane.clipboard);
+    try testing.expect(pane.clipboard_owned);
+}
+
+test "setClipboard: frees previous clipboard on replacement" {
+    var buf = try TextBuffer.init(testing.allocator, "hello");
+    defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
+    var pane = EditorPane{
+        .buffer = &buf,
+        .undo = &um,
+    };
+    defer pane.freeClipboard();
+
+    pane.setClipboard("first");
+    try testing.expectEqualStrings("first", pane.clipboard);
+
+    // Replace — the previous allocation should be freed (no leak)
+    pane.setClipboard("second");
+    try testing.expectEqualStrings("second", pane.clipboard);
+    try testing.expect(pane.clipboard_owned);
 }
