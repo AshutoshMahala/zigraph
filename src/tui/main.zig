@@ -63,4 +63,5 @@ pub fn main() !void {
 
 test {
     _ = @import("text_buffer.zig");
+    _ = @import("undo.zig");
 }
