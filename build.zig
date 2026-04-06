@@ -854,6 +854,25 @@ pub fn build(b: *std.Build) void {
     const run_cli_step = b.step("run-cli", "Run the zigraph CLI");
     run_cli_step.dependOn(&run_cli.step);
 
+    // LSP server executable
+    const lsp_exe = b.addExecutable(.{
+        .name = "zgraph-lsp",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/lsp/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+                .{ .name = "dsl", .module = dsl_mod },
+            },
+        }),
+    });
+    b.installArtifact(lsp_exe);
+
+    const run_lsp = b.addRunArtifact(lsp_exe);
+    const run_lsp_step = b.step("run-lsp", "Run the zgraph LSP server");
+    run_lsp_step.dependOn(&run_lsp.step);
+
     // DSL demo example
     const dsl_demo = b.addExecutable(.{
         .name = "dsl_demo",
