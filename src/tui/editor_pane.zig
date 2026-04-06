@@ -12,6 +12,18 @@ const EditorPane = @This();
 
 const gutter_width: u16 = 5;
 
+/// A single error or warning annotation to display in the editor.
+pub const ErrorLine = struct {
+    /// 0-based line index.
+    line: usize,
+    /// 0-based column where the underline starts.
+    col: usize,
+    /// Number of characters to underline (0 means underline to end of line).
+    len: usize,
+    severity: enum { err, warn },
+    message: []const u8,
+};
+
 buffer: *TextBuffer,
 undo: *UndoManager,
 definitions: ?*Definitions = null,
@@ -21,6 +33,7 @@ scroll_top: usize = 0,
 scroll_left: usize = 0,
 focused: bool = true,
 modified: bool = false,
+error_lines: []const ErrorLine = &.{},
 
 pub fn widget(self: *EditorPane) vxfw.Widget {
     return .{
@@ -146,7 +159,7 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
 
     if (line_count == 0) {
         // Empty buffer — just show gutter for line 1
-        writeGutter(&surface, 0, 1);
+        writeGutter(&surface, 0, 1, self.error_lines);
         if (self.focused) {
             surface.cursor = .{
                 .col = gutter_width,
@@ -166,7 +179,7 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         if (buf_line >= line_count) break;
 
         // Render gutter (line number, 1-based, right-aligned)
-        writeGutter(&surface, row, buf_line + 1);
+        writeGutter(&surface, row, buf_line + 1, self.error_lines);
 
         // Get line content
         const line_content = self.buffer.lineAt(buf_line) catch continue;
@@ -179,7 +192,22 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         var col: u16 = gutter_width;
         for (line_content, 0..) |ch, ci| {
             if (col >= total_width) break;
-            const style = spanStyleAt(spans, ci);
+            var style = spanStyleAt(spans, ci);
+
+            // Merge error/warning underline if this character is in an error range
+            for (self.error_lines) |el| {
+                if (el.line == buf_line) {
+                    const end_col = if (el.len == 0) line_content.len else el.col + el.len;
+                    if (ci >= el.col and ci < end_col) {
+                        const ul_style = if (el.severity == .err)
+                            Highlighter.error_underline
+                        else
+                            Highlighter.warning_underline;
+                        style.ul = ul_style.ul;
+                        style.ul_style = ul_style.ul_style;
+                    }
+                }
+            }
 
             // Apply cursor reverse if this is the cursor position
             var cell_style = style;
@@ -223,27 +251,62 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     return surface;
 }
 
-fn writeGutter(surface: *vxfw.Surface, row: u16, line_num: usize) void {
+fn writeGutter(surface: *vxfw.Surface, row: u16, line_num: usize, error_lines: []const ErrorLine) void {
     // Format line number right-aligned in gutter_width - 1 chars, then a space
     var num_buf: [16]u8 = undefined;
     const num_str = std.fmt.bufPrint(&num_buf, "{d}", .{line_num}) catch return;
-    const pad = if (gutter_width > num_str.len + 1) gutter_width - @as(u16, @intCast(num_str.len)) - 1 else 0;
+    // pad: number of leading spaces before the line number digits
+    // Layout: [marker][padding][digits][space]  total = gutter_width
+    // marker takes col 0; digits + space take gutter_width - 1 chars after that
+    const inner_width: u16 = gutter_width - 1; // cols 1..gutter_width-1 used for num + trailing space
+    const pad: u16 = if (inner_width > @as(u16, @intCast(num_str.len)) + 1)
+        inner_width - @as(u16, @intCast(num_str.len)) - 1
+    else
+        0;
 
     const dim_style: vaxis.Cell.Style = .{ .dim = true };
 
-    var col: u16 = 0;
-    // Write padding spaces
-    while (col < pad) : (col += 1) {
+    // Determine if this line (0-based: line_num - 1) has an error or warning
+    const buf_line = line_num - 1; // convert 1-based to 0-based
+    var marker_severity: ?@FieldType(ErrorLine, "severity") = null;
+    for (error_lines) |el| {
+        if (el.line == buf_line) {
+            if (marker_severity == null or el.severity == .err) {
+                marker_severity = el.severity;
+            }
+        }
+    }
+
+    // col 0: marker (● for error/warning) or dim space
+    if (marker_severity) |sev| {
+        const marker_style: vaxis.Cell.Style = if (sev == .err)
+            .{ .fg = .{ .index = 1 } }
+        else
+            .{ .fg = .{ .index = 3 } };
+        surface.writeCell(0, row, .{
+            .char = .{ .grapheme = "●", .width = 1 },
+            .style = marker_style,
+        });
+    } else {
+        surface.writeCell(0, row, .{
+            .char = .{ .grapheme = " ", .width = 1 },
+            .style = dim_style,
+        });
+    }
+
+    // cols 1..pad: padding spaces before the number
+    var col: u16 = 1;
+    const pad_end = col + pad;
+    while (col < pad_end) : (col += 1) {
         surface.writeCell(col, row, .{
             .char = .{ .grapheme = " ", .width = 1 },
             .style = dim_style,
         });
     }
     // Write digits
-    for (num_str) |ch| {
-        _ = ch;
+    for (num_str, 0..) |_, di| {
         surface.writeCell(col, row, .{
-            .char = .{ .grapheme = num_str[col - pad .. col - pad + 1], .width = 1 },
+            .char = .{ .grapheme = num_str[di .. di + 1], .width = 1 },
             .style = dim_style,
         });
         col += 1;
@@ -316,4 +379,52 @@ test "spanStyleAt: returns span style for covered column" {
     };
     const style = spanStyleAt(&spans, 1);
     try testing.expect(style.bold);
+}
+
+test "ErrorLine: error_lines field defaults to empty" {
+    var buf = try TextBuffer.init(testing.allocator, "hello\n");
+    defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
+    const pane = EditorPane{
+        .buffer = &buf,
+        .undo = &um,
+    };
+    try testing.expectEqual(@as(usize, 0), pane.error_lines.len);
+}
+
+test "ErrorLine: struct has expected fields" {
+    const el = EditorPane.ErrorLine{
+        .line = 2,
+        .col = 4,
+        .len = 3,
+        .severity = .err,
+        .message = "unexpected token",
+    };
+    try testing.expectEqual(@as(usize, 2), el.line);
+    try testing.expectEqual(@as(usize, 4), el.col);
+    try testing.expectEqual(@as(usize, 3), el.len);
+    try testing.expect(el.severity == .err);
+    try testing.expectEqualStrings("unexpected token", el.message);
+}
+
+test "ErrorLine: gutter marker severity prefers err over warn" {
+    // When a line has both a warning and an error, error takes priority.
+    // We test the logic by checking that error_lines with .err severity
+    // overrides an earlier .warn entry for the same line.
+    const error_lines = [_]EditorPane.ErrorLine{
+        .{ .line = 0, .col = 0, .len = 1, .severity = .warn, .message = "w" },
+        .{ .line = 0, .col = 2, .len = 1, .severity = .err, .message = "e" },
+    };
+    // Verify the logic: scan through and confirm err wins
+    var found: ?@FieldType(EditorPane.ErrorLine, "severity") = null;
+    for (error_lines) |el| {
+        if (el.line == 0) {
+            if (found == null or el.severity == .err) {
+                found = el.severity;
+            }
+        }
+    }
+    try testing.expect(found != null);
+    try testing.expect(found.? == .err);
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
+const dsl = @import("dsl");
 
 const TextBuffer = @import("text_buffer.zig");
 const EditorPane = @import("editor_pane.zig");
@@ -46,6 +47,8 @@ buffers: std.ArrayListUnmanaged(BufferState),
 active_tab: usize = 0,
 tab_cache: std.ArrayListUnmanaged(TabBar.Tab),
 children: [6]vxfw.SubSurface = undefined,
+/// Owned slice of error/warning annotations for the current buffer.
+last_errors: []EditorPane.ErrorLine = &.{},
 
 pub fn create(allocator: std.mem.Allocator) !*App {
     const buffer = try allocator.create(TextBuffer);
@@ -103,6 +106,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .buffers = .{},
         .tab_cache = .{},
         .split = undefined,
+        .last_errors = &.{},
     };
     self.split = .{
         .lhs = self.editor_pane.widget(),
@@ -124,6 +128,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
 }
 
 pub fn destroy(self: *App) void {
+    self.allocator.free(self.last_errors);
     self.preview_pane.destroy();
     // Destroy all buffer states
     for (self.buffers.items) |bs| {
@@ -265,6 +270,59 @@ fn refreshPreview(self: *App) void {
     self.preview_pane.renderFromSource(self.allocator, source);
     self.rebuildSourceMap();
     self.definitions.clear();
+    self.refreshErrors(source);
+}
+
+fn refreshErrors(self: *App, source: []const u8) void {
+    // Free previous error annotations
+    self.allocator.free(self.last_errors);
+    self.last_errors = &.{};
+    self.editor_pane.error_lines = &.{};
+
+    // Run tokenize + parse to collect DSL errors
+    var err_list = dsl.errors.ErrorList.init(self.allocator);
+    defer err_list.deinit();
+
+    const tokens = dsl.tokenizer.tokenize(self.allocator, source, &err_list) catch {
+        // Tokenizer returned a fatal error; any errors are already in err_list via the error path,
+        // but since tokenize returns error on OOM (not parse errors), just return.
+        return;
+    };
+    defer self.allocator.free(tokens);
+
+    if (!err_list.hasErrors()) {
+        // Also run the parser to collect parse-level errors
+        var p = dsl.parser.Parser.init(self.allocator, tokens, &err_list);
+        _ = p.parse() catch {};
+    }
+
+    if (!err_list.hasErrors()) {
+        self.status_bar.message = "";
+        return;
+    }
+
+    // Convert DslError list → []ErrorLine
+    var lines = std.ArrayListUnmanaged(EditorPane.ErrorLine){};
+    for (err_list.errors.items) |e| {
+        // DslError.loc.line is 1-based; ErrorLine.line is 0-based
+        const buf_line: usize = if (e.loc.line > 0) e.loc.line - 1 else 0;
+        const buf_col: usize = if (e.loc.col > 0) e.loc.col - 1 else 0;
+        lines.append(self.allocator, .{
+            .line = buf_line,
+            .col = buf_col,
+            .len = 1,
+            .severity = .err,
+            .message = e.message,
+        }) catch break;
+    }
+
+    self.last_errors = lines.toOwnedSlice(self.allocator) catch &.{};
+    self.editor_pane.error_lines = self.last_errors;
+
+    // Show first error message in status bar
+    if (self.last_errors.len > 0) {
+        self.status_bar.message = self.last_errors[0].message;
+    }
 }
 
 fn saveCurrentFile(self: *App) !void {
