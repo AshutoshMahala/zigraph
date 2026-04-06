@@ -112,6 +112,22 @@ db .database .large -> cache .cache
     (class_ref)))
 
 ================
+String-labeled nodes in edge
+================
+
+"Web Server" -> "Database"
+
+---
+
+(source_file
+  (edge_chain
+    (string
+      (string_content))
+    (edge_operator)
+    (string
+      (string_content))))
+
+================
 Dot-path identifiers in edge
 ================
 

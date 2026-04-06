@@ -26,6 +26,20 @@ Import directive with string
       (string_content))))
 
 ================
+Layout directive with string value
+================
+
+@layout "dagre"
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (string
+      (string_content))))
+
+================
 Direction directive
 ================
 
