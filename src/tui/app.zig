@@ -5,6 +5,7 @@ const vxfw = vaxis.vxfw;
 const TextBuffer = @import("text_buffer.zig");
 const EditorPane = @import("editor_pane.zig");
 const UndoManager = @import("undo.zig");
+const PreviewPane = @import("preview_pane.zig");
 
 const App = @This();
 
@@ -16,7 +17,7 @@ split: vxfw.SplitView,
 editor_pane: *EditorPane,
 buffer: *TextBuffer,
 undo: *UndoManager,
-preview_text: vxfw.Text,
+preview_pane: *PreviewPane,
 status_text: vxfw.Text,
 children: [2]vxfw.SubSurface = undefined,
 
@@ -33,16 +34,23 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .undo = undo,
     };
 
+    const preview_pane = try allocator.create(PreviewPane);
+    preview_pane.* = .{ .allocator = allocator };
+
+    // Initial render from the default buffer contents
+    const source = buffer.contents(allocator) catch null;
+    if (source) |s| {
+        defer allocator.free(s);
+        preview_pane.renderFromSource(allocator, s);
+    }
+
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
         .buffer = buffer,
         .undo = undo,
         .editor_pane = editor_pane,
-        .preview_text = .{
-            .text = "[preview pane]",
-            .width_basis = .parent,
-        },
+        .preview_pane = preview_pane,
         .status_text = .{
             .text = "zigraph editor | Ctrl+Q quit | Tab switch focus",
             .style = .{ .reverse = true },
@@ -52,13 +60,14 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     };
     self.split = .{
         .lhs = self.editor_pane.widget(),
-        .rhs = self.preview_text.widget(),
+        .rhs = self.preview_pane.widget(),
         .width = 40,
     };
     return self;
 }
 
 pub fn destroy(self: *App) void {
+    self.preview_pane.destroy();
     self.allocator.destroy(self.editor_pane);
     self.undo.deinit();
     self.allocator.destroy(self.undo);
@@ -75,6 +84,12 @@ pub fn widget(self: *App) vxfw.Widget {
     };
 }
 
+fn refreshPreview(self: *App) void {
+    const source = self.buffer.contents(self.allocator) catch return;
+    defer self.allocator.free(source);
+    self.preview_pane.renderFromSource(self.allocator, source);
+}
+
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
     const self: *App = @ptrCast(@alignCast(ptr));
     switch (event) {
@@ -88,10 +103,27 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 };
                 ctx.redraw = true;
             } else if (self.focus == .editor) {
+                // Track whether the buffer was modified before forwarding
+                const was_modified = self.editor_pane.modified;
+
                 // Forward key events to editor pane
                 const ep_widget = self.editor_pane.widget();
                 if (ep_widget.eventHandler) |handler| {
                     try handler(ep_widget.userdata, ctx, event);
+                }
+
+                // If the editor modified the buffer, refresh the preview
+                if (self.editor_pane.modified and !was_modified) {
+                    self.refreshPreview();
+                } else if (self.editor_pane.modified) {
+                    // Also refresh on continued edits (modified was already true)
+                    self.refreshPreview();
+                }
+            } else if (self.focus == .preview) {
+                // Forward key events to preview pane
+                const pp_widget = self.preview_pane.widget();
+                if (pp_widget.eventHandler) |handler| {
+                    try handler(pp_widget.userdata, ctx, event);
                 }
             }
         },
@@ -108,10 +140,11 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
 
     // Update focus state
     self.editor_pane.focused = (self.focus == .editor);
+    self.preview_pane.focused = (self.focus == .preview);
 
     // Update split's lhs/rhs
     self.split.lhs = self.editor_pane.widget();
-    self.split.rhs = self.preview_text.widget();
+    self.split.rhs = self.preview_pane.widget();
 
     // Draw split view in content area
     const content_ctx = ctx.withConstraints(
