@@ -294,9 +294,9 @@ pub fn lineColToPosition(self: *const TextBuffer, line: usize, col: usize) usize
 
     for (self.pieces.items) |p| {
         const buf = self.pieceSlice(p);
-        for (buf) |_| {
+        for (buf) |c| {
             if (current_line == line and current_col == col) return offset;
-            if (self.byteAt(offset) == '\n') {
+            if (c == '\n') {
                 current_line += 1;
                 current_col = 0;
             } else {
@@ -317,7 +317,7 @@ fn byteAt(self: *const TextBuffer, pos: usize) u8 {
         }
         offset += p.len;
     }
-    unreachable;
+    return '\n';
 }
 
 // --- Tests ---
