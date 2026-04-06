@@ -8,3 +8,37 @@ Single line comment
 
 (source_file
   (comment))
+
+================
+Multiple comments
+================
+
+# first comment
+# second comment
+
+---
+
+(source_file
+  (comment)
+  (comment))
+
+================
+Comment inside block
+================
+
+network {
+  # internal comment
+  A -> B
+}
+
+---
+
+(source_file
+  (block
+    (identifier)
+    (block_body
+      (comment)
+      (edge_chain
+        (identifier)
+        (edge_operator)
+        (identifier)))))
