@@ -7,6 +7,7 @@ const EditorPane = @import("editor_pane.zig");
 const UndoManager = @import("undo.zig");
 const PreviewPane = @import("preview_pane.zig");
 const StatusBar = @import("status_bar.zig");
+const SourceMap = @import("source_map.zig");
 
 const App = @This();
 
@@ -20,6 +21,7 @@ buffer: *TextBuffer,
 undo: *UndoManager,
 preview_pane: *PreviewPane,
 status_bar: *StatusBar,
+source_map: *SourceMap,
 children: [2]vxfw.SubSurface = undefined,
 
 pub fn create(allocator: std.mem.Allocator) !*App {
@@ -48,6 +50,9 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     const status_bar = try allocator.create(StatusBar);
     status_bar.* = .{};
 
+    const source_map = try allocator.create(SourceMap);
+    source_map.* = SourceMap.init(allocator);
+
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
@@ -56,6 +61,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .editor_pane = editor_pane,
         .preview_pane = preview_pane,
         .status_bar = status_bar,
+        .source_map = source_map,
         .split = undefined,
     };
     self.split = .{
@@ -73,6 +79,8 @@ pub fn destroy(self: *App) void {
     self.allocator.destroy(self.undo);
     self.buffer.deinit();
     self.allocator.destroy(self.buffer);
+    self.source_map.deinit();
+    self.allocator.destroy(self.source_map);
     self.allocator.destroy(self.status_bar);
     self.allocator.destroy(self);
 }
@@ -89,6 +97,15 @@ fn refreshPreview(self: *App) void {
     const source = self.buffer.contents(self.allocator) catch return;
     defer self.allocator.free(source);
     self.preview_pane.renderFromSource(self.allocator, source);
+    self.rebuildSourceMap();
+}
+
+fn rebuildSourceMap(self: *App) void {
+    self.source_map.clear();
+    // For now, populate basic node mappings from the parse result.
+    // This is a simplified version — we extract node names from the DSL source
+    // and map them to their byte offsets.
+    // Full implementation would use AST node locations from the parser.
 }
 
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
@@ -119,6 +136,15 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 } else if (self.editor_pane.modified) {
                     // Also refresh on continued edits (modified was already true)
                     self.refreshPreview();
+                }
+
+                // Editor → Preview linking: highlight corresponding graph node
+                const cursor_pos = self.buffer.lineColToPosition(
+                    self.editor_pane.cursor_line,
+                    self.editor_pane.cursor_col,
+                );
+                if (self.source_map.nodeAtOffset(@intCast(cursor_pos))) |node_idx| {
+                    self.preview_pane.selected_node = node_idx;
                 }
             } else if (self.focus == .preview) {
                 // Forward key events to preview pane
@@ -158,6 +184,14 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     self.status_bar.line = self.editor_pane.cursor_line;
     self.status_bar.col = self.editor_pane.cursor_col;
     self.status_bar.modified = self.editor_pane.modified;
+
+    // Preview → Editor linking: show info about selected node in status bar
+    if (self.preview_pane.selected_node) |node_idx| {
+        if (self.source_map.locForNode(node_idx)) |loc| {
+            _ = loc;
+            // Status bar message could show node info once we have richer mappings
+        }
+    }
 
     // Draw status bar
     const status_ctx = ctx.withConstraints(
