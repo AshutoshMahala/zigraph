@@ -1,0 +1,40 @@
+{
+  "name": "tree-sitter-zgraph",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the zgraph graph description language",
+  "main": "bindings/node",
+  "types": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "zgraph",
+    "graph",
+    "syntax-highlighting"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/markussagen/zigraph"
+  },
+  "license": "MIT",
+  "files": [
+    "grammar.js",
+    "binding.gyp",
+    "prebuilds/**",
+    "bindings/node/*",
+    "queries/*",
+    "src/**"
+  ],
+  "dependencies": {
+    "node-addon-api": "^8.0.0",
+    "node-gyp-build": "^4.8.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.24.0"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse",
+    "build": "tree-sitter generate && tree-sitter test"
+  }
+}

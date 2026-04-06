@@ -33,3 +33,8 @@ docs/
 !/assets/*.svg
 subgraph_demo.json
 subgraph_demo.svg
+
+# Tree-sitter generated files
+tree-sitter-zgraph/src/
+tree-sitter-zgraph/node_modules/
+tree-sitter-zgraph/build/
