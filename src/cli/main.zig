@@ -38,11 +38,16 @@ const WatchArgs = struct {
     poll_ms: u64 = 500,
 };
 
+const EditArgs = struct {
+    files: []const []const u8 = &.{},
+};
+
 const Command = union(enum) {
     render: RenderArgs,
     check: CheckArgs,
     fmt: FmtArgs,
     watch: WatchArgs,
+    edit: EditArgs,
     help,
 };
 
@@ -55,6 +60,7 @@ fn printHelp(writer: anytype) !void {
         \\  check <file>           Validate syntax, print OK or errors
         \\  fmt [file]             Format a .zgraph file (reads stdin if no file given)
         \\  watch <file>           Watch a file and re-render on changes
+        \\  edit [file...]         Open file(s) in TUI editor
         \\
         \\Render options:
         \\  -f terminal|svg|json                          Output format (default: terminal)
@@ -190,6 +196,12 @@ fn parseArgs(args: []const []const u8) !Command {
             }
         }
         return Command{ .watch = watch_args };
+    }
+
+    if (std.mem.eql(u8, cmd_str, "edit")) {
+        // Collect remaining args as file paths
+        const files = if (args.len > 1) args[1..] else args[0..0];
+        return Command{ .edit = .{ .files = files } };
     }
 
     return error.UnknownCommand;
@@ -489,6 +501,13 @@ pub fn main() !void {
                 try stderr.print("error: {s}\n", .{@errorName(err)});
                 std.process.exit(1);
             };
+        },
+        .edit => |edit_args| {
+            const stderr = std.fs.File.stderr().deprecatedWriter();
+            try stderr.writeAll("TUI editor not available in this binary.\n");
+            try stderr.writeAll("Use 'zig build run-edit' or 'zigraph-edit' instead.\n");
+            _ = edit_args;
+            std.process.exit(1);
         },
     }
 }
