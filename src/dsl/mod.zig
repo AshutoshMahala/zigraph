@@ -42,6 +42,11 @@ pub const ParseResult = struct {
 
 /// Full pipeline: tokenize → parse → resolve → build graphs from a DSL source string.
 pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseResult {
+    return parseAndBuildWithBase(allocator, source, null);
+}
+
+/// Full pipeline with optional base directory for @import resolution.
+pub fn parseAndBuildWithBase(allocator: std.mem.Allocator, source: []const u8, base_dir: ?[]const u8) !ParseResult {
     var err_list = errors.ErrorList.init(allocator);
     errdefer err_list.deinit();
 
@@ -52,10 +57,58 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
     const doc = try p.parse();
     defer freeDoc(allocator, doc);
 
-    const resolve_result = try resolver.resolve(allocator, doc, &err_list);
+    // Resolve @import directives if a base directory is provided
+    if (base_dir) |dir| {
+        var visited = std.StringHashMap(void).init(allocator);
+        defer {
+            var it = visited.keyIterator();
+            while (it.next()) |key| allocator.free(key.*);
+            visited.deinit();
+        }
 
-    // Collect owned labels (from var substitution) before freeing resolve result.
-    // These labels are borrowed by BuiltGraph and must outlive it.
+        const import_result = try imports.resolveImports(allocator, doc.directives, dir, &visited, &err_list);
+        defer {
+            allocator.free(import_result.styles);
+            allocator.free(import_result.vars);
+        }
+
+        // Merge imported styles and vars into the resolver call.
+        // Imported styles have lower priority (loaded first), document styles override.
+        // We pass them as extra_styles/extra_vars to resolve.
+        // For now, we prepend imported styles/vars to the doc's own by building merged slices.
+        // Note: resolver.resolve only sees doc.styles and doc.vars, so we need to extend them.
+        // Since doc fields are const slices from the parser, we build new merged slices.
+        if (import_result.styles.len > 0 or import_result.vars.len > 0) {
+            var merged_doc = doc;
+            if (import_result.styles.len > 0) {
+                const merged_styles = try allocator.alloc(ast.StyleRule, import_result.styles.len + doc.styles.len);
+                defer allocator.free(merged_styles);
+                @memcpy(merged_styles[0..import_result.styles.len], import_result.styles);
+                @memcpy(merged_styles[import_result.styles.len..], doc.styles);
+                merged_doc.styles = merged_styles;
+            }
+            if (import_result.vars.len > 0) {
+                const merged_vars = try allocator.alloc(ast.Property, import_result.vars.len + doc.vars.len);
+                defer allocator.free(merged_vars);
+                @memcpy(merged_vars[0..import_result.vars.len], import_result.vars);
+                @memcpy(merged_vars[import_result.vars.len..], doc.vars);
+                merged_doc.vars = merged_vars;
+            }
+            const resolve_result = try resolver.resolve(allocator, merged_doc, &err_list);
+            return buildFromResolved(allocator, doc, resolve_result, &err_list);
+        }
+    }
+
+    const resolve_result = try resolver.resolve(allocator, doc, &err_list);
+    return buildFromResolved(allocator, doc, resolve_result, &err_list);
+}
+
+fn buildFromResolved(
+    allocator: std.mem.Allocator,
+    doc: ast.Document,
+    resolve_result: resolver.ResolveResult,
+    err_list: *errors.ErrorList,
+) !ParseResult {
     var owned_labels_list = std.ArrayListUnmanaged([]const u8){};
     errdefer {
         for (owned_labels_list.items) |lbl| allocator.free(lbl);
@@ -92,14 +145,10 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
         trees_list.deinit(allocator);
     }
 
-    // resolved blocks: optional __default__ block first, then named blocks
-    // matching doc.blocks order. Track named-block offset.
     var doc_block_idx: usize = 0;
     for (resolve_result.blocks) |blk| {
         switch (blk.config.layout) {
             .table => {
-                // table_headers/table_row are not preserved by the resolver;
-                // use the original AST block's statements and directives.
                 const ast_stmts: []const ast.Statement = if (std.mem.eql(u8, blk.name, "__default__"))
                     doc.statements
                 else if (doc_block_idx >= doc.blocks.len)
@@ -116,15 +165,13 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
                     const d = doc.blocks[doc_block_idx].directives;
                     break :dir_blk d;
                 };
-                const built = try bridge.buildTable(allocator, blk.name, ast_stmts, ast_dirs, &err_list);
+                const built = try bridge.buildTable(allocator, blk.name, ast_stmts, ast_dirs, err_list);
                 try tables_list.append(allocator, built);
             },
             .tree => {
-                // Build both a BuiltGraph and a TreeResult for tree blocks.
                 const built_graph = try bridge.buildGraph(allocator, blk);
                 try graphs_list.append(allocator, built_graph);
 
-                // Collect node ids/labels and edges for tree_bridge.buildTree
                 var node_ids = std.ArrayListUnmanaged([]const u8){};
                 defer node_ids.deinit(allocator);
                 var node_labels = std.ArrayListUnmanaged([]const u8){};
@@ -143,12 +190,11 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
                     node_ids.items,
                     node_labels.items,
                     tree_edges.items,
-                    &err_list,
+                    err_list,
                 );
                 try trees_list.append(allocator, built_tree);
             },
             else => {
-                // .dag, .force, .card, .flow → buildGraph
                 const built = try bridge.buildGraph(allocator, blk);
                 try graphs_list.append(allocator, built);
             },
@@ -163,7 +209,7 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
         .tables = try tables_list.toOwnedSlice(allocator),
         .trees = try trees_list.toOwnedSlice(allocator),
         .owned_labels = try owned_labels_list.toOwnedSlice(allocator),
-        .err_list = err_list,
+        .err_list = err_list.*,
         .allocator = allocator,
     };
 }

@@ -213,6 +213,7 @@ fn renderSource(
     allocator: std.mem.Allocator,
     source: []const u8,
     is_markdown: bool,
+    base_dir: ?[]const u8,
     format: Format,
     direction_override: ?dsl.ast.Direction,
     writer: anytype,
@@ -220,7 +221,7 @@ fn renderSource(
     var result = if (is_markdown)
         try dsl.parseMarkdown(allocator, source)
     else
-        try dsl.parseAndBuild(allocator, source);
+        try dsl.parseAndBuildWithBase(allocator, source, base_dir);
     defer result.deinit();
 
     if (result.hasErrors()) {
@@ -281,16 +282,17 @@ fn cmdRender(allocator: std.mem.Allocator, args: RenderArgs) !void {
     defer allocator.free(source);
 
     const is_md = if (args.input_file) |path| isMarkdownFile(path) else false;
+    const base_dir: ?[]const u8 = if (args.input_file) |path| std.fs.path.dirname(path) orelse "." else null;
 
     // Prepare output writer
     if (args.output_file) |out_path| {
         const out_file = try std.fs.cwd().createFile(out_path, .{ .truncate = true });
         defer out_file.close();
         const file_writer = out_file.deprecatedWriter();
-        try renderSource(allocator, source, is_md, args.format, args.direction_override, file_writer);
+        try renderSource(allocator, source, is_md, base_dir, args.format, args.direction_override, file_writer);
     } else {
         const stdout = std.fs.File.stdout().deprecatedWriter();
-        try renderSource(allocator, source, is_md, args.format, args.direction_override, stdout);
+        try renderSource(allocator, source, is_md, base_dir, args.format, args.direction_override, stdout);
     }
 }
 
@@ -369,11 +371,12 @@ fn cmdWatch(allocator: std.mem.Allocator, args: WatchArgs) !void {
             defer allocator.free(source);
 
             const is_md = isMarkdownFile(args.input_file);
+            const base_dir: ?[]const u8 = std.fs.path.dirname(args.input_file) orelse ".";
 
             // Clear screen (ANSI escape)
             try stdout.writeAll("\x1b[2J\x1b[H");
 
-            renderSource(allocator, source, is_md, args.format, args.direction_override, stdout) catch |err| {
+            renderSource(allocator, source, is_md, base_dir, args.format, args.direction_override, stdout) catch |err| {
                 if (err != error.ParseError and err != error.NoGraphs) {
                     try stderr.print("error: {s}\n", .{@errorName(err)});
                 }
