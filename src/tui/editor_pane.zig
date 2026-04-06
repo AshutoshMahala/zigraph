@@ -4,17 +4,20 @@ const vxfw = vaxis.vxfw;
 
 const TextBuffer = @import("text_buffer.zig");
 const Highlighter = @import("highlighter.zig");
+const UndoManager = @import("undo.zig");
 
 const EditorPane = @This();
 
 const gutter_width: u16 = 5;
 
 buffer: *TextBuffer,
+undo: *UndoManager,
 cursor_line: usize = 0,
 cursor_col: usize = 0,
 scroll_top: usize = 0,
 scroll_left: usize = 0,
 focused: bool = true,
+modified: bool = false,
 
 pub fn widget(self: *EditorPane) vxfw.Widget {
     return .{
@@ -61,6 +64,49 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     self.cursor_line = line_count - 1;
                 }
                 ctx.consumeAndRedraw();
+            } else if (key.matches(vaxis.Key.backspace, .{})) {
+                const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
+                if (pos > 0) {
+                    self.undo.deleteText(self.buffer, pos - 1, 1) catch return;
+                    const lc = self.buffer.positionToLineCol(pos - 1);
+                    self.cursor_line = lc.line;
+                    self.cursor_col = lc.col;
+                    self.modified = true;
+                    ctx.consumeAndRedraw();
+                }
+            } else if (key.matches(vaxis.Key.delete, .{})) {
+                const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
+                if (pos < self.buffer.totalLen()) {
+                    self.undo.deleteText(self.buffer, pos, 1) catch return;
+                    self.modified = true;
+                    ctx.consumeAndRedraw();
+                }
+            } else if (key.matches(vaxis.Key.enter, .{})) {
+                const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
+                self.undo.insertText(self.buffer, pos, "\n") catch return;
+                self.cursor_line += 1;
+                self.cursor_col = 0;
+                self.modified = true;
+                ctx.consumeAndRedraw();
+            } else if (key.matches('z', .{ .ctrl = true })) {
+                self.undo.undo(self.buffer) catch return;
+                ctx.consumeAndRedraw();
+            } else if (key.matches('y', .{ .ctrl = true })) {
+                self.undo.redo(self.buffer) catch return;
+                ctx.consumeAndRedraw();
+            } else if (key.matches('z', .{ .ctrl = true, .shift = true })) {
+                self.undo.redo(self.buffer) catch return;
+                ctx.consumeAndRedraw();
+            } else {
+                if (key.text) |text| {
+                    if (text.len > 0 and text[0] >= 0x20) {
+                        const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);
+                        self.undo.insertText(self.buffer, pos, text) catch return;
+                        self.cursor_col += text.len;
+                        self.modified = true;
+                        ctx.consumeAndRedraw();
+                    }
+                }
             }
         },
         else => {},
@@ -224,20 +270,27 @@ const testing = std.testing;
 test "EditorPane: initial state" {
     var buf = try TextBuffer.init(testing.allocator, "hello\nworld\n");
     defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
     var pane = EditorPane{
         .buffer = &buf,
+        .undo = &um,
     };
     try testing.expectEqual(@as(usize, 0), pane.cursor_line);
     try testing.expectEqual(@as(usize, 0), pane.cursor_col);
     try testing.expectEqual(@as(usize, 0), pane.scroll_top);
+    try testing.expect(!pane.modified);
     _ = pane.widget();
 }
 
 test "EditorPane: cursor clamp on empty buffer" {
     var buf = try TextBuffer.init(testing.allocator, "");
     defer buf.deinit();
+    var um = UndoManager.init(testing.allocator);
+    defer um.deinit();
     var pane = EditorPane{
         .buffer = &buf,
+        .undo = &um,
         .cursor_line = 5,
         .cursor_col = 10,
     };

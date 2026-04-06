@@ -4,6 +4,7 @@ const vxfw = vaxis.vxfw;
 
 const TextBuffer = @import("text_buffer.zig");
 const EditorPane = @import("editor_pane.zig");
+const UndoManager = @import("undo.zig");
 
 const App = @This();
 
@@ -14,6 +15,7 @@ focus: Focus = .editor,
 split: vxfw.SplitView,
 editor_pane: *EditorPane,
 buffer: *TextBuffer,
+undo: *UndoManager,
 preview_text: vxfw.Text,
 status_text: vxfw.Text,
 children: [2]vxfw.SubSurface = undefined,
@@ -22,15 +24,20 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     const buffer = try allocator.create(TextBuffer);
     buffer.* = try TextBuffer.init(allocator, "# Example\n@layout sugiyama\n\nA -> B -> C\nB -> D\n");
 
+    const undo = try allocator.create(UndoManager);
+    undo.* = UndoManager.init(allocator);
+
     const editor_pane = try allocator.create(EditorPane);
     editor_pane.* = .{
         .buffer = buffer,
+        .undo = undo,
     };
 
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
         .buffer = buffer,
+        .undo = undo,
         .editor_pane = editor_pane,
         .preview_text = .{
             .text = "[preview pane]",
@@ -53,6 +60,8 @@ pub fn create(allocator: std.mem.Allocator) !*App {
 
 pub fn destroy(self: *App) void {
     self.allocator.destroy(self.editor_pane);
+    self.undo.deinit();
+    self.allocator.destroy(self.undo);
     self.buffer.deinit();
     self.allocator.destroy(self.buffer);
     self.allocator.destroy(self);
