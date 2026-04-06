@@ -67,7 +67,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     preview_pane.* = .{ .allocator = allocator };
 
     // Initial render from the default buffer contents
-    const source = buffer.contents(allocator) catch null;
+    const source = buffer.contents(allocator) catch null; // OOM: skip initial render
     if (source) |s| {
         defer allocator.free(s);
         preview_pane.renderFromSource(allocator, s);
@@ -220,10 +220,30 @@ fn executeAction(self: *App, action: CommandPalette.Action, ctx: *vxfw.EventCont
             ctx.redraw = true;
         },
         .close_tab => {
-            // Close tab: switch to previous if possible
+            // Close tab: remove the current buffer and switch to an adjacent one
             if (self.buffers.items.len > 1) {
-                const next = if (self.active_tab == 0) 0 else self.active_tab - 1;
+                const close_idx = self.active_tab;
+                const next = if (close_idx == 0) 0 else close_idx - 1;
                 self.switchTab(next);
+
+                // Remove the closed buffer and free its resources
+                const closed = self.buffers.orderedRemove(close_idx);
+                self.allocator.destroy(closed.editor_pane);
+                closed.undo.deinit();
+                self.allocator.destroy(closed.undo);
+                closed.buffer.deinit();
+                self.allocator.destroy(closed.buffer);
+
+                // Adjust active_tab if the closed tab was before the current one
+                if (close_idx < self.active_tab) {
+                    self.active_tab -= 1;
+                }
+                // Re-clamp active_tab in case we removed the last item
+                if (self.active_tab >= self.buffers.items.len) {
+                    self.active_tab = self.buffers.items.len - 1;
+                }
+
+                self.rebuildTabCache();
                 self.refreshPreview();
             }
             ctx.redraw = true;

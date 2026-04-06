@@ -40,18 +40,28 @@ pub fn widget(self: *EditorPane) vxfw.Widget {
     };
 }
 
+fn clampCursorCol(self: *EditorPane) void {
+    const line = self.buffer.lineAt(self.cursor_line) catch return;
+    defer self.buffer.allocator.free(line);
+    if (self.cursor_col > line.len) {
+        self.cursor_col = line.len;
+    }
+}
+
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
     const self: *EditorPane = @ptrCast(@alignCast(ptr));
     switch (event) {
         .key_press => |key| {
             if (key.matches(vaxis.Key.up, .{})) {
                 self.cursor_line -|= 1;
+                self.clampCursorCol();
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.down, .{})) {
                 const line_count = self.buffer.lineCount();
                 if (line_count > 0 and self.cursor_line < line_count - 1) {
                     self.cursor_line += 1;
                 }
+                self.clampCursorCol();
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.left, .{})) {
                 self.cursor_col -|= 1;
@@ -69,6 +79,7 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.page_up, .{})) {
                 self.cursor_line -|= 20;
+                self.clampCursorCol();
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.page_down, .{})) {
                 const line_count = self.buffer.lineCount();
@@ -76,6 +87,7 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 if (line_count > 0 and self.cursor_line >= line_count) {
                     self.cursor_line = line_count - 1;
                 }
+                self.clampCursorCol();
                 ctx.consumeAndRedraw();
             } else if (key.matches(vaxis.Key.backspace, .{})) {
                 const pos = self.buffer.lineColToPosition(self.cursor_line, self.cursor_col);

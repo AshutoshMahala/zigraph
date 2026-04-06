@@ -194,7 +194,7 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     if (self.drag_active) {
                         if (self.drag_node) |node_id| {
                             if (!self.pinned_positions.contains(node_id)) {
-                                self.pinned_positions.put(self.allocator, node_id, .{ 0, 0 }) catch {};
+                                self.pinned_positions.put(self.allocator, node_id, .{ 0, 0 }) catch {}; // OOM: skip pin on drag release
                             }
                         }
                         self.drag_active = false;
