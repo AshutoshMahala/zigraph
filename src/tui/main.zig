@@ -22,4 +22,5 @@ test {
     _ = @import("undo.zig");
     _ = @import("highlighter.zig");
     _ = @import("source_map.zig");
+    _ = @import("editor_pane.zig");
 }

@@ -2,6 +2,9 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 
+const TextBuffer = @import("text_buffer.zig");
+const EditorPane = @import("editor_pane.zig");
+
 const App = @This();
 
 pub const Focus = enum { editor, preview };
@@ -9,19 +12,26 @@ pub const Focus = enum { editor, preview };
 allocator: std.mem.Allocator,
 focus: Focus = .editor,
 split: vxfw.SplitView,
-editor_text: vxfw.Text,
+editor_pane: *EditorPane,
+buffer: *TextBuffer,
 preview_text: vxfw.Text,
 status_text: vxfw.Text,
 children: [2]vxfw.SubSurface = undefined,
 
 pub fn create(allocator: std.mem.Allocator) !*App {
+    const buffer = try allocator.create(TextBuffer);
+    buffer.* = try TextBuffer.init(allocator, "# Example\n@layout sugiyama\n\nA -> B -> C\nB -> D\n");
+
+    const editor_pane = try allocator.create(EditorPane);
+    editor_pane.* = .{
+        .buffer = buffer,
+    };
+
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
-        .editor_text = .{
-            .text = "[editor pane]",
-            .width_basis = .parent,
-        },
+        .buffer = buffer,
+        .editor_pane = editor_pane,
         .preview_text = .{
             .text = "[preview pane]",
             .width_basis = .parent,
@@ -34,7 +44,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .split = undefined,
     };
     self.split = .{
-        .lhs = self.editor_text.widget(),
+        .lhs = self.editor_pane.widget(),
         .rhs = self.preview_text.widget(),
         .width = 40,
     };
@@ -42,6 +52,9 @@ pub fn create(allocator: std.mem.Allocator) !*App {
 }
 
 pub fn destroy(self: *App) void {
+    self.allocator.destroy(self.editor_pane);
+    self.buffer.deinit();
+    self.allocator.destroy(self.buffer);
     self.allocator.destroy(self);
 }
 
@@ -65,6 +78,12 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     .preview => .editor,
                 };
                 ctx.redraw = true;
+            } else if (self.focus == .editor) {
+                // Forward key events to editor pane
+                const ep_widget = self.editor_pane.widget();
+                if (ep_widget.eventHandler) |handler| {
+                    try handler(ep_widget.userdata, ctx, event);
+                }
             }
         },
         else => {},
@@ -78,8 +97,11 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     // Reserve 1 row for the status bar
     const content_height = max.height -| 1;
 
-    // Update split's lhs/rhs in case pointers changed
-    self.split.lhs = self.editor_text.widget();
+    // Update focus state
+    self.editor_pane.focused = (self.focus == .editor);
+
+    // Update split's lhs/rhs
+    self.split.lhs = self.editor_pane.widget();
     self.split.rhs = self.preview_text.widget();
 
     // Draw split view in content area
