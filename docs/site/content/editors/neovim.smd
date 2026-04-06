@@ -1,5 +1,6 @@
 ---
 .title = "Neovim",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Tree-sitter highlighting, LSP config, and filetype detection",

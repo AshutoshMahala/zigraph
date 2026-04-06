@@ -1,5 +1,6 @@
 ---
 .title = "DAG",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Directed acyclic graph layouts with topological ordering",
@@ -26,7 +27,7 @@ var ir = try zigraph.layout(&g, allocator, .{
 
 ## Example
 
-```zgraph
+```
 # Build pipeline DAG
 fetch [label="Fetch Deps"]
 compile [label="Compile"]

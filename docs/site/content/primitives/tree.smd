@@ -1,5 +1,6 @@
 ---
 .title = "Tree",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Hierarchical tree diagrams with Unicode box-drawing",
@@ -46,11 +47,6 @@ const nodes = [_]TreeNode{.{
 
 ## Zig API
 
-```=html
-<div class="callout callout-zig">
-  <div class="callout-label">Zig API</div>
-```
-
 ```zig
 const std = @import("std");
 const zigraph = @import("zigraph");
@@ -73,10 +69,6 @@ const nodes = [_]TreeNode{.{
 const output = try T.tree.render(allocator, &nodes, .{});
 defer allocator.free(output);
 std.debug.print("{s}\n", .{output});
-```
-
-```=html
-</div>
 ```
 
 ## Features

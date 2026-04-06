@@ -1,5 +1,6 @@
 ---
 .title = "Table",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Tabular data rendering with headers and rows",
@@ -9,7 +10,7 @@ The table primitive renders structured data as formatted tables with headers, al
 
 ## DSL Syntax
 
-```zgraph
+```
 users {
   headers: id | name | email
   row: 1 | Alice | alice@example.com
@@ -18,11 +19,6 @@ users {
 ```
 
 ## Zig API
-
-```=html
-<div class="callout callout-zig">
-  <div class="callout-label">Zig API</div>
-```
 
 Table rendering uses the terminal table module:
 
@@ -37,8 +33,4 @@ const output = try T.table.render(allocator, .{
         &.{ "2", "Bob", "bob@example.com" },
     },
 });
-```
-
-```=html
-</div>
 ```

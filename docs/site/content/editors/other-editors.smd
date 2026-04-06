@@ -1,5 +1,6 @@
 ---
 .title = "Other Editors",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Generic LSP and formatter integration for any editor",
@@ -34,7 +35,7 @@ args = ["lsp"]
 
 ### Emacs (lsp-mode)
 
-```elisp
+```
 (add-to-list 'auto-mode-alist '("\\.zgraph\\'" . prog-mode))
 
 (with-eval-after-load 'lsp-mode

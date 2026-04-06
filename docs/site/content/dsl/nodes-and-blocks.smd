@@ -1,5 +1,6 @@
 ---
 .title = "Nodes & Blocks",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Node declarations, labels, and block syntax",
@@ -9,7 +10,7 @@
 
 Nodes are declared by using an identifier. The first use of an identifier creates the node:
 
-```zgraph
+```
 server
 database
 cache
@@ -19,7 +20,7 @@ cache
 
 Add a label with the `label` property in brackets:
 
-```zgraph
+```
 server [label="API Server"]
 db [label="PostgreSQL Database"]
 ```
@@ -30,7 +31,7 @@ If no label is given, the identifier name is used as the label.
 
 Blocks group related content with curly braces:
 
-```zgraph
+```
 backend {
   server [label="API"]
   db [label="Database"]
@@ -52,7 +53,7 @@ Blocks create namespaced scopes. Nodes inside blocks are referenced using dot-pa
 
 Blocks can be nested to arbitrary depth:
 
-```zgraph
+```
 infrastructure {
   aws {
     ec2 [label="EC2"]

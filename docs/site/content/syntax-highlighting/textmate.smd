@@ -1,5 +1,6 @@
 ---
 .title = "TextMate Grammar",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "VS Code .tmLanguage.json scope names and patterns",

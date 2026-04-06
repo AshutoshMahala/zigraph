@@ -1,5 +1,6 @@
 ---
 .title = "Styling & Theming",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "@style blocks, class references, colors, and visual properties",
@@ -9,7 +10,7 @@
 
 Use `@style` to define default styles for all nodes or edges:
 
-```zgraph
+```
 @style node {
   fill = "#1e1e2e"
   color = "#cdd6f4"
@@ -27,7 +28,7 @@ Use `@style` to define default styles for all nodes or edges:
 
 Define named style classes and apply them to nodes:
 
-```zgraph
+```
 @style .primary {
   fill = "#89b4fa"
   color = "#1e1e2e"
@@ -44,7 +45,7 @@ legacy .danger [label="Deprecated Service"]
 
 Multiple classes can be applied to a single node:
 
-```zgraph
+```
 node .primary .large [label="Important"]
 ```
 
@@ -62,7 +63,7 @@ Styles accept several color formats:
 
 Create complete themes by combining `@style` blocks:
 
-```zgraph
+```
 # Dark theme
 @style node {
   fill = "#1e1e2e"

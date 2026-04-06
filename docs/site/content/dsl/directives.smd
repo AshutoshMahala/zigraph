@@ -1,5 +1,6 @@
 ---
 .title = "Directives",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "@-prefixed directives for style, layout, and more",
@@ -13,7 +14,7 @@ Directives are `@`-prefixed instructions that control rendering behavior. They s
 
 Define visual styles for nodes, edges, or classes:
 
-```zgraph
+```
 @style node {
   color = "white"
   fill = "#1a1a2e"
@@ -32,7 +33,7 @@ Define visual styles for nodes, edges, or classes:
 
 Apply class styles with dot-prefix notation:
 
-```zgraph
+```
 server .highlight [label="Important Server"]
 ```
 
@@ -40,7 +41,7 @@ server .highlight [label="Important Server"]
 
 Control the layout direction:
 
-```zgraph
+```
 @layout {
   direction = "lr"    # left-to-right (default is top-to-bottom)
   spacing = 20

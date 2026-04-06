@@ -1,5 +1,6 @@
 ---
 .title = "Edges",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "All 9 edge operators and edge chains",
@@ -23,7 +24,7 @@ zgraph supports 9 edge operators:
 
 ## Examples
 
-```zgraph
+```
 # Solid connections
 a -> b         # directed
 a <-> b        # bidirectional
@@ -43,7 +44,7 @@ a -..- b       # dotted undirected
 
 Multiple nodes can be chained in a single statement:
 
-```zgraph
+```
 a -> b -> c -> d
 ```
 
@@ -51,7 +52,7 @@ This creates three edges: `a->b`, `b->c`, `c->d`.
 
 Mixed operators in chains:
 
-```zgraph
+```
 client -> server => database -.-> cache
 ```
 
@@ -59,7 +60,7 @@ client -> server => database -.-> cache
 
 Add labels to edges with brackets:
 
-```zgraph
+```
 server -> db [label="queries"]
 server -> cache [label="reads"]
 ```

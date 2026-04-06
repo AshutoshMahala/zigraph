@@ -3,12 +3,12 @@
   <head id="head">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title id="title" :text="$page.title.suffix(' | zigraph')"></title>
+    <title :text="$page.title.suffix(' | zigraph')"></title>
     <link rel="stylesheet" href="$site.asset('style.css').link()">
     <super>
   </head>
-  <body id="body">
-    <nav class="top-nav" id="top-nav">
+  <body>
+    <nav class="top-nav">
       <div class="nav-inner">
         <a href="$site.page('').link()" class="nav-logo">zigraph</a>
         <button class="nav-toggle" onclick="document.body.classList.toggle('nav-open')" aria-label="Toggle navigation">
@@ -38,6 +38,5 @@
       </aside>
     </div>
     <script src="$site.asset('main.js').link()"></script>
-    <super>
   </body>
 </html>

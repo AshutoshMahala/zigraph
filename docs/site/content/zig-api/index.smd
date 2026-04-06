@@ -1,5 +1,7 @@
 ---
 .title = "Zig Library API",
+.date = @date("2026-04-06T00:00:00"),
+.author = "zigraph",
 .layout = "section.shtml",
 .description = "Embed zigraph in your Zig application",
 ---

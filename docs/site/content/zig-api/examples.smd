@@ -1,5 +1,6 @@
 ---
 .title = "Examples",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Zig code examples for common use cases",

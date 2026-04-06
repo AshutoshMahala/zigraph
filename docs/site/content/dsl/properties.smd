@@ -1,5 +1,6 @@
 ---
 .title = "Properties",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Property lists and annotations",
@@ -9,7 +10,7 @@
 
 Properties are key-value pairs in square brackets:
 
-```zgraph
+```
 server [label="API Server" color="blue" shape="box"]
 ```
 
@@ -28,7 +29,7 @@ Multiple properties are space-separated within the brackets.
 
 Annotations appear before nodes or edges and modify their behavior:
 
-```zgraph
+```
 [layout="lr"]  # Left-to-right layout for this scope
 
 server [label="API"]

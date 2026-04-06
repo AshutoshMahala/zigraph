@@ -1,5 +1,6 @@
 ---
 .title = "Graph",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = "Directed and undirected graphs with the Sugiyama layered layout",
@@ -70,11 +71,6 @@ cache -.-> db</code></pre>
 
 ## CLI Usage
 
-```=html
-<div class="callout callout-cli">
-  <div class="callout-label">CLI</div>
-```
-
 Render a graph from a `.zgraph` file:
 
 ```bash
@@ -82,16 +78,7 @@ zigraph render graph.zgraph -o output.svg
 zigraph render graph.zgraph --format ascii
 ```
 
-```=html
-</div>
-```
-
 ## Zig API
-
-```=html
-<div class="callout callout-zig">
-  <div class="callout-label">Zig API</div>
-```
 
 Build and render a graph programmatically:
 
@@ -116,10 +103,6 @@ const svg = try zigraph.svg.render(ir, allocator, .{});
 
 // Terminal output
 const text = try zigraph.terminal.render(ir, allocator, .{});
-```
-
-```=html
-</div>
 ```
 
 ## Configuration

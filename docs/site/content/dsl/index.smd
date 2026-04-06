@@ -1,5 +1,7 @@
 ---
 .title = "DSL Syntax",
+.date = @date("2026-04-06T00:00:00"),
+.author = "zigraph",
 .layout = "section.shtml",
 .description = "The .zgraph file format for describing graphs",
 ---

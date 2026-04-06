@@ -1,5 +1,7 @@
 ---
 .title = "Getting Started",
+.date = @date("2026-04-06T00:00:00"),
+.author = "zigraph",
 .layout = "section.shtml",
 .description = "Install zigraph and create your first diagram",
 ---

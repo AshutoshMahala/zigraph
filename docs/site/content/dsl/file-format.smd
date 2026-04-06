@@ -1,5 +1,6 @@
 ---
 .title = "File Format",
+.author = "zigraph",
 .layout = "page.shtml",
 .date = @date("2026-04-06T00:00:00"),
 .description = ".zgraph file structure, encoding, and comments",
@@ -13,7 +14,7 @@ zgraph files use the `.zgraph` extension. The file is UTF-8 encoded plain text.
 
 Comments start with `#` and continue to the end of the line:
 
-```zgraph
+```
 # This is a comment
 server [label="API"]  # Inline comment
 ```
@@ -32,7 +33,7 @@ Statements are separated by newlines. Semicolons are treated as whitespace and c
 
 ## Minimal Example
 
-```zgraph
+```
 # Two nodes connected by a directed edge
 a -> b
 ```

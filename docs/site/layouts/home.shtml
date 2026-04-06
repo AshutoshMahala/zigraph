@@ -1,14 +1,10 @@
 <extend template="base.shtml">
 <head id="head">
 </head>
-<body id="body">
-  <nav class="top-nav" id="top-nav">
-  </nav>
-  <aside class="sidebar" id="sidebar">
-  </aside>
-  <main class="content" id="content">
-    <div :html="$page.content()"></div>
-  </main>
-  <aside class="toc" id="toc">
-  </aside>
-</body>
+<aside class="sidebar" id="sidebar">
+</aside>
+<main class="content" id="content">
+  <div :html="$page.content()"></div>
+</main>
+<aside class="toc" id="toc">
+</aside>
