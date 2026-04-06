@@ -1,0 +1,14 @@
+# Test file for TUI editor
+@layout sugiyama
+@direction top-down
+
+vars {
+    color = "blue"
+}
+
+frontend -> api -> db [shape=cylinder]
+api -> cache [shape=diamond]
+
+@style .database {
+    color = "${color}"
+}

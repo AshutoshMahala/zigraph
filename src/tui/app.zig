@@ -214,9 +214,8 @@ fn executeAction(self: *App, action: CommandPalette.Action, ctx: *vxfw.EventCont
     switch (action) {
         .quit => ctx.quit = true,
         .save => {
-            self.saveCurrentFile() catch |err| {
+            self.saveCurrentFile() catch {
                 self.status_bar.message = "Save failed";
-                _ = err;
             };
             ctx.redraw = true;
         },
@@ -402,9 +401,8 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
             }
 
             if (key.matches('s', .{ .ctrl = true })) {
-                self.saveCurrentFile() catch |err| {
+                self.saveCurrentFile() catch {
                     self.status_bar.message = "Save failed";
-                    _ = err;
                 };
                 ctx.redraw = true;
                 return;

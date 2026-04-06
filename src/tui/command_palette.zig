@@ -164,10 +164,10 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     self.filterCommands();
                 }
                 ctx.redraw = true;
-            } else if (key.matches(vaxis.Key.arrow_up, .{})) {
+            } else if (key.matches(vaxis.Key.up, .{})) {
                 if (self.selected > 0) self.selected -= 1;
                 ctx.redraw = true;
-            } else if (key.matches(vaxis.Key.arrow_down, .{})) {
+            } else if (key.matches(vaxis.Key.down, .{})) {
                 if (self.filtered_count > 0 and self.selected + 1 < self.filtered_count) {
                     self.selected += 1;
                 }
