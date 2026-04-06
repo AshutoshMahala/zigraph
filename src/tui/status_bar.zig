@@ -44,7 +44,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
 
     const reverse_style: vaxis.Style = .{ .reverse = true };
 
-    // Fill entire row 0 with reverse-video spaces
     var i: u16 = 0;
     while (i < max.width) : (i += 1) {
         surface.writeCell(i, 0, .{
@@ -53,7 +52,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         });
     }
 
-    // Left side: message if non-empty, else filename
     const left_text = if (self.message.len > 0) self.message else self.filename;
     {
         var c: u16 = 1;
@@ -67,7 +65,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         }
     }
 
-    // Right side: "Ln {line+1} Col {col+1}" + " *" if modified
     var buf: [64]u8 = undefined;
     const right_text = if (self.modified)
         std.fmt.bufPrint(&buf, "Ln {d} Col {d} *", .{ self.line + 1, self.col + 1 }) catch return surface

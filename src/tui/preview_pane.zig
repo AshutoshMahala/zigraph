@@ -31,7 +31,6 @@ pub fn widget(self: *PreviewPane) vxfw.Widget {
 }
 
 pub fn renderFromSource(self: *PreviewPane, allocator: std.mem.Allocator, source: []const u8) void {
-    // Free previous render
     if (self.rendered_output) |old| allocator.free(old);
     self.rendered_output = null;
     if (self.error_message) |old| allocator.free(old);
@@ -81,7 +80,6 @@ pub fn renderFromSource(self: *PreviewPane, allocator: std.mem.Allocator, source
     };
     self.rendered_output = output;
 
-    // Compute dimensions from the output
     var width: usize = 0;
     var height: usize = 0;
     var line_len: usize = 0;

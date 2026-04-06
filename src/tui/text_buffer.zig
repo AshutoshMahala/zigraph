@@ -80,7 +80,6 @@ pub fn insert(self: *TextBuffer, pos: usize, text: []const u8) Allocator.Error!v
         .len = text.len,
     };
 
-    // Find which piece contains `pos`
     var offset: usize = 0;
     var i: usize = 0;
     while (i < self.pieces.items.len) : (i += 1) {
@@ -121,7 +120,6 @@ pub fn delete(self: *TextBuffer, pos: usize, len: usize) Allocator.Error![]u8 {
     var offset: usize = 0;
     var i: usize = 0;
 
-    // Find starting piece
     while (i < self.pieces.items.len) {
         const p = self.pieces.items[i];
         if (offset + p.len > pos) break;
@@ -229,7 +227,6 @@ pub fn lineAt(self: *const TextBuffer, line_num: usize) Allocator.Error![]u8 {
     var line_start: usize = 0;
     var pos: usize = 0;
 
-    // Find line_start
     for (self.pieces.items) |p| {
         const buf = self.pieceSlice(p);
         for (buf) |c| {
@@ -243,7 +240,6 @@ pub fn lineAt(self: *const TextBuffer, line_num: usize) Allocator.Error![]u8 {
         if (current_line == line_num) break;
     }
 
-    // Find line_end (next \n or end of text)
     var line_end = line_start;
     current_line = 0;
     pos = 0;

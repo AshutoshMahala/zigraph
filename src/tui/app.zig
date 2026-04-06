@@ -32,7 +32,6 @@ quit_prompt_visible: bool = false,
 split: vxfw.SplitView,
 orientation: enum { horizontal, vertical } = .horizontal,
 split_height: u16 = 15,
-// Shortcuts to the active buffer's state
 editor_pane: *EditorPane,
 buffer: *TextBuffer,
 undo: *UndoManager,
@@ -66,7 +65,6 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     const preview_pane = try allocator.create(PreviewPane);
     preview_pane.* = .{ .allocator = allocator };
 
-    // Initial render from the default buffer contents
     const source = buffer.contents(allocator) catch null; // OOM: skip initial render
     if (source) |s| {
         defer allocator.free(s);
@@ -114,7 +112,6 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .width = 40,
     };
 
-    // Register the initial buffer
     try self.buffers.append(allocator, .{
         .buffer = buffer,
         .undo = undo,
@@ -130,7 +127,6 @@ pub fn create(allocator: std.mem.Allocator) !*App {
 pub fn destroy(self: *App) void {
     self.allocator.free(self.last_errors);
     self.preview_pane.destroy();
-    // Destroy all buffer states
     for (self.buffers.items) |bs| {
         self.allocator.destroy(bs.editor_pane);
         bs.undo.deinit();
@@ -180,13 +176,11 @@ pub fn addBuffer(self: *App, filename: []const u8, content: []const u8) !void {
         .modified = false,
     });
 
-    // Switch to the new tab
     self.switchTab(self.buffers.items.len - 1);
 }
 
 pub fn switchTab(self: *App, index: usize) void {
     if (index >= self.buffers.items.len) return;
-    // Save current modified state back
     if (self.active_tab < self.buffers.items.len) {
         self.buffers.items[self.active_tab].modified = self.editor_pane.modified;
     }
@@ -463,7 +457,6 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 return;
             }
 
-            // Clear quit prompt on any key that isn't Ctrl+Q or Ctrl+S
             if (self.quit_prompt_visible and !key.matches('q', .{ .ctrl = true })) {
                 self.quit_prompt_visible = false;
                 self.status_bar.message = "";
@@ -509,24 +502,19 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 };
                 ctx.redraw = true;
             } else if (self.focus == .editor) {
-                // Track whether the buffer was modified before forwarding
                 const was_modified = self.editor_pane.modified;
 
-                // Forward key events to editor pane
                 const ep_widget = self.editor_pane.widget();
                 if (ep_widget.eventHandler) |handler| {
                     try handler(ep_widget.userdata, ctx, event);
                 }
 
-                // If the editor modified the buffer, refresh the preview
                 if (self.editor_pane.modified and !was_modified) {
                     self.refreshPreview();
                 } else if (self.editor_pane.modified) {
-                    // Also refresh on continued edits (modified was already true)
                     self.refreshPreview();
                 }
 
-                // Editor → Preview linking: highlight corresponding graph node
                 const cursor_pos = self.buffer.lineColToPosition(
                     self.editor_pane.cursor_line,
                     self.editor_pane.cursor_col,
@@ -535,7 +523,6 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     self.preview_pane.selected_node = node_idx;
                 }
             } else if (self.focus == .preview) {
-                // Forward key events to preview pane
                 const pp_widget = self.preview_pane.widget();
                 if (pp_widget.eventHandler) |handler| {
                     try handler(pp_widget.userdata, ctx, event);
@@ -550,27 +537,22 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     const self: *App = @ptrCast(@alignCast(ptr));
     const max = ctx.max.size();
 
-    // Rebuild tab cache to reflect current state
     self.rebuildTabCache();
 
-    // Determine tab bar height (0 if single buffer, 1 if multiple)
     const tab_bar_height: u16 = if (self.buffers.items.len > 1) 1 else 0;
 
     // Reserve rows for the status bar (dynamic) + tab bar height
     const status_height = self.status_bar.height();
     const content_height = max.height -| (status_height + tab_bar_height);
 
-    // Update focus state
     self.editor_pane.focused = (self.focus == .editor);
     self.preview_pane.focused = (self.focus == .preview);
 
-    // Update split's lhs/rhs
     self.split.lhs = self.editor_pane.widget();
     self.split.rhs = self.preview_pane.widget();
 
     var child_idx: usize = 0;
 
-    // Draw tab bar if visible
     if (tab_bar_height > 0) {
         const tab_ctx = ctx.withConstraints(
             .{ .width = max.width, .height = 1 },
@@ -584,7 +566,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         child_idx += 1;
     }
 
-    // Draw split view in content area
     const content_ctx = ctx.withConstraints(
         .{ .width = max.width, .height = content_height },
         vxfw.MaxSize.fromSize(.{ .width = max.width, .height = content_height }),
@@ -598,7 +579,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         };
         child_idx += 1;
     } else {
-        // Vertical mode: editor on top, preview on bottom
         const editor_h = @min(self.split_height, content_height -| 1);
         const preview_h = content_height -| editor_h;
 
@@ -627,7 +607,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         }
     }
 
-    // Update status bar fields from editor state
     self.status_bar.line = self.editor_pane.cursor_line;
     self.status_bar.col = self.editor_pane.cursor_col;
     self.status_bar.modified = self.editor_pane.modified;
@@ -635,14 +614,12 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         self.status_bar.filename = self.buffers.items[self.active_tab].filename;
     }
 
-    // Preview → Editor linking: show info about selected node in status bar
     if (self.preview_pane.selected_node) |node_idx| {
         self.status_bar.setContextInfo("Node: {d}", .{node_idx});
     } else {
         self.status_bar.context_info = "";
     }
 
-    // Draw status bar
     const status_ctx = ctx.withConstraints(
         .{ .width = max.width, .height = status_height },
         vxfw.MaxSize.fromSize(.{ .width = max.width, .height = status_height }),
@@ -655,7 +632,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     };
     child_idx += 1;
 
-    // Draw keybindings overlay (on top of everything)
     if (self.keybindings.visible) {
         const kb_ctx = ctx.withConstraints(
             .{ .width = max.width, .height = max.height },
@@ -669,7 +645,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         child_idx += 1;
     }
 
-    // Draw command palette overlay (on top of everything)
     if (self.command_palette.visible) {
         const cp_ctx = ctx.withConstraints(
             .{ .width = max.width, .height = max.height },

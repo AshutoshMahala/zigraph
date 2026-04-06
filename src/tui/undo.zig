@@ -90,7 +90,6 @@ pub fn undo(self: *UndoManager, buf: *TextBuffer) Allocator.Error!void {
     if (self.undo_stack.items.len == 0) return;
     const group = self.undo_stack.pop().?;
 
-    // Apply ops in reverse
     var i: usize = group.ops.items.len;
     while (i > 0) {
         i -= 1;
@@ -115,7 +114,6 @@ pub fn redo(self: *UndoManager, buf: *TextBuffer) Allocator.Error!void {
     if (self.redo_stack.items.len == 0) return;
     const group = self.redo_stack.pop().?;
 
-    // Apply ops forward
     for (group.ops.items) |op| {
         switch (op) {
             .insert => |data| {

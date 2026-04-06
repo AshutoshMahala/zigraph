@@ -145,7 +145,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     const visible_height: usize = @intCast(max.height);
     const total_width: u16 = max.width;
 
-    // Clamp cursor to valid range
     const line_count = self.buffer.lineCount();
     if (line_count == 0) {
         self.cursor_line = 0;
@@ -156,7 +155,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         }
     }
 
-    // Ensure scroll_top keeps cursor visible
     if (self.cursor_line < self.scroll_top) {
         self.scroll_top = self.cursor_line;
     }
@@ -167,7 +165,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     var surface = try vxfw.Surface.init(ctx.arena, self.widget(), max);
 
     if (line_count == 0) {
-        // Empty buffer — just show gutter for line 1
         writeGutter(&surface, 0, 1, self.error_lines);
         if (self.focused) {
             surface.cursor = .{
@@ -184,17 +181,13 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         const buf_line = self.scroll_top + @as(usize, row);
         if (buf_line >= line_count) break;
 
-        // Render gutter (line number, 1-based, right-aligned)
         writeGutter(&surface, row, buf_line + 1, self.error_lines);
 
-        // Get line content
         const line_content = self.buffer.lineAt(buf_line) catch continue;
         defer self.buffer.allocator.free(line_content);
 
-        // Get syntax spans for this line
         const spans = Highlighter.tokenizeToSpans(ctx.arena, line_content) catch &[_]Highlighter.StyledSpan{};
 
-        // Write each character with syntax style
         var col: u16 = gutter_width;
         for (line_content, 0..) |_, ci| {
             if (col >= total_width) break;
@@ -215,7 +208,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
                 }
             }
 
-            // Apply cursor reverse if this is the cursor position
             var cell_style = style;
             if (buf_line == self.cursor_line and ci == self.cursor_col and self.focused) {
                 cell_style.reverse = true;
@@ -228,7 +220,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
             col += 1;
         }
 
-        // If cursor is at end of line, show reverse space block
         if (buf_line == self.cursor_line and self.cursor_col >= line_content.len and self.focused) {
             const cursor_screen_col = gutter_width + @as(u16, @intCast(line_content.len));
             if (cursor_screen_col < total_width) {
@@ -240,7 +231,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         }
     }
 
-    // Set terminal cursor position
     if (self.focused and self.cursor_line >= self.scroll_top and
         self.cursor_line < self.scroll_top + visible_height)
     {
@@ -257,7 +247,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
 }
 
 fn writeGutter(surface: *vxfw.Surface, row: u16, line_num: usize, error_lines: []const ErrorLine) void {
-    // Format line number right-aligned in gutter_width - 1 chars, then a space
     var num_buf: [16]u8 = undefined;
     const num_str = std.fmt.bufPrint(&num_buf, "{d}", .{line_num}) catch return;
     // pad: number of leading spaces before the line number digits
@@ -299,7 +288,6 @@ fn writeGutter(surface: *vxfw.Surface, row: u16, line_num: usize, error_lines: [
         });
     }
 
-    // cols 1..pad: padding spaces before the number
     var col: u16 = 1;
     const pad_end = col + pad;
     while (col < pad_end) : (col += 1) {
@@ -308,7 +296,6 @@ fn writeGutter(surface: *vxfw.Surface, row: u16, line_num: usize, error_lines: [
             .style = dim_style,
         });
     }
-    // Write digits
     for (num_str, 0..) |_, di| {
         surface.writeCell(col, row, .{
             .char = .{ .grapheme = num_str[di .. di + 1], .width = 1 },
@@ -316,7 +303,6 @@ fn writeGutter(surface: *vxfw.Surface, row: u16, line_num: usize, error_lines: [
         });
         col += 1;
     }
-    // Write trailing space
     if (col < gutter_width) {
         surface.writeCell(col, row, .{
             .char = .{ .grapheme = " ", .width = 1 },

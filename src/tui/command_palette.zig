@@ -156,7 +156,6 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 self.hide();
                 ctx.redraw = true;
             } else if (key.matches(vaxis.Key.enter, .{})) {
-                // Enter: execute selected (handled by App after checking selectedAction)
                 ctx.redraw = true;
             } else if (key.matches(vaxis.Key.backspace, .{})) {
                 if (self.input_len > 0) {
