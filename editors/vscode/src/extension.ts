@@ -35,7 +35,12 @@ export function activate(context: vscode.ExtensionContext): void {
     clientOptions,
   );
 
-  client.start();
+  client.start().catch((err: Error) => {
+    vscode.window.showErrorMessage(
+      `zgraph LSP failed to start: ${err.message}. Check the "zgraph.lsp.path" setting.`,
+    );
+  });
+
   context.subscriptions.push({
     dispose: () => {
       if (client) {

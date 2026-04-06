@@ -27,6 +27,10 @@
       "name": "string.quoted.double.zgraph",
       "patterns": [
         {
+          "match": "\\\\.",
+          "name": "constant.character.escape.zgraph"
+        },
+        {
           "match": "\\$\\{([a-zA-Z_][a-zA-Z0-9_-]*)\\}",
           "captures": {
             "0": { "name": "meta.interpolation.zgraph" },
@@ -36,7 +40,7 @@
       ]
     },
     "directive": {
-      "match": "(@)(import|layout|theme|direction|spacing|border|align)\\b",
+      "match": "(@)([a-zA-Z_][a-zA-Z0-9_-]*)\\b",
       "captures": {
         "1": { "name": "punctuation.definition.directive.zgraph" },
         "2": { "name": "entity.other.attribute-name.zgraph" }
@@ -83,7 +87,7 @@
       ]
     },
     "edge-operator": {
-      "match": "<->|<==>|==>|<-|->|--|-\\.->|-\\.\\.->|-\\.\\.-|=>",
+      "match": "<->|==>|->|<-|--|-\\.->|-\\.\\.->|-\\.\\.-|=>",
       "name": "keyword.operator.edge.zgraph"
     },
     "class-ref": {

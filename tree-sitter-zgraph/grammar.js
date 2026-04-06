@@ -8,8 +8,6 @@ module.exports = grammar({
 
   word: $ => $._word,
 
-  conflicts: $ => [],
-
   rules: {
     source_file: $ => repeat($._statement),
 
@@ -25,10 +23,6 @@ module.exports = grammar({
       $.table_row_decl,
     ),
 
-    // ── Blocks ──────────────────────────────────────────────
-    // A block can be: { ... } or [layout] { ... } or name { ... } or name [layout] { ... }
-    // Named blocks: the name (identifier/string) is followed by
-    // optional annotation and then block_body.
     block: $ => prec.right(choice(
       seq($.block_body),
       seq($.annotation, $.block_body),
@@ -41,7 +35,6 @@ module.exports = grammar({
 
     block_body: $ => seq('{', repeat($._statement), '}'),
 
-    // ── Edge chains ─────────────────────────────────────────
     edge_chain: $ => prec.left(1, seq(
       $._node_with_attrs,
       repeat1(seq($.edge_operator, $._node_with_attrs)),
@@ -59,14 +52,12 @@ module.exports = grammar({
       '-..-',
     ),
 
-    // ── Node with attributes (shared between edge_chain start and node_decl)
     _node_with_attrs: $ => prec.right(seq(
       choice($.identifier, $.string),
       optional($.annotation),
       repeat($.class_ref),
     )),
 
-    // ── Node declarations (standalone with properties/classes)
     node_decl: $ => prec(-1, seq(
       choice($.identifier, $.string),
       choice(
@@ -75,7 +66,6 @@ module.exports = grammar({
       ),
     )),
 
-    // ── Annotation: [ident] or [key=val, ...] ───────────────
     annotation: $ => seq(
       '[',
       choice(
@@ -85,7 +75,6 @@ module.exports = grammar({
       ']',
     ),
 
-    // ── Property (used inside annotation and style_rule) ────
     property: $ => seq(
       $.property_key,
       '=',
@@ -96,7 +85,6 @@ module.exports = grammar({
 
     property_value: $ => choice($.identifier, $.string, $.number),
 
-    // ── Directives ──────────────────────────────────────────
     directive: $ => prec.right(seq(
       '@',
       $.directive_name,
@@ -117,7 +105,6 @@ module.exports = grammar({
 
     _directive_value_item: $ => $.identifier,
 
-    // ── Style rules ─────────────────────────────────────────
     style_rule: $ => seq(
       '@',
       'style',
@@ -132,10 +119,8 @@ module.exports = grammar({
       $.class_ref,
     ),
 
-    // ── Class references ────────────────────────────────────
     class_ref: $ => seq('.', $._word),
 
-    // ── Vars block ──────────────────────────────────────────
     vars_block: $ => seq(
       'vars',
       '{',
@@ -149,7 +134,6 @@ module.exports = grammar({
       choice($.identifier, $.string, $.number),
     ),
 
-    // ── Tables ──────────────────────────────────────────────
     table_headers: $ => seq(
       'headers',
       ':',
@@ -168,19 +152,16 @@ module.exports = grammar({
 
     table_cell: _ => /[a-zA-Z0-9_][a-zA-Z0-9_-]*/,
 
-    // ── Card fields ─────────────────────────────────────────
     card_field: $ => seq(
       $.identifier,
       ':',
       choice($.identifier, $.string, $.number),
     ),
 
-    // ── Identifiers ─────────────────────────────────────────
     identifier: _ => /[a-zA-Z_][a-zA-Z0-9_-]*(\.[a-zA-Z_][a-zA-Z0-9_-]*)*/,
 
     _word: _ => /[a-zA-Z_][a-zA-Z0-9_-]*/,
 
-    // ── Strings ─────────────────────────────────────────────
     string: $ => seq(
       '"',
       repeat(choice(
@@ -198,10 +179,8 @@ module.exports = grammar({
       '}',
     ),
 
-    // ── Numbers ─────────────────────────────────────────────
     number: _ => /\d+(\.\d+)?/,
 
-    // ── Comments ────────────────────────────────────────────
     comment: _ => token(seq('#', /.*/)),
   },
 });

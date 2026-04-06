@@ -37,7 +37,8 @@ local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
 parser_config.zgraph = {
   install_info = {
     url = "https://github.com/markussagen/zigraph",
-    files = { "tree-sitter-zgraph/src/parser.c" },
+    files = { "src/parser.c" },
+    location = "tree-sitter-zgraph",
     branch = "main",
   },
   filetype = "zgraph",
