@@ -62,5 +62,5 @@ pub fn main() !void {
 }
 
 test {
-    // Will import submodule tests as they're created
+    _ = @import("text_buffer.zig");
 }
