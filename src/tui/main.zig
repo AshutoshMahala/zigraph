@@ -27,9 +27,8 @@ pub fn main() !void {
             continue;
         };
         defer allocator.free(content);
-        // Extract filename from path
-        const filename = std.fs.path.basename(file_path);
-        app.addBuffer(filename, content) catch continue;
+        // Use the full file path so save can write back to disk
+        app.addBuffer(file_path, content) catch continue;
     }
 
     try vx_app.run(app.widget(), .{});

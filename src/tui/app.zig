@@ -27,6 +27,7 @@ pub const BufferState = struct {
 
 allocator: std.mem.Allocator,
 focus: Focus = .editor,
+quit_prompt_visible: bool = false,
 split: vxfw.SplitView,
 // Shortcuts to the active buffer's state
 editor_pane: *EditorPane,
@@ -206,8 +207,10 @@ fn executeAction(self: *App, action: CommandPalette.Action, ctx: *vxfw.EventCont
     switch (action) {
         .quit => ctx.quit = true,
         .save => {
-            // Save not yet implemented; placeholder
-            self.status_bar.message = "Save not yet implemented";
+            self.saveCurrentFile() catch |err| {
+                self.status_bar.message = "Save failed";
+                _ = err;
+            };
             ctx.redraw = true;
         },
         .close_tab => {
@@ -254,6 +257,22 @@ fn refreshPreview(self: *App) void {
     self.preview_pane.renderFromSource(self.allocator, source);
     self.rebuildSourceMap();
     self.definitions.clear();
+}
+
+fn saveCurrentFile(self: *App) !void {
+    const active = &self.buffers.items[self.active_tab];
+    if (std.mem.eql(u8, active.filename, "[new]")) {
+        self.status_bar.message = "No filename — use :save <path>";
+        return;
+    }
+    const content = try self.buffer.contents(self.allocator);
+    defer self.allocator.free(content);
+    const file = try std.fs.cwd().createFile(active.filename, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(content);
+    self.editor_pane.modified = false;
+    active.modified = false;
+    self.status_bar.message = "Saved";
 }
 
 fn rebuildSourceMap(self: *App) void {
@@ -316,8 +335,38 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 return;
             }
 
+            if (key.matches('s', .{ .ctrl = true })) {
+                self.saveCurrentFile() catch |err| {
+                    self.status_bar.message = "Save failed";
+                    _ = err;
+                };
+                ctx.redraw = true;
+                return;
+            }
+
+            // Clear quit prompt on any key that isn't Ctrl+Q or Ctrl+S
+            if (self.quit_prompt_visible and !key.matches('q', .{ .ctrl = true })) {
+                self.quit_prompt_visible = false;
+                self.status_bar.message = "";
+            }
+
             if (key.matches('q', .{ .ctrl = true })) {
-                ctx.quit = true;
+                var has_unsaved = false;
+                for (self.buffers.items) |bs| {
+                    if (bs.modified) {
+                        has_unsaved = true;
+                        break;
+                    }
+                }
+                if (self.editor_pane.modified) has_unsaved = true;
+
+                if (has_unsaved and !self.quit_prompt_visible) {
+                    self.quit_prompt_visible = true;
+                    self.status_bar.message = "Unsaved changes! Press Ctrl+Q again to quit, or Ctrl+S to save";
+                    ctx.redraw = true;
+                } else {
+                    ctx.quit = true;
+                }
             } else if (key.matches('\t', .{ .ctrl = true, .shift = true })) {
                 // Ctrl+Shift+Tab: previous tab
                 if (self.buffers.items.len > 1) {
