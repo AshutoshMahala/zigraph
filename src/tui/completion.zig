@@ -21,6 +21,7 @@ pub const CompletionItem = struct {
 };
 
 const directive_completions = [_]CompletionItem{
+    .{ .text = "align", .description = "Set alignment" },
     .{ .text = "layout", .description = "Set layout algorithm" },
     .{ .text = "direction", .description = "Set flow direction" },
     .{ .text = "import", .description = "Import another file" },

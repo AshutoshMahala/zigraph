@@ -273,7 +273,10 @@ fn executeAction(self: *App, action: CommandPalette.Action, ctx: *vxfw.EventCont
             }
             ctx.redraw = true;
         },
-        else => {},
+        else => {
+            self.status_bar.message = "Command not yet implemented";
+            ctx.redraw = true;
+        },
     }
 }
 
@@ -281,8 +284,8 @@ fn refreshPreview(self: *App) void {
     const source = self.buffer.contents(self.allocator) catch return;
     defer self.allocator.free(source);
     self.preview_pane.renderFromSource(self.allocator, source);
-    self.rebuildSourceMap();
     self.definitions.clear();
+    self.rebuildSourceMap(source);
     self.refreshErrors(source);
 }
 
@@ -354,9 +357,32 @@ fn saveCurrentFile(self: *App) !void {
     self.status_bar.message = "Saved";
 }
 
-fn rebuildSourceMap(self: *App) void {
+fn rebuildSourceMap(self: *App, source: []const u8) void {
     self.source_map.clear();
-    // TODO: populate from AST
+
+    var err_list = dsl.errors.ErrorList.init(self.allocator);
+    defer err_list.deinit();
+
+    const tokens = dsl.tokenizer.tokenize(self.allocator, source, &err_list) catch return;
+    defer self.allocator.free(tokens);
+
+    // Walk tokens and register identifier tokens as node candidates.
+    // We use a simple incrementing counter as the node_index (approximate mapping).
+    var node_index: usize = 0;
+    var i: usize = 0;
+    while (i < tokens.len) : (i += 1) {
+        const tok = tokens[i];
+        if (tok.kind != .identifier) continue;
+
+        const loc = dsl.errors.Loc{
+            .line = tok.loc.line,
+            .col = tok.loc.col,
+            .offset = @intCast(tok.loc.offset),
+        };
+        self.source_map.addNode(node_index, loc, tok.text.len) catch {};
+        self.definitions.addNode(tok.text, loc) catch {};
+        node_index += 1;
+    }
 }
 
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
