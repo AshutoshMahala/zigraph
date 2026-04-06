@@ -9,6 +9,7 @@ const PreviewPane = @import("preview_pane.zig");
 const StatusBar = @import("status_bar.zig");
 const SourceMap = @import("source_map.zig");
 const TabBar = @import("tab_bar.zig");
+const CommandPalette = @import("command_palette.zig");
 
 const App = @This();
 
@@ -33,10 +34,11 @@ preview_pane: *PreviewPane,
 status_bar: *StatusBar,
 source_map: *SourceMap,
 tab_bar: *TabBar,
+command_palette: *CommandPalette,
 buffers: std.ArrayListUnmanaged(BufferState),
 active_tab: usize = 0,
 tab_cache: std.ArrayListUnmanaged(TabBar.Tab),
-children: [3]vxfw.SubSurface = undefined,
+children: [4]vxfw.SubSurface = undefined,
 
 pub fn create(allocator: std.mem.Allocator) !*App {
     const buffer = try allocator.create(TextBuffer);
@@ -70,6 +72,8 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     const tab_bar = try allocator.create(TabBar);
     tab_bar.* = .{ .tabs = &.{} };
 
+    const command_palette = try CommandPalette.create(allocator);
+
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
@@ -80,6 +84,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .status_bar = status_bar,
         .source_map = source_map,
         .tab_bar = tab_bar,
+        .command_palette = command_palette,
         .buffers = .{},
         .tab_cache = .{},
         .split = undefined,
@@ -118,6 +123,7 @@ pub fn destroy(self: *App) void {
     self.source_map.deinit();
     self.allocator.destroy(self.source_map);
     self.allocator.destroy(self.status_bar);
+    self.command_palette.destroy();
     self.allocator.destroy(self.tab_bar);
     self.allocator.destroy(self);
 }
@@ -181,6 +187,52 @@ fn rebuildTabCache(self: *App) void {
     self.tab_bar.tabs = self.tab_cache.items;
 }
 
+fn executeAction(self: *App, action: CommandPalette.Action, ctx: *vxfw.EventContext) void {
+    switch (action) {
+        .quit => ctx.quit = true,
+        .save => {
+            // Save not yet implemented; placeholder
+            self.status_bar.message = "Save not yet implemented";
+            ctx.redraw = true;
+        },
+        .close_tab => {
+            // Close tab: switch to previous if possible
+            if (self.buffers.items.len > 1) {
+                const next = if (self.active_tab == 0) 0 else self.active_tab - 1;
+                self.switchTab(next);
+                self.refreshPreview();
+            }
+            ctx.redraw = true;
+        },
+        .toggle_orientation => {
+            // Toggle not yet implemented; placeholder
+            self.status_bar.message = "Toggle orientation not yet implemented";
+            ctx.redraw = true;
+        },
+        .show_keybindings => {
+            self.status_bar.message = "Keybindings help not yet implemented";
+            ctx.redraw = true;
+        },
+        .next_tab => {
+            if (self.buffers.items.len > 1) {
+                const next = (self.active_tab + 1) % self.buffers.items.len;
+                self.switchTab(next);
+                self.refreshPreview();
+            }
+            ctx.redraw = true;
+        },
+        .prev_tab => {
+            if (self.buffers.items.len > 1) {
+                const prev = if (self.active_tab == 0) self.buffers.items.len - 1 else self.active_tab - 1;
+                self.switchTab(prev);
+                self.refreshPreview();
+            }
+            ctx.redraw = true;
+        },
+        else => {},
+    }
+}
+
 fn refreshPreview(self: *App) void {
     const source = self.buffer.contents(self.allocator) catch return;
     defer self.allocator.free(source);
@@ -198,8 +250,40 @@ fn rebuildSourceMap(self: *App) void {
 
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
     const self: *App = @ptrCast(@alignCast(ptr));
+    const vaxis_mod = @import("vaxis");
     switch (event) {
         .key_press => |key| {
+            // Ctrl+P toggles command palette
+            if (key.matches('p', .{ .ctrl = true })) {
+                if (self.command_palette.visible) {
+                    self.command_palette.hide();
+                } else {
+                    self.command_palette.show();
+                }
+                ctx.redraw = true;
+                return;
+            }
+
+            // When command palette is visible, it captures all key events
+            if (self.command_palette.visible) {
+                // Check for Enter before forwarding (to capture the action)
+                const is_enter = key.matches(vaxis_mod.Key.enter, .{});
+
+                const cp_widget = self.command_palette.widget();
+                if (cp_widget.eventHandler) |handler| {
+                    try handler(cp_widget.userdata, ctx, event);
+                }
+
+                // If Enter was pressed, execute the selected action
+                if (is_enter) {
+                    if (self.command_palette.selectedAction()) |action| {
+                        self.command_palette.hide();
+                        self.executeAction(action, ctx);
+                    }
+                }
+                return;
+            }
+
             if (key.matches('q', .{ .ctrl = true })) {
                 ctx.quit = true;
             } else if (key.matches('\t', .{ .ctrl = true, .shift = true })) {
@@ -340,6 +424,20 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         .surface = status_surface,
     };
     child_idx += 1;
+
+    // Draw command palette overlay (on top of everything)
+    if (self.command_palette.visible) {
+        const cp_ctx = ctx.withConstraints(
+            .{ .width = max.width, .height = max.height },
+            vxfw.MaxSize.fromSize(.{ .width = max.width, .height = max.height }),
+        );
+        const cp_surface = try self.command_palette.widget().draw(cp_ctx);
+        self.children[child_idx] = .{
+            .origin = .{ .row = 0, .col = 0 },
+            .surface = cp_surface,
+        };
+        child_idx += 1;
+    }
 
     return .{
         .size = max,

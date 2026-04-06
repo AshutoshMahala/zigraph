@@ -26,4 +26,5 @@ test {
     _ = @import("preview_pane.zig");
     _ = @import("status_bar.zig");
     _ = @import("tab_bar.zig");
+    _ = @import("command_palette.zig");
 }
