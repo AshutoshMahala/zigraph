@@ -1,0 +1,30 @@
+================
+Table with headers and rows
+================
+
+metrics [table] {
+  headers: Service, Latency, Status
+  row: API, 120ms, healthy
+  row: 2, Lexer, wip
+}
+
+---
+
+(source_file
+  (block
+    (identifier)
+    (annotation
+      (identifier))
+    (block_body
+      (table_headers
+        (table_cell)
+        (table_cell)
+        (table_cell))
+      (table_row_decl
+        (table_cell)
+        (table_cell)
+        (table_cell))
+      (table_row_decl
+        (table_cell)
+        (table_cell)
+        (table_cell)))))

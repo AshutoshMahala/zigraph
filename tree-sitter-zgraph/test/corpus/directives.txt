@@ -1,0 +1,79 @@
+================
+Layout directive with identifier
+================
+
+@layout sugiyama
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (identifier)))
+
+================
+Import directive with string
+================
+
+@import "styles.zgraph"
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (string
+      (string_content))))
+
+================
+Direction directive
+================
+
+@direction left-right
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (identifier)))
+
+================
+Border directive
+================
+
+@border none
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (identifier)))
+
+================
+Align directive with multiple values
+================
+
+@align right, left, center
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (identifier)
+    (identifier)
+    (identifier)))
+
+================
+Directive without value
+================
+
+@spacing
+
+---
+
+(source_file
+  (directive
+    (directive_name)))

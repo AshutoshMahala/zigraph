@@ -1,0 +1,52 @@
+================
+Vars block
+================
+
+vars {
+  env: production
+  port: 8080
+}
+
+---
+
+(source_file
+  (vars_block
+    (var_decl
+      (identifier)
+      (identifier))
+    (var_decl
+      (identifier)
+      (number))))
+
+================
+String interpolation in card field
+================
+
+server: "${env} server"
+
+---
+
+(source_file
+  (card_field
+    (identifier)
+    (string
+      (string_interpolation
+        (identifier))
+      (string_content))))
+
+================
+Vars with string values
+================
+
+vars {
+  greeting: "hello"
+}
+
+---
+
+(source_file
+  (vars_block
+    (var_decl
+      (identifier)
+      (string
+        (string_content)))))

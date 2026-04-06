@@ -1,0 +1,47 @@
+================
+Style rule for node
+================
+
+@style node { shape = rect }
+
+---
+
+(source_file
+  (style_rule
+    (style_selector
+      (identifier))
+    (property
+      (property_key (identifier))
+      (property_value (identifier)))))
+
+================
+Style rule for edge
+================
+
+@style edge { color = blue }
+
+---
+
+(source_file
+  (style_rule
+    (style_selector
+      (identifier))
+    (property
+      (property_key (identifier))
+      (property_value (identifier)))))
+
+================
+Style rule with class selector
+================
+
+@style .database { shape = cylinder }
+
+---
+
+(source_file
+  (style_rule
+    (style_selector
+      (class_ref))
+    (property
+      (property_key (identifier))
+      (property_value (identifier)))))
