@@ -424,6 +424,13 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 return;
             }
 
+            // Ctrl+I toggles context panel in status bar
+            if (key.matches('i', .{ .ctrl = true })) {
+                self.status_bar.toggle();
+                ctx.redraw = true;
+                return;
+            }
+
             // Ctrl+] increases split size, Ctrl+[ decreases
             if (key.matches(']', .{ .ctrl = true })) {
                 switch (self.orientation) {
@@ -535,8 +542,9 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     // Determine tab bar height (0 if single buffer, 1 if multiple)
     const tab_bar_height: u16 = if (self.buffers.items.len > 1) 1 else 0;
 
-    // Reserve 1 row for the status bar + tab bar height
-    const content_height = max.height -| (1 + tab_bar_height);
+    // Reserve rows for the status bar (dynamic) + tab bar height
+    const status_height = self.status_bar.height();
+    const content_height = max.height -| (status_height + tab_bar_height);
 
     // Update focus state
     self.editor_pane.focused = (self.focus == .editor);
@@ -615,16 +623,15 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
 
     // Preview → Editor linking: show info about selected node in status bar
     if (self.preview_pane.selected_node) |node_idx| {
-        if (self.source_map.locForNode(node_idx)) |loc| {
-            _ = loc;
-            // Status bar message could show node info once we have richer mappings
-        }
+        self.status_bar.setContextInfo("Node: {d}", .{node_idx});
+    } else {
+        self.status_bar.context_info = "";
     }
 
     // Draw status bar
     const status_ctx = ctx.withConstraints(
-        .{ .width = max.width, .height = 1 },
-        vxfw.MaxSize.fromSize(.{ .width = max.width, .height = 1 }),
+        .{ .width = max.width, .height = status_height },
+        vxfw.MaxSize.fromSize(.{ .width = max.width, .height = status_height }),
     );
     const status_surface = try self.status_bar.widget().draw(status_ctx);
 
