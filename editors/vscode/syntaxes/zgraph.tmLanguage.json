@@ -1,0 +1,142 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "zgraph",
+  "scopeName": "source.zgraph",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#style-block" },
+    { "include": "#vars-block" },
+    { "include": "#directive" },
+    { "include": "#edge-operator" },
+    { "include": "#class-ref" },
+    { "include": "#property-list" },
+    { "include": "#table-keyword" },
+    { "include": "#number" },
+    { "include": "#block-start" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.zgraph"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.zgraph",
+      "patterns": [
+        {
+          "match": "\\$\\{([a-zA-Z_][a-zA-Z0-9_-]*)\\}",
+          "captures": {
+            "0": { "name": "meta.interpolation.zgraph" },
+            "1": { "name": "variable.other.zgraph" }
+          }
+        }
+      ]
+    },
+    "directive": {
+      "match": "(@)(import|layout|theme|direction|spacing|border|align)\\b",
+      "captures": {
+        "1": { "name": "punctuation.definition.directive.zgraph" },
+        "2": { "name": "entity.other.attribute-name.zgraph" }
+      }
+    },
+    "style-block": {
+      "begin": "(@)(style)\\s+(node|edge|\\.[a-zA-Z_][a-zA-Z0-9_-]*)\\s*\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.directive.zgraph" },
+        "2": { "name": "keyword.control.zgraph" },
+        "3": { "name": "entity.name.type.zgraph" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.block.end.zgraph" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#property-assignment" },
+        { "include": "#string" },
+        { "include": "#number" }
+      ]
+    },
+    "vars-block": {
+      "begin": "\\b(vars)\\s*\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.zgraph" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.block.end.zgraph" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#number" },
+        {
+          "match": "([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "variable.parameter.zgraph" },
+            "2": { "name": "punctuation.separator.zgraph" }
+          }
+        }
+      ]
+    },
+    "edge-operator": {
+      "match": "<->|<==>|==>|<-|->|--|-\\.->|-\\.\\.->|-\\.\\.-|=>",
+      "name": "keyword.operator.edge.zgraph"
+    },
+    "class-ref": {
+      "match": "\\.[a-zA-Z_][a-zA-Z0-9_-]*",
+      "name": "entity.name.type.class.zgraph"
+    },
+    "property-list": {
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.brackets.begin.zgraph" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.brackets.end.zgraph" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#number" },
+        { "include": "#property-assignment" },
+        {
+          "match": "[a-zA-Z_][a-zA-Z0-9_-]*",
+          "name": "string.unquoted.zgraph"
+        }
+      ]
+    },
+    "property-assignment": {
+      "match": "([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(=)",
+      "captures": {
+        "1": { "name": "support.other.property.zgraph" },
+        "2": { "name": "keyword.operator.assignment.zgraph" }
+      }
+    },
+    "table-keyword": {
+      "match": "\\b(headers|row)\\s*(:)",
+      "captures": {
+        "1": { "name": "keyword.control.zgraph" },
+        "2": { "name": "punctuation.separator.zgraph" }
+      }
+    },
+    "number": {
+      "match": "\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.zgraph"
+    },
+    "block-start": {
+      "match": "([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(?=\\[|\\{)",
+      "captures": {
+        "1": { "name": "entity.name.function.zgraph" }
+      }
+    },
+    "identifier": {
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*\\b",
+      "name": "variable.other.zgraph"
+    }
+  }
+}
