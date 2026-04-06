@@ -1,0 +1,109 @@
+================
+Empty block
+================
+
+{ }
+
+---
+
+(source_file
+  (block
+    (block_body)))
+
+================
+Named block
+================
+
+myblock { }
+
+---
+
+(source_file
+  (block
+    (identifier)
+    (block_body)))
+
+================
+Block with layout annotation
+================
+
+pipeline [dag] { A -> B }
+
+---
+
+(source_file
+  (block
+    (identifier)
+    (annotation
+      (identifier))
+    (block_body
+      (edge_chain
+        (identifier)
+        (edge_operator)
+        (identifier)))))
+
+================
+String-named block
+================
+
+"my block" { }
+
+---
+
+(source_file
+  (block
+    (string
+      (string_content))
+    (block_body)))
+
+================
+Nested blocks
+================
+
+system {
+  frontend {
+    App -> API
+  }
+  backend {
+    API -> DB
+  }
+}
+
+---
+
+(source_file
+  (block
+    (identifier)
+    (block_body
+      (block
+        (identifier)
+        (block_body
+          (edge_chain
+            (identifier)
+            (edge_operator)
+            (identifier))))
+      (block
+        (identifier)
+        (block_body
+          (edge_chain
+            (identifier)
+            (edge_operator)
+            (identifier)))))))
+
+================
+Unnamed block with layout
+================
+
+[tree] { A -> B }
+
+---
+
+(source_file
+  (block
+    (annotation
+      (identifier))
+    (block_body
+      (edge_chain
+        (identifier)
+        (edge_operator)
+        (identifier)))))

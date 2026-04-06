@@ -1,0 +1,126 @@
+================
+Simple directed edge
+================
+
+A -> B
+
+---
+
+(source_file
+  (edge_chain
+    (identifier)
+    (edge_operator)
+    (identifier)))
+
+================
+Bidirectional edge
+================
+
+A <-> B
+
+---
+
+(source_file
+  (edge_chain
+    (identifier)
+    (edge_operator)
+    (identifier)))
+
+================
+Chain of three
+================
+
+A -> B -> C
+
+---
+
+(source_file
+  (edge_chain
+    (identifier)
+    (edge_operator)
+    (identifier)
+    (edge_operator)
+    (identifier)))
+
+================
+All nine edge operators
+================
+
+A -> B
+C <-> D
+E => F
+G ==> H
+I -- J
+K <- L
+M -.-> N
+O -..-> P
+Q -..- R
+
+---
+
+(source_file
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier))
+  (edge_chain (identifier) (edge_operator) (identifier)))
+
+================
+Node with properties in edge
+================
+
+A [color=red, shape=circle] -> B [shape=box]
+
+---
+
+(source_file
+  (edge_chain
+    (identifier)
+    (annotation
+      (property
+        (property_key (identifier))
+        (property_value (identifier)))
+      (property
+        (property_key (identifier))
+        (property_value (identifier))))
+    (edge_operator)
+    (identifier)
+    (annotation
+      (property
+        (property_key (identifier))
+        (property_value (identifier))))))
+
+================
+Class references on edge nodes
+================
+
+db .database .large -> cache .cache
+
+---
+
+(source_file
+  (edge_chain
+    (identifier)
+    (class_ref)
+    (class_ref)
+    (edge_operator)
+    (identifier)
+    (class_ref)))
+
+================
+Dot-path identifiers in edge
+================
+
+frontend.App -> backend.API
+
+---
+
+(source_file
+  (edge_chain
+    (identifier)
+    (edge_operator)
+    (identifier)))
