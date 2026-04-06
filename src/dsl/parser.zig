@@ -742,16 +742,16 @@ pub const Parser = struct {
         }
         self.advance();
 
-        // Table blocks use a dedicated body parser
+        // Table blocks use a dedicated body parser but also support directives
         if (layout != null and layout.? == .table) {
-            const table_stmts = try self.parseTableBody();
-            var empty_dirs: std.ArrayListUnmanaged(ast.Directive) = .{};
+            var table_dirs: std.ArrayListUnmanaged(ast.Directive) = .{};
+            const table_stmts = try self.parseTableBody(&table_dirs);
             var empty_stys: std.ArrayListUnmanaged(ast.StyleRule) = .{};
             var empty_vars: std.ArrayListUnmanaged(ast.Property) = .{};
             return ast.NamedBlock{
                 .name       = name_tok.text,
                 .layout     = layout,
-                .directives = try empty_dirs.toOwnedSlice(self.allocator),
+                .directives = try table_dirs.toOwnedSlice(self.allocator),
                 .styles     = try empty_stys.toOwnedSlice(self.allocator),
                 .statements = table_stmts,
                 .vars       = try empty_vars.toOwnedSlice(self.allocator),
@@ -821,7 +821,7 @@ pub const Parser = struct {
 
     // ---------- table body ----------
 
-    fn parseTableBody(self: *Parser) anyerror![]ast.Statement {
+    fn parseTableBody(self: *Parser, directives: *std.ArrayListUnmanaged(ast.Directive)) anyerror![]ast.Statement {
         var stmts: std.ArrayListUnmanaged(ast.Statement) = .{};
 
         self.skipNewlines();
@@ -829,6 +829,13 @@ pub const Parser = struct {
             self.skipNewlines();
             if (self.peek().kind == .rbrace or self.peek().kind == .eof) break;
             if (self.peek().kind == .comment) { self.advance(); continue; }
+
+            // Parse directives (@border, @align) inside table blocks
+            if (self.peek().kind == .at_keyword) {
+                const dir = try self.parseDirective();
+                try directives.append(self.allocator, dir);
+                continue;
+            }
 
             const tok = self.peek();
             if (tok.kind != .identifier) {
@@ -1289,4 +1296,43 @@ test "parse @import directive" {
     try std.testing.expectEqual(@as(usize, 1), doc.directives.len);
     try std.testing.expectEqual(ast.DirectiveKind.import_, doc.directives[0].kind);
     try std.testing.expectEqualStrings("styles.zgraph", doc.directives[0].value);
+}
+
+test "parse table block with @border and @align directives" {
+    const allocator = std.testing.allocator;
+    var err_list = errors.ErrorList.init(allocator);
+    defer err_list.deinit();
+    const source =
+        \\metrics [table] {
+        \\  @border double
+        \\  @align center
+        \\  headers: ID, Name
+        \\  row: 1, Parser
+        \\}
+    ;
+    const tokens = try tokenizer.tokenize(allocator, source, &err_list);
+    defer allocator.free(tokens);
+    var p = Parser.init(allocator, tokens, &err_list);
+    const doc = try p.parse();
+    defer {
+        allocator.free(doc.directives);
+        for (doc.styles) |sr| allocator.free(sr.properties.properties);
+        allocator.free(doc.styles);
+        for (doc.statements) |stmt| freeStatement(stmt);
+        allocator.free(doc.statements);
+        for (doc.blocks) |blk| freeBlock(blk);
+        allocator.free(doc.blocks);
+        allocator.free(doc.vars);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), doc.blocks.len);
+    const block = doc.blocks[0];
+    try std.testing.expectEqual(@as(usize, 2), block.directives.len);
+    try std.testing.expectEqual(ast.DirectiveKind.border, block.directives[0].kind);
+    try std.testing.expectEqualStrings("double", block.directives[0].value);
+    try std.testing.expectEqual(ast.DirectiveKind.align_, block.directives[1].kind);
+    try std.testing.expectEqualStrings("center", block.directives[1].value);
+
+    // Should have 2 statements: 1 headers + 1 row
+    try std.testing.expectEqual(@as(usize, 2), block.statements.len);
 }

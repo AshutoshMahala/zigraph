@@ -451,6 +451,55 @@ const Resolver = struct {
 // Var substitution helper
 // ============================================================
 
+/// Apply var substitution to all labels, property values, and card fields
+/// in the resolved block's nodes and edges.
+fn applyVarSubstitution(
+    allocator: std.mem.Allocator,
+    resolved: anytype,
+    vars_map: *const std.StringHashMap([]const u8),
+    err_list: *errors.ErrorList,
+) !void {
+    for (resolved.nodes) |*node| {
+        // Labels
+        const orig = node.label;
+        node.label = try substituteVars(allocator, node.label, vars_map, err_list, node.loc);
+        node.label_owned = node.label.ptr != orig.ptr;
+
+        // Property values
+        for (node.properties) |*prop| {
+            prop.value = try substituteVars(allocator, prop.value, vars_map, err_list, node.loc);
+        }
+
+        // Card fields
+        if (node.card_fields) |fields| {
+            var needs_sub = false;
+            for (fields) |f| {
+                if (std.mem.indexOf(u8, f, "${") != null) { needs_sub = true; break; }
+            }
+            if (needs_sub) {
+                const new_fields = try allocator.alloc([]const u8, fields.len);
+                for (fields, 0..) |f, fi| {
+                    new_fields[fi] = try substituteVars(allocator, f, vars_map, err_list, node.loc);
+                }
+                node.card_fields = new_fields;
+            }
+        }
+    }
+    for (resolved.edges) |*edge| {
+        // Labels
+        if (edge.label) |lbl| {
+            const new_lbl = try substituteVars(allocator, lbl, vars_map, err_list, edge.loc);
+            edge.label = new_lbl;
+            edge.label_owned = new_lbl.ptr != lbl.ptr;
+        }
+
+        // Property values
+        for (edge.properties) |*prop| {
+            prop.value = try substituteVars(allocator, prop.value, vars_map, err_list, edge.loc);
+        }
+    }
+}
+
 /// Replace all `${name}` occurrences in `text` with values from `vars_map`.
 /// Returns the original slice (without allocation) when no `${` is present.
 /// Otherwise returns a newly allocated slice owned by `allocator`.
@@ -528,20 +577,8 @@ pub fn resolve(
     // 3. Bare statements → __default__ block (only if non-empty)
     if (doc.statements.len > 0) {
         const resolved = try r.resolveStatements(doc.statements);
-        // Apply var substitution on node and edge labels
         if (doc_vars_map.count() > 0) {
-            for (resolved.nodes) |*node| {
-                const orig = node.label;
-                node.label = try substituteVars(allocator, node.label, &doc_vars_map, err_list, node.loc);
-                node.label_owned = node.label.ptr != orig.ptr;
-            }
-            for (resolved.edges) |*edge| {
-                if (edge.label) |lbl| {
-                    const new_lbl = try substituteVars(allocator, lbl, &doc_vars_map, err_list, edge.loc);
-                    edge.label = new_lbl;
-                    edge.label_owned = new_lbl.ptr != lbl.ptr;
-                }
-            }
+            try applyVarSubstitution(allocator, resolved, &doc_vars_map, err_list);
         }
         try blocks_list.append(allocator, .{
             .name      = "__default__",
@@ -590,20 +627,8 @@ pub fn resolve(
             try blk_vars_map.put(v.key, v.value);
         }
 
-        // Apply var substitution on node and edge labels
         if (blk_vars_map.count() > 0) {
-            for (resolved.nodes) |*node| {
-                const orig = node.label;
-                node.label = try substituteVars(allocator, node.label, &blk_vars_map, err_list, node.loc);
-                node.label_owned = node.label.ptr != orig.ptr;
-            }
-            for (resolved.edges) |*edge| {
-                if (edge.label) |lbl| {
-                    const new_lbl = try substituteVars(allocator, lbl, &blk_vars_map, err_list, edge.loc);
-                    edge.label = new_lbl;
-                    edge.label_owned = new_lbl.ptr != lbl.ptr;
-                }
-            }
+            try applyVarSubstitution(allocator, resolved, &blk_vars_map, err_list);
         }
 
         try blocks_list.append(allocator, .{

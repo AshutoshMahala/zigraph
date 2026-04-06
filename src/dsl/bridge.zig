@@ -2,6 +2,7 @@ const std = @import("std");
 const zigraph = @import("zigraph");
 
 const ast = @import("ast.zig");
+const errors = @import("errors.zig");
 const resolver = @import("resolver.zig");
 
 const ResolvedBlock = resolver.ResolvedBlock;
@@ -66,6 +67,7 @@ pub fn buildTable(
     name: []const u8,
     statements: []const ast.Statement,
     directives: []const ast.Directive,
+    err_list: *errors.ErrorList,
 ) !BuiltTable {
     var headers: ?[]const []const u8 = null;
     var rows_list: std.ArrayListUnmanaged([]const []const u8) = .{};
@@ -80,7 +82,16 @@ pub fn buildTable(
     for (statements) |stmt| {
         switch (stmt) {
             .table_headers => |h| { headers = try dupeStringSlice(allocator, h.fields); },
-            .table_row => |r| { try rows_list.append(allocator, try dupeStringSlice(allocator, r.fields)); },
+            .table_row => |r| {
+                const fields = try dupeStringSlice(allocator, r.fields);
+                // Validate column count matches headers
+                if (headers) |hdrs| {
+                    if (fields.len != hdrs.len) {
+                        try err_list.add(r.loc, .column_count_mismatch, "row column count does not match headers");
+                    }
+                }
+                try rows_list.append(allocator, fields);
+            },
             else => {},
         }
     }

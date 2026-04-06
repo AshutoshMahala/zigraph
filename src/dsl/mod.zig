@@ -108,7 +108,7 @@ pub fn parseAndBuild(allocator: std.mem.Allocator, source: []const u8) !ParseRes
                     const d = doc.blocks[doc_block_idx].directives;
                     break :dir_blk d;
                 };
-                const built = try bridge.buildTable(allocator, blk.name, ast_stmts, ast_dirs);
+                const built = try bridge.buildTable(allocator, blk.name, ast_stmts, ast_dirs, &err_list);
                 try tables_list.append(allocator, built);
             },
             .tree => {
@@ -230,7 +230,7 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, md_source: []const u8) !Parse
                     else d: {
                         break :d doc.blocks[doc_block_idx].directives;
                     };
-                    const built = try bridge.buildTable(allocator, rb.name, ast_stmts, ast_dirs);
+                    const built = try bridge.buildTable(allocator, rb.name, ast_stmts, ast_dirs, &err_list);
                     try tables_list.append(allocator, built);
                 },
                 .tree => {
@@ -418,6 +418,50 @@ test "end-to-end: [table] block" {
     try std.testing.expect(result.tables[0].headers != null);
     try std.testing.expectEqual(@as(usize, 3), result.tables[0].headers.?.len);
     try std.testing.expectEqual(@as(usize, 2), result.tables[0].rows.len);
+}
+
+test "end-to-end: [table] block with @border directive" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\metrics [table] {
+        \\  @border double
+        \\  @align center
+        \\  headers: ID, Name
+        \\  row: 1, Parser
+        \\}
+    ;
+    var result = try parseAndBuild(allocator, source);
+    defer result.deinit();
+    try std.testing.expect(!result.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), result.tables.len);
+    try std.testing.expectEqualStrings("double", result.tables[0].border);
+    try std.testing.expectEqualStrings("center", result.tables[0].alignment);
+}
+
+test "end-to-end: [table] column count mismatch reports error" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\metrics [table] {
+        \\  headers: ID, Name, Status
+        \\  row: 1, Parser
+        \\}
+    ;
+    var result = try parseAndBuild(allocator, source);
+    defer result.deinit();
+    try std.testing.expect(result.hasErrors());
+}
+
+test "end-to-end: var substitution in labels" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\vars {
+        \\  name: World
+        \\}
+        \\greeting: "${name}"
+    ;
+    var result = try parseAndBuild(allocator, source);
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.graphs.len);
 }
 
 test "end-to-end: [tree] block" {
