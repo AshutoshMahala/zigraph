@@ -10,6 +10,7 @@ const StatusBar = @import("status_bar.zig");
 const SourceMap = @import("source_map.zig");
 const TabBar = @import("tab_bar.zig");
 const CommandPalette = @import("command_palette.zig");
+const Keybindings = @import("keybindings.zig");
 const Definitions = @import("definitions.zig");
 
 const App = @This();
@@ -36,11 +37,12 @@ status_bar: *StatusBar,
 source_map: *SourceMap,
 tab_bar: *TabBar,
 command_palette: *CommandPalette,
+keybindings: *Keybindings,
 definitions: *Definitions,
 buffers: std.ArrayListUnmanaged(BufferState),
 active_tab: usize = 0,
 tab_cache: std.ArrayListUnmanaged(TabBar.Tab),
-children: [4]vxfw.SubSurface = undefined,
+children: [5]vxfw.SubSurface = undefined,
 
 pub fn create(allocator: std.mem.Allocator) !*App {
     const buffer = try allocator.create(TextBuffer);
@@ -76,6 +78,9 @@ pub fn create(allocator: std.mem.Allocator) !*App {
 
     const command_palette = try CommandPalette.create(allocator);
 
+    const keybindings = try allocator.create(Keybindings);
+    keybindings.* = .{};
+
     const definitions = try allocator.create(Definitions);
     definitions.* = Definitions.init(allocator);
 
@@ -90,6 +95,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .source_map = source_map,
         .tab_bar = tab_bar,
         .command_palette = command_palette,
+        .keybindings = keybindings,
         .definitions = definitions,
         .buffers = .{},
         .tab_cache = .{},
@@ -132,6 +138,7 @@ pub fn destroy(self: *App) void {
     self.definitions.deinit();
     self.allocator.destroy(self.definitions);
     self.command_palette.destroy();
+    self.allocator.destroy(self.keybindings);
     self.allocator.destroy(self.tab_bar);
     self.allocator.destroy(self);
 }
@@ -218,7 +225,7 @@ fn executeAction(self: *App, action: CommandPalette.Action, ctx: *vxfw.EventCont
             ctx.redraw = true;
         },
         .show_keybindings => {
-            self.status_bar.message = "Keybindings help not yet implemented";
+            self.keybindings.toggle();
             ctx.redraw = true;
         },
         .next_tab => {
@@ -262,6 +269,22 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
     const vaxis_mod = @import("vaxis");
     switch (event) {
         .key_press => |key| {
+            // Ctrl+H toggles keybindings help
+            if (key.matches('h', .{ .ctrl = true })) {
+                self.keybindings.toggle();
+                ctx.redraw = true;
+                return;
+            }
+
+            // When keybindings overlay is visible, it captures all key events
+            if (self.keybindings.visible) {
+                const kb_widget = self.keybindings.widget();
+                if (kb_widget.eventHandler) |handler| {
+                    try handler(kb_widget.userdata, ctx, event);
+                }
+                return;
+            }
+
             // Ctrl+P toggles command palette
             if (key.matches('p', .{ .ctrl = true })) {
                 if (self.command_palette.visible) {
@@ -433,6 +456,20 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         .surface = status_surface,
     };
     child_idx += 1;
+
+    // Draw keybindings overlay (on top of everything)
+    if (self.keybindings.visible) {
+        const kb_ctx = ctx.withConstraints(
+            .{ .width = max.width, .height = max.height },
+            vxfw.MaxSize.fromSize(.{ .width = max.width, .height = max.height }),
+        );
+        const kb_surface = try self.keybindings.widget().draw(kb_ctx);
+        self.children[child_idx] = .{
+            .origin = .{ .row = 0, .col = 0 },
+            .surface = kb_surface,
+        };
+        child_idx += 1;
+    }
 
     // Draw command palette overlay (on top of everything)
     if (self.command_palette.visible) {

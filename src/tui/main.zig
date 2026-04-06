@@ -27,6 +27,7 @@ test {
     _ = @import("status_bar.zig");
     _ = @import("tab_bar.zig");
     _ = @import("command_palette.zig");
+    _ = @import("keybindings.zig");
     _ = @import("definitions.zig");
     _ = @import("completion.zig");
 }
