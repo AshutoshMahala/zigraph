@@ -29,6 +29,8 @@ allocator: std.mem.Allocator,
 focus: Focus = .editor,
 quit_prompt_visible: bool = false,
 split: vxfw.SplitView,
+orientation: enum { horizontal, vertical } = .horizontal,
+split_height: u16 = 15,
 // Shortcuts to the active buffer's state
 editor_pane: *EditorPane,
 buffer: *TextBuffer,
@@ -43,7 +45,7 @@ definitions: *Definitions,
 buffers: std.ArrayListUnmanaged(BufferState),
 active_tab: usize = 0,
 tab_cache: std.ArrayListUnmanaged(TabBar.Tab),
-children: [5]vxfw.SubSurface = undefined,
+children: [6]vxfw.SubSurface = undefined,
 
 pub fn create(allocator: std.mem.Allocator) !*App {
     const buffer = try allocator.create(TextBuffer);
@@ -223,8 +225,14 @@ fn executeAction(self: *App, action: CommandPalette.Action, ctx: *vxfw.EventCont
             ctx.redraw = true;
         },
         .toggle_orientation => {
-            // Toggle not yet implemented; placeholder
-            self.status_bar.message = "Toggle orientation not yet implemented";
+            self.orientation = switch (self.orientation) {
+                .horizontal => .vertical,
+                .vertical => .horizontal,
+            };
+            self.status_bar.message = switch (self.orientation) {
+                .horizontal => "Split: horizontal",
+                .vertical => "Split: vertical",
+            };
             ctx.redraw = true;
         },
         .show_keybindings => {
@@ -340,6 +348,38 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                     self.status_bar.message = "Save failed";
                     _ = err;
                 };
+                ctx.redraw = true;
+                return;
+            }
+
+            // Ctrl+\ toggles split orientation
+            if (key.matches('\\', .{ .ctrl = true })) {
+                self.orientation = switch (self.orientation) {
+                    .horizontal => .vertical,
+                    .vertical => .horizontal,
+                };
+                self.status_bar.message = switch (self.orientation) {
+                    .horizontal => "Split: horizontal",
+                    .vertical => "Split: vertical",
+                };
+                ctx.redraw = true;
+                return;
+            }
+
+            // Ctrl+] increases split size, Ctrl+[ decreases
+            if (key.matches(']', .{ .ctrl = true })) {
+                switch (self.orientation) {
+                    .horizontal => self.split.width +|= 5,
+                    .vertical => self.split_height +|= 3,
+                }
+                ctx.redraw = true;
+                return;
+            }
+            if (key.matches('[', .{ .ctrl = true })) {
+                switch (self.orientation) {
+                    .horizontal => self.split.width = @max(10, self.split.width -| 5),
+                    .vertical => self.split_height = @max(5, self.split_height -| 3),
+                }
                 ctx.redraw = true;
                 return;
             }
@@ -469,13 +509,43 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         .{ .width = max.width, .height = content_height },
         vxfw.MaxSize.fromSize(.{ .width = max.width, .height = content_height }),
     );
-    const split_surface = try self.split.widget().draw(content_ctx);
 
-    self.children[child_idx] = .{
-        .origin = .{ .row = @intCast(tab_bar_height), .col = 0 },
-        .surface = split_surface,
-    };
-    child_idx += 1;
+    if (self.orientation == .horizontal) {
+        const split_surface = try self.split.widget().draw(content_ctx);
+        self.children[child_idx] = .{
+            .origin = .{ .row = @intCast(tab_bar_height), .col = 0 },
+            .surface = split_surface,
+        };
+        child_idx += 1;
+    } else {
+        // Vertical mode: editor on top, preview on bottom
+        const editor_h = @min(self.split_height, content_height -| 1);
+        const preview_h = content_height -| editor_h;
+
+        const editor_ctx = ctx.withConstraints(
+            .{ .width = max.width, .height = editor_h },
+            vxfw.MaxSize.fromSize(.{ .width = max.width, .height = editor_h }),
+        );
+        const editor_surface = try self.editor_pane.widget().draw(editor_ctx);
+        self.children[child_idx] = .{
+            .origin = .{ .row = @intCast(tab_bar_height), .col = 0 },
+            .surface = editor_surface,
+        };
+        child_idx += 1;
+
+        if (preview_h > 0) {
+            const preview_ctx = ctx.withConstraints(
+                .{ .width = max.width, .height = preview_h },
+                vxfw.MaxSize.fromSize(.{ .width = max.width, .height = preview_h }),
+            );
+            const preview_surface = try self.preview_pane.widget().draw(preview_ctx);
+            self.children[child_idx] = .{
+                .origin = .{ .row = @intCast(tab_bar_height + editor_h), .col = 0 },
+                .surface = preview_surface,
+            };
+            child_idx += 1;
+        }
+    }
 
     // Update status bar fields from editor state
     self.status_bar.line = self.editor_pane.cursor_line;
