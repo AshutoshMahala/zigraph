@@ -207,31 +207,87 @@ fn groupSiblingSubgraphs(
         node_group[ni] = if (node_sg[ni]) |si| top_anc[si] else sg_count + ni;
     }
 
-    // 3. Compute global centroid (center-x) for each group.
-    //    Key: group_id → (sum_of_center_x, count).
-    var grp_sum = std.AutoHashMapUnmanaged(usize, u64){};
-    defer grp_sum.deinit(allocator);
-    var grp_cnt = std.AutoHashMapUnmanaged(usize, u64){};
-    defer grp_cnt.deinit(allocator);
+    // 3. Compute group centroid for ordering.
+    //    Small bridge groups (few members, many external connections) use
+    //    NEIGHBOR centroid — placing them where their edges want them.
+    //    Large self-contained groups keep their OWN centroid.
+
+    // 3a. Own centroid.
+    var own_sum = std.AutoHashMapUnmanaged(usize, u64){};
+    defer own_sum.deinit(allocator);
+    var own_cnt = std.AutoHashMapUnmanaged(usize, u64){};
+    defer own_cnt.deinit(allocator);
     for (0..node_count) |ni| {
         const grp = node_group[ni];
         const cx: u64 = @intCast(node_x[ni] + node_widths[ni] / 2);
-        const s = try grp_sum.getOrPut(allocator, grp);
+        const s = try own_sum.getOrPut(allocator, grp);
         if (!s.found_existing) s.value_ptr.* = 0;
         s.value_ptr.* += cx;
-        const c = try grp_cnt.getOrPut(allocator, grp);
+        const c = try own_cnt.getOrPut(allocator, grp);
         if (!c.found_existing) c.value_ptr.* = 0;
         c.value_ptr.* += 1;
     }
 
-    // group_id → centroid (integer)
+    // 3b. Neighbor centroid: sum center-x of external neighbors per group.
+    var nbr_sum = std.AutoHashMapUnmanaged(usize, u64){};
+    defer nbr_sum.deinit(allocator);
+    var nbr_cnt = std.AutoHashMapUnmanaged(usize, u64){};
+    defer nbr_cnt.deinit(allocator);
+    for (0..node_count) |ni| {
+        const grp = node_group[ni];
+        // Children in different groups
+        if (ni < g.children.items.len) {
+            for (g.children.items[ni].items) |child| {
+                if (child >= node_count) continue;
+                if (node_group[child] != grp) {
+                    const cx: u64 = @intCast(node_x[child] + node_widths[child] / 2);
+                    const s = try nbr_sum.getOrPut(allocator, grp);
+                    if (!s.found_existing) s.value_ptr.* = 0;
+                    s.value_ptr.* += cx;
+                    const c = try nbr_cnt.getOrPut(allocator, grp);
+                    if (!c.found_existing) c.value_ptr.* = 0;
+                    c.value_ptr.* += 1;
+                }
+            }
+        }
+        // Parents in different groups
+        if (ni < g.parents.items.len) {
+            for (g.parents.items[ni].items) |parent| {
+                if (parent >= node_count) continue;
+                if (node_group[parent] != grp) {
+                    const cx: u64 = @intCast(node_x[parent] + node_widths[parent] / 2);
+                    const s = try nbr_sum.getOrPut(allocator, grp);
+                    if (!s.found_existing) s.value_ptr.* = 0;
+                    s.value_ptr.* += cx;
+                    const c = try nbr_cnt.getOrPut(allocator, grp);
+                    if (!c.found_existing) c.value_ptr.* = 0;
+                    c.value_ptr.* += 1;
+                }
+            }
+        }
+    }
+
+    // 3c. Final centroid: use neighbor centroid for small bridge groups
+    //     (few members with external connections), own for large groups.
     var grp_centroid = std.AutoHashMapUnmanaged(usize, u64){};
     defer grp_centroid.deinit(allocator);
     {
-        var it = grp_sum.iterator();
+        var it = own_sum.iterator();
         while (it.next()) |kv| {
-            const cnt = grp_cnt.get(kv.key_ptr.*) orelse 1;
-            try grp_centroid.put(allocator, kv.key_ptr.*, kv.value_ptr.* / cnt);
+            const grp = kv.key_ptr.*;
+            const oc = own_cnt.get(grp) orelse 1;
+            const own_cx = kv.value_ptr.* / oc;
+            const nc = nbr_cnt.get(grp) orelse 0;
+            if (nc > 0 and (oc <= 3 or nc > oc)) {
+                // Small bridge group (≤3 members) or group with more
+                // external than internal connections: place where
+                // cross-subgraph edges want it, reducing zig-zag.
+                const ns = nbr_sum.get(grp) orelse 0;
+                try grp_centroid.put(allocator, grp, ns / nc);
+            } else {
+                // Large or self-contained group: use own centroid.
+                try grp_centroid.put(allocator, grp, own_cx);
+            }
         }
     }
 
