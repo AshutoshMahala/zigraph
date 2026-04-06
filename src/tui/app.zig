@@ -10,6 +10,7 @@ const StatusBar = @import("status_bar.zig");
 const SourceMap = @import("source_map.zig");
 const TabBar = @import("tab_bar.zig");
 const CommandPalette = @import("command_palette.zig");
+const Definitions = @import("definitions.zig");
 
 const App = @This();
 
@@ -35,6 +36,7 @@ status_bar: *StatusBar,
 source_map: *SourceMap,
 tab_bar: *TabBar,
 command_palette: *CommandPalette,
+definitions: *Definitions,
 buffers: std.ArrayListUnmanaged(BufferState),
 active_tab: usize = 0,
 tab_cache: std.ArrayListUnmanaged(TabBar.Tab),
@@ -74,6 +76,9 @@ pub fn create(allocator: std.mem.Allocator) !*App {
 
     const command_palette = try CommandPalette.create(allocator);
 
+    const definitions = try allocator.create(Definitions);
+    definitions.* = Definitions.init(allocator);
+
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
@@ -85,6 +90,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .source_map = source_map,
         .tab_bar = tab_bar,
         .command_palette = command_palette,
+        .definitions = definitions,
         .buffers = .{},
         .tab_cache = .{},
         .split = undefined,
@@ -123,6 +129,8 @@ pub fn destroy(self: *App) void {
     self.source_map.deinit();
     self.allocator.destroy(self.source_map);
     self.allocator.destroy(self.status_bar);
+    self.definitions.deinit();
+    self.allocator.destroy(self.definitions);
     self.command_palette.destroy();
     self.allocator.destroy(self.tab_bar);
     self.allocator.destroy(self);
@@ -238,6 +246,7 @@ fn refreshPreview(self: *App) void {
     defer self.allocator.free(source);
     self.preview_pane.renderFromSource(self.allocator, source);
     self.rebuildSourceMap();
+    self.definitions.clear();
 }
 
 fn rebuildSourceMap(self: *App) void {

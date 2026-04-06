@@ -6,12 +6,15 @@ const TextBuffer = @import("text_buffer.zig");
 const Highlighter = @import("highlighter.zig");
 const UndoManager = @import("undo.zig");
 
+const Definitions = @import("definitions.zig");
+
 const EditorPane = @This();
 
 const gutter_width: u16 = 5;
 
 buffer: *TextBuffer,
 undo: *UndoManager,
+definitions: ?*Definitions = null,
 cursor_line: usize = 0,
 cursor_col: usize = 0,
 scroll_top: usize = 0,
