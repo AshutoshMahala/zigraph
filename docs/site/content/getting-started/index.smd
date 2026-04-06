@@ -1,0 +1,7 @@
+---
+.title = "Getting Started",
+.layout = "section.shtml",
+.description = "Install zigraph and create your first diagram",
+---
+
+Get up and running with zigraph. Whether you're using the CLI to render diagrams or embedding the library in a Zig project, this guide walks you through installation and your first visualization.

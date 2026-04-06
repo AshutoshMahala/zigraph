@@ -1,0 +1,118 @@
+---
+.title = "First Diagram",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Step-by-step walkthrough with visual output",
+---
+
+## What We're Building
+
+A simple dependency graph showing how modules relate to each other. We'll render it to both ASCII (terminal) and SVG.
+
+```=html
+<div class="split-view">
+  <div class="split-input">
+    <div class="split-label">Zig Source</div>
+    <pre><code>var g = zigraph.Graph.init(allocator);
+
+try g.addNode(1, "main.zig");
+try g.addNode(2, "http.zig");
+try g.addNode(3, "json.zig");
+try g.addNode(4, "auth.zig");
+try g.addNode(5, "db.zig");
+try g.addNode(6, "log.zig");
+
+try g.addEdge(1, 2);
+try g.addEdge(1, 3);
+try g.addEdge(2, 4);
+try g.addEdge(2, 5);
+try g.addEdge(3, 5);
+try g.addEdge(4, 6);
+try g.addEdge(5, 6);</code></pre>
+  </div>
+  <div class="split-output">
+    <div class="split-tabs">
+      <button class="active" data-target="svg">SVG</button>
+      <button data-target="ascii">ASCII</button>
+    </div>
+    <div class="split-panel active" data-panel="svg">
+      <p><em>SVG output renders a layered DAG with nodes arranged by dependency depth.</em></p>
+    </div>
+    <div class="split-panel" data-panel="ascii">
+      <pre>          ┌──────────┐
+          │ main.zig │
+          └────┬─────┘
+         ┌─────┴─────┐
+         v            v
+    ┌──────────┐ ┌──────────┐
+    │ http.zig │ │ json.zig │
+    └────┬─────┘ └────┬─────┘
+    ┌────┴──┐         │
+    v       v         v
+┌──────┐ ┌──────┐
+│ auth │ │  db  │
+└───┬──┘ └───┬──┘
+    └────┬────┘
+         v
+    ┌─────────┐
+    │ log.zig │
+    └─────────┘</pre>
+    </div>
+  </div>
+</div>
+```
+
+## Step by Step
+
+### 1. Create the graph
+
+Every graph starts with `Graph.init` and explicit allocator:
+
+```zig
+var g = zigraph.Graph.init(allocator);
+defer g.deinit();
+```
+
+### 2. Add nodes
+
+Nodes have a numeric ID and a label string:
+
+```zig
+try g.addNode(1, "main.zig");
+try g.addNode(2, "http.zig");
+```
+
+### 3. Add edges
+
+Directed edges point from source to target:
+
+```zig
+try g.addEdge(1, 2); // main.zig -> http.zig
+```
+
+### 4. Compute layout
+
+The layout engine assigns positions to all nodes:
+
+```zig
+var ir = try zigraph.layout(&g, allocator, .{});
+defer ir.deinit();
+```
+
+### 5. Render
+
+Choose your renderer — SVG for files, terminal for quick previews:
+
+```zig
+// SVG
+const svg = try zigraph.svg.render(ir, allocator, .{});
+
+// Terminal
+const text = try zigraph.terminal.render(ir, allocator, .{});
+```
+
+## Next Steps
+
+- Explore [Primitives](/primitives/) for graph, tree, card, table, and more
+- Learn the [DSL syntax](/dsl/) for writing `.zgraph` files
+- Set up [editor integration](/editors/) for syntax highlighting
