@@ -1,0 +1,20 @@
+---
+.title = "Configuration",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "LSP and formatter settings",
+---
+
+## LSP Settings
+
+The LSP server accepts configuration via the standard `initialize` request:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `formatOnSave` | `false` | Auto-format when saving |
+| `diagnostics.enabled` | `true` | Show real-time diagnostics |
+| `completion.enabled` | `true` | Enable autocomplete |
+
+## Editor-Specific Configuration
+
+See the [Editor Integration](/editors/) section for how to pass these settings in Neovim and VS Code.

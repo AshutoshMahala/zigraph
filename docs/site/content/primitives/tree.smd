@@ -1,0 +1,87 @@
+---
+.title = "Tree",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Hierarchical tree diagrams with Unicode box-drawing",
+---
+
+The tree primitive renders hierarchical data as indented text diagrams using Unicode box-drawing characters (`├─`, `└─`, `│`).
+
+## Overview
+
+Trees are ideal for visualizing file systems, ASTs, org charts, or any hierarchical structure. The tree renderer is standalone — it doesn't use the graph layout engine.
+
+```=html
+<div class="split-view">
+  <div class="split-input">
+    <div class="split-label">Zig Source</div>
+    <pre><code>const TreeNode = zigraph.terminal.tree.TreeNode;
+const nodes = [_]TreeNode{.{
+    .label = "src",
+    .children = &.{
+        .{ .label = "main.zig", .description = "entry point" },
+        .{ .label = "graph.zig", .description = "core graph types" },
+        .{ .label = "layout/", .children = &.{
+            .{ .label = "sugiyama.zig" },
+            .{ .label = "force.zig" },
+        }},
+    },
+}};</code></pre>
+  </div>
+  <div class="split-output">
+    <div class="split-tabs">
+      <button class="active" data-target="ascii">ASCII</button>
+    </div>
+    <div class="split-panel active" data-panel="ascii">
+      <pre>src
+├── main.zig — entry point
+├── graph.zig — core graph types
+└── layout/
+    ├── sugiyama.zig
+    └── force.zig</pre>
+    </div>
+  </div>
+</div>
+```
+
+## Zig API
+
+```=html
+<div class="callout callout-zig">
+  <div class="callout-label">Zig API</div>
+```
+
+```zig
+const std = @import("std");
+const zigraph = @import("zigraph");
+const T = zigraph.terminal;
+const TreeNode = T.tree.TreeNode;
+
+const nodes = [_]TreeNode{.{
+    .label = "Project",
+    .children = &.{
+        .{ .label = "src", .children = &.{
+            .{ .label = "main.zig" },
+            .{ .label = "lib.zig" },
+        }},
+        .{ .label = "tests", .children = &.{
+            .{ .label = "test_graph.zig" },
+        }},
+    },
+}};
+
+const output = try T.tree.render(allocator, &nodes, .{});
+defer allocator.free(output);
+std.debug.print("{s}\n", .{output});
+```
+
+```=html
+</div>
+```
+
+## Features
+
+- **Descriptions** — Add context next to labels with `.description`
+- **Extra lines** — Multi-line content with `.extra_lines`
+- **Grouping** — Nested children with visual indentation
+- **Colors** — Terminal color support via the color system

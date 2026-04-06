@@ -1,0 +1,68 @@
+---
+.title = "Embedding zigraph",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Adding zigraph as a Zig dependency and build.zig setup",
+---
+
+## Add the Dependency
+
+```bash
+zig fetch --save git+https://github.com/markussagen/zigraph
+```
+
+This adds zigraph to your `build.zig.zon` dependencies.
+
+## Configure build.zig
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const zigraph_dep = b.dependency("zigraph", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "my-app",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.root_module.addImport("zigraph", zigraph_dep.module("zigraph"));
+    b.installArtifact(exe);
+}
+```
+
+## Verify
+
+Create `src/main.zig`:
+
+```zig
+const zigraph = @import("zigraph");
+const std = @import("std");
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    var g = zigraph.Graph.init(gpa.allocator());
+    defer g.deinit();
+
+    try g.addNode(1, "hello");
+    try g.addNode(2, "world");
+    try g.addEdge(1, 2);
+
+    std.debug.print("Graph has {d} nodes\n", .{g.nodeCount()});
+}
+```
+
+```bash
+zig build run
+# Output: Graph has 2 nodes
+```

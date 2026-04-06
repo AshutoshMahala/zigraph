@@ -1,0 +1,7 @@
+---
+.title = "Zig Library API",
+.layout = "section.shtml",
+.description = "Embed zigraph in your Zig application",
+---
+
+zigraph is designed as an embeddable library. Add it as a Zig dependency and use the public API to build, layout, and render graphs programmatically.

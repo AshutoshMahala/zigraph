@@ -1,0 +1,57 @@
+---
+.title = "Tree-sitter Grammar",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Grammar structure, node types, and query files",
+---
+
+## Overview
+
+The Tree-sitter grammar lives in `tree-sitter-zgraph/` and provides full incremental parsing of `.zgraph` files. It powers syntax highlighting, code folding, and structural queries.
+
+## Node Types
+
+The grammar defines these node types:
+
+| Node | Description |
+|------|-------------|
+| `source_file` | Root node |
+| `block` | Named `{ }` group |
+| `edge_chain` | Node-operator-node sequence |
+| `edge_operator` | One of 9 operators (`->`, `<-`, etc.) |
+| `annotation` | `[key=val]` property list |
+| `directive` | `@name` directive |
+| `style_block` | `@style target { }` |
+| `vars_block` | `vars { }` block |
+| `var_decl` | Variable declaration inside vars |
+| `string` | Double-quoted string with interpolation |
+| `string_interpolation` | `${name}` inside strings |
+| `comment` | `# ...` line comment |
+| `identifier` | Node/variable name (including `dot.paths`) |
+
+## Highlight Queries
+
+The highlight queries map node types to standard highlight groups:
+
+```scheme
+(comment) @comment
+(string) @string
+(edge_operator) @operator
+(identifier) @variable
+(block (identifier) @function)
+(directive (identifier) @attribute)
+(annotation (identifier) @type)
+```
+
+## Building from Source
+
+```bash
+cd tree-sitter-zgraph
+bun install
+bun run generate
+bun run test  # Runs 31 corpus tests
+```
+
+## Test Corpus
+
+Tests live in `tree-sitter-zgraph/test/corpus/` with 31 tests across 7 files covering blocks, edges, directives, variables, tables, styles, and comments.

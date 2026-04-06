@@ -1,0 +1,42 @@
+---
+.title = "VS Code",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Extension install, TextMate grammar, and LSP settings",
+---
+
+## Installation
+
+Install the zgraph extension from the VS Code marketplace, or build from source:
+
+```bash
+cd editors/vscode
+bun install
+bun run build
+```
+
+Then install the `.vsix` file via VS Code's "Install from VSIX" command.
+
+## Features
+
+The extension provides:
+
+- **Syntax highlighting** — TextMate grammar for `.zgraph` files
+- **LSP integration** — Diagnostics, completions, hover, formatting
+- **Comment toggling** — `Ctrl+/` toggles `#` comments
+- **Bracket matching** — Auto-close `{}`, `[]`, `""`
+
+## Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `zgraph.lsp.enabled` | `true` | Enable/disable the LSP client |
+| `zgraph.lsp.path` | `"zigraph"` | Path to the zigraph binary |
+
+## Troubleshooting
+
+If the LSP fails to start, check:
+
+1. The `zigraph` binary is on your PATH: `which zigraph`
+2. The path is correct in settings: `zgraph.lsp.path`
+3. Check the Output panel (select "zgraph" from the dropdown) for error messages

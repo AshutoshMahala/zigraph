@@ -1,0 +1,41 @@
+---
+.title = "Commands",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "All CLI commands with usage examples",
+---
+
+## render
+
+Render a `.zgraph` file to an output format:
+
+```bash
+zigraph render input.zgraph -o output.svg
+zigraph render input.zgraph --format ascii
+zigraph render input.zgraph --format json -o output.json
+```
+
+## fmt
+
+Format a `.zgraph` file in place:
+
+```bash
+zigraph fmt input.zgraph
+zigraph fmt --check input.zgraph  # Check without modifying
+```
+
+## lsp
+
+Start the language server (typically called by editors, not manually):
+
+```bash
+zigraph lsp
+```
+
+## validate
+
+Check a `.zgraph` file for errors without rendering:
+
+```bash
+zigraph validate input.zgraph
+```

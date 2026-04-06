@@ -1,0 +1,7 @@
+---
+.title = "Syntax Highlighting",
+.layout = "section.shtml",
+.description = "Tree-sitter and TextMate grammars for .zgraph files",
+---
+
+zigraph provides two syntax highlighting grammars: a Tree-sitter grammar for editors with native Tree-sitter support (Neovim, Helix) and a TextMate grammar for VS Code and other TextMate-compatible editors.

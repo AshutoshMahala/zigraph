@@ -1,0 +1,49 @@
+---
+.title = "Output Formats",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "SVG, ASCII, and JSON output modes",
+---
+
+## SVG
+
+The default output format. Produces a standalone SVG file with:
+
+- Spline-based edge routing
+- Embedded node labels
+- Viewbox scaling for any display size
+
+```bash
+zigraph render graph.zgraph -o graph.svg
+```
+
+## ASCII / Unicode
+
+Terminal-friendly output using Unicode box-drawing characters:
+
+```bash
+zigraph render graph.zgraph --format ascii
+```
+
+Outputs text like:
+
+```
+    ┌──────────┐
+    │ main.zig │
+    └────┬─────┘
+    ┌────┴─────┐
+    v          v
+┌────────┐ ┌────────┐
+│http.zig│ │json.zig│
+└────────┘ └────────┘
+```
+
+## JSON
+
+Machine-readable output with full layout information:
+
+```bash
+zigraph render graph.zgraph --format json
+```
+
+The JSON output includes node positions, edge paths, and all computed layout data. Useful for building custom renderers or integrating with other tools.

@@ -1,0 +1,31 @@
+---
+.title = "Options",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Global and per-command flags",
+---
+
+## Global Options
+
+| Flag | Description |
+|------|-------------|
+| `--help`, `-h` | Show help text |
+| `--version` | Print version number |
+| `--color` | Force colored terminal output |
+| `--no-color` | Disable colored output |
+
+## Render Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-o`, `--output` | stdout | Output file path |
+| `--format` | `svg` | Output format: `svg`, `ascii`, `json` |
+| `--theme` | (none) | Apply a named theme |
+| `--layout` | `sugiyama` | Layout algorithm: `sugiyama`, `force` |
+
+## Format Options
+
+| Flag | Description |
+|------|-------------|
+| `--check` | Check formatting without modifying files |
+| `--stdin` | Read from stdin instead of file |

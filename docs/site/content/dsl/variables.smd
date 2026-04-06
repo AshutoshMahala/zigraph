@@ -1,0 +1,35 @@
+---
+.title = "Variables",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Variable blocks and string interpolation",
+---
+
+## Variable Blocks
+
+Define reusable values in a `vars` block:
+
+```zgraph
+vars {
+  app_name: "My Application"
+  db_host: "db.example.com"
+  version: "2.1.0"
+}
+```
+
+## String Interpolation
+
+Use `${name}` syntax inside strings to reference variables:
+
+```zgraph
+vars {
+  env: "production"
+  region: "us-east-1"
+}
+
+server [label="Server (${env})"]
+db [label="DB @ ${region}"]
+server -> db
+```
+
+Variables are resolved at parse time. Undefined variables produce an error.

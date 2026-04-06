@@ -1,0 +1,78 @@
+---
+.title = "Card",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Multi-line box nodes with header and content lines",
+---
+
+Card nodes are multi-line box nodes with a header and content lines, rendered natively in graph layouts. They're useful for displaying structured information within graph nodes — like database schemas, service descriptions, or configuration blocks.
+
+## Overview
+
+```=html
+<div class="split-view">
+  <div class="split-input">
+    <div class="split-label">Zig Source</div>
+    <pre><code>var g = zigraph.Graph.init(allocator);
+// Add card-style nodes with content lines
+try g.addCardNode(1, "UserService", &.{
+    "POST /users",
+    "GET /users/:id",
+    "PUT /users/:id",
+});
+try g.addCardNode(2, "AuthService", &.{
+    "POST /login",
+    "POST /refresh",
+});
+try g.addEdge(1, 2);</code></pre>
+  </div>
+  <div class="split-output">
+    <div class="split-tabs">
+      <button class="active" data-target="ascii">ASCII</button>
+    </div>
+    <div class="split-panel active" data-panel="ascii">
+      <pre>┌──────────────────┐
+│   UserService    │
+├──────────────────┤
+│ POST /users      │
+│ GET /users/:id   │
+│ PUT /users/:id   │
+└────────┬─────────┘
+         │
+         v
+┌──────────────────┐
+│   AuthService    │
+├──────────────────┤
+│ POST /login      │
+│ POST /refresh    │
+└──────────────────┘</pre>
+    </div>
+  </div>
+</div>
+```
+
+## Zig API
+
+```=html
+<div class="callout callout-zig">
+  <div class="callout-label">Zig API</div>
+```
+
+```zig
+const zigraph = @import("zigraph");
+
+var g = zigraph.Graph.init(allocator);
+defer g.deinit();
+
+try g.addCardNode(1, "Service", &.{ "endpoint 1", "endpoint 2" });
+try g.addCardNode(2, "Database", &.{ "table_a", "table_b" });
+try g.addEdge(1, 2);
+
+var ir = try zigraph.layout(&g, allocator, .{});
+defer ir.deinit();
+const text = try zigraph.terminal.render(ir, allocator, .{});
+```
+
+```=html
+</div>
+```

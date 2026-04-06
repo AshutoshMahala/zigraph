@@ -1,0 +1,57 @@
+---
+.title = "Other Editors",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Generic LSP and formatter integration for any editor",
+---
+
+## Generic LSP Setup
+
+Any editor that supports the Language Server Protocol can use zigraph's LSP. The server command is:
+
+```
+zigraph lsp
+```
+
+Communication is over **stdio** (stdin/stdout).
+
+### Helix
+
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[[language]]
+name = "zgraph"
+scope = "source.zgraph"
+file-types = ["zgraph"]
+comment-token = "#"
+language-servers = ["zigraph-lsp"]
+
+[language-server.zigraph-lsp]
+command = "zigraph"
+args = ["lsp"]
+```
+
+### Emacs (lsp-mode)
+
+```elisp
+(add-to-list 'auto-mode-alist '("\\.zgraph\\'" . prog-mode))
+
+(with-eval-after-load 'lsp-mode
+  (add-to-list 'lsp-language-id-configuration '(prog-mode . "zgraph"))
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection '("zigraph" "lsp"))
+    :activation-fn (lsp-activate-on "zgraph")
+    :server-id 'zigraph)))
+```
+
+## Formatter Integration
+
+Use `zigraph fmt` as an external formatter:
+
+```bash
+zigraph fmt --stdin < input.zgraph > formatted.zgraph
+```
+
+Most editors can pipe the buffer through an external command for formatting.

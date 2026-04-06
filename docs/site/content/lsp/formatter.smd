@@ -1,0 +1,37 @@
+---
+.title = "Formatter",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Auto-formatting rules and configuration",
+---
+
+## Usage
+
+Format via CLI:
+
+```bash
+zigraph fmt file.zgraph
+```
+
+Format on save via LSP (configure in your editor settings).
+
+## Formatting Rules
+
+The formatter enforces consistent style:
+
+- **Indentation** — 2 spaces inside blocks
+- **Spacing** — Single space around edge operators (`a -> b`, not `a->b`)
+- **Blank lines** — One blank line between top-level blocks
+- **Trailing newline** — Files end with a single newline
+- **Property alignment** — Properties aligned within brackets
+
+## Check Mode
+
+Verify formatting without modifying files:
+
+```bash
+zigraph fmt --check file.zgraph
+echo $?  # 0 = formatted, 1 = needs formatting
+```
+
+Useful in CI pipelines.

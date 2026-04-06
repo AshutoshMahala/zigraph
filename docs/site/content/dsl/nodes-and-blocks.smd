@@ -1,0 +1,67 @@
+---
+.title = "Nodes & Blocks",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Node declarations, labels, and block syntax",
+---
+
+## Node Declarations
+
+Nodes are declared by using an identifier. The first use of an identifier creates the node:
+
+```zgraph
+server
+database
+cache
+```
+
+## Labels
+
+Add a label with the `label` property in brackets:
+
+```zgraph
+server [label="API Server"]
+db [label="PostgreSQL Database"]
+```
+
+If no label is given, the identifier name is used as the label.
+
+## Blocks
+
+Blocks group related content with curly braces:
+
+```zgraph
+backend {
+  server [label="API"]
+  db [label="Database"]
+  server -> db
+}
+
+frontend {
+  app [label="React App"]
+  cdn [label="CDN"]
+  app -> cdn
+}
+
+frontend.app -> backend.server
+```
+
+Blocks create namespaced scopes. Nodes inside blocks are referenced using dot-path notation (`backend.server`).
+
+## Nested Blocks
+
+Blocks can be nested to arbitrary depth:
+
+```zgraph
+infrastructure {
+  aws {
+    ec2 [label="EC2"]
+    rds [label="RDS"]
+    ec2 -> rds
+  }
+  monitoring {
+    grafana [label="Grafana"]
+  }
+  aws.ec2 -> monitoring.grafana
+}
+```

@@ -1,0 +1,41 @@
+---
+.title = "LSP Features",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Diagnostics, completions, hover, and go-to-definition",
+---
+
+## Diagnostics
+
+Real-time error reporting as you type:
+
+- Syntax errors (missing brackets, invalid operators)
+- Undefined node references
+- Duplicate node declarations
+- Invalid property values
+
+## Completions
+
+Context-aware autocomplete for:
+
+- Node names (from current file)
+- Property names (within `[]` brackets)
+- Edge operators
+- Directive names (`@style`, `@layout`)
+- Variable names (within `${...}`)
+
+## Hover
+
+Hover over identifiers to see:
+
+- Node properties and connections
+- Variable values
+- Style class definitions
+
+## Go to Definition
+
+Jump to the definition of:
+
+- Node declarations
+- Variable definitions in `vars {}` blocks
+- Style classes defined in `@style` blocks

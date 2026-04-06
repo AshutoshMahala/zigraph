@@ -1,0 +1,7 @@
+---
+.title = "DSL Syntax",
+.layout = "section.shtml",
+.description = "The .zgraph file format for describing graphs",
+---
+
+The zgraph DSL is a concise language for describing graphs, trees, and other visual structures. Files use the `.zgraph` extension and can be rendered via the CLI or parsed programmatically with the Zig API.

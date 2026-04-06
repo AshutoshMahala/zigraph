@@ -1,0 +1,88 @@
+---
+.title = "API Reference",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Public types, functions, and rendering pipeline",
+---
+
+## Core Types
+
+### `Graph`
+
+The main graph data structure.
+
+```zig
+const Graph = zigraph.Graph;
+
+var g = Graph.init(allocator);
+defer g.deinit();
+```
+
+| Method | Description |
+|--------|-------------|
+| `init(allocator)` | Create a new empty graph |
+| `deinit()` | Free all graph memory |
+| `addNode(id, label)` | Add a node with numeric ID and label |
+| `addEdge(from, to)` | Add a directed edge |
+| `addCardNode(id, label, lines)` | Add a card-style node |
+| `nodeCount()` | Return the number of nodes |
+
+### `layout`
+
+Compute positions for all nodes and edges:
+
+```zig
+var ir = try zigraph.layout(&g, allocator, .{});
+defer ir.deinit();
+```
+
+Options:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `node_spacing` | `u32` | `15` | Horizontal gap between nodes |
+| `layer_spacing` | `u32` | `30` | Vertical gap between layers |
+| `optimize_crossings` | `bool` | `true` | Run crossing reduction |
+| `assume_acyclic` | `bool` | `false` | Skip cycle detection |
+
+### Renderers
+
+#### SVG
+
+```zig
+const svg = try zigraph.svg.render(ir, allocator, .{});
+defer allocator.free(svg);
+```
+
+#### Terminal
+
+```zig
+const text = try zigraph.terminal.render(ir, allocator, .{});
+defer allocator.free(text);
+```
+
+#### JSON
+
+```zig
+const json = try zigraph.json.render(ir, allocator, .{});
+defer allocator.free(json);
+```
+
+## Tree Module
+
+Standalone tree rendering (no graph layout needed):
+
+```zig
+const T = zigraph.terminal;
+const TreeNode = T.tree.TreeNode;
+
+const nodes = [_]TreeNode{.{
+    .label = "root",
+    .children = &.{
+        .{ .label = "child1" },
+        .{ .label = "child2", .description = "with description" },
+    },
+}};
+
+const output = try T.tree.render(allocator, &nodes, .{});
+```

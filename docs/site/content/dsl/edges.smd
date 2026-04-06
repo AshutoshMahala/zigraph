@@ -1,0 +1,65 @@
+---
+.title = "Edges",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "All 9 edge operators and edge chains",
+---
+
+## Edge Operators
+
+zgraph supports 9 edge operators:
+
+| Operator | Name | Style |
+|----------|------|-------|
+| `->` | Directed | Solid line with arrow |
+| `<-` | Reverse directed | Solid line with reversed arrow |
+| `--` | Undirected | Solid line, no arrows |
+| `<->` | Bidirectional | Arrows on both ends |
+| `=>` | Thick directed | Bold arrow |
+| `==>` | Double thick | Double bold arrow |
+| `-.->` | Dashed directed | Dashed line with arrow |
+| `-..->` | Dotted directed | Dotted line with arrow |
+| `-..-` | Dotted undirected | Dotted line, no arrows |
+
+## Examples
+
+```zgraph
+# Solid connections
+a -> b         # directed
+a <-> b        # bidirectional
+a -- b         # undirected
+
+# Emphasized connections
+a => b         # thick
+a ==> b        # double thick
+
+# Weak/optional connections
+a -.-> b       # dashed
+a -..-> b      # dotted
+a -..- b       # dotted undirected
+```
+
+## Edge Chains
+
+Multiple nodes can be chained in a single statement:
+
+```zgraph
+a -> b -> c -> d
+```
+
+This creates three edges: `a->b`, `b->c`, `c->d`.
+
+Mixed operators in chains:
+
+```zgraph
+client -> server => database -.-> cache
+```
+
+## Edge Labels
+
+Add labels to edges with brackets:
+
+```zgraph
+server -> db [label="queries"]
+server -> cache [label="reads"]
+```

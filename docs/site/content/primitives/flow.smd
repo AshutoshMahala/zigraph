@@ -1,0 +1,28 @@
+---
+.title = "Flow",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Flowchart diagrams with decision nodes and paths",
+---
+
+Flowcharts extend the graph primitive with specialized node shapes (diamonds for decisions, rounded rectangles for processes) and labeled paths.
+
+## Overview
+
+Flowcharts use the same Sugiyama layout engine as graphs, but with additional node types and edge labels optimized for process visualization.
+
+## Example
+
+```zgraph
+start [shape="oval"]
+check [shape="diamond" label="Valid?"]
+process [label="Process Data"]
+error [label="Show Error"]
+done [shape="oval" label="End"]
+
+start -> check
+check -> process [label="yes"]
+check -> error [label="no"]
+process -> done
+error -> done
+```

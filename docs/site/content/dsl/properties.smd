@@ -1,0 +1,39 @@
+---
+.title = "Properties",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Property lists and annotations",
+---
+
+## Property Lists
+
+Properties are key-value pairs in square brackets:
+
+```zgraph
+server [label="API Server" color="blue" shape="box"]
+```
+
+Multiple properties are space-separated within the brackets.
+
+## Common Properties
+
+| Property | Values | Description |
+|----------|--------|-------------|
+| `label` | String | Display text for the node |
+| `color` | Color name or hex | Node border/text color |
+| `shape` | `box`, `oval`, `diamond` | Node shape |
+| `style` | `filled`, `dashed`, `dotted` | Visual style |
+
+## Annotations
+
+Annotations appear before nodes or edges and modify their behavior:
+
+```zgraph
+[layout="lr"]  # Left-to-right layout for this scope
+
+server [label="API"]
+db [label="DB"]
+server -> db
+```
+
+Annotations use the same bracket syntax as properties but apply to the scope rather than a specific node.

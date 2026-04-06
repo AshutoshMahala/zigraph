@@ -1,0 +1,81 @@
+---
+.title = "Styling & Theming",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "@style blocks, class references, colors, and visual properties",
+---
+
+## Style Blocks
+
+Use `@style` to define default styles for all nodes or edges:
+
+```zgraph
+@style node {
+  fill = "#1e1e2e"
+  color = "#cdd6f4"
+  border = "#45475a"
+  font-size = 14
+}
+
+@style edge {
+  color = "#585b70"
+  width = 1.5
+}
+```
+
+## Class References
+
+Define named style classes and apply them to nodes:
+
+```zgraph
+@style .primary {
+  fill = "#89b4fa"
+  color = "#1e1e2e"
+}
+
+@style .danger {
+  fill = "#f38ba8"
+  color = "#1e1e2e"
+}
+
+server .primary [label="API Server"]
+legacy .danger [label="Deprecated Service"]
+```
+
+Multiple classes can be applied to a single node:
+
+```zgraph
+node .primary .large [label="Important"]
+```
+
+## Color Values
+
+Styles accept several color formats:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Hex | `"#ff5733"` | 6-digit hex color |
+| Named | `"red"` | CSS color name |
+| RGB | `"rgb(255, 87, 51)"` | RGB function |
+
+## Theming
+
+Create complete themes by combining `@style` blocks:
+
+```zgraph
+# Dark theme
+@style node {
+  fill = "#1e1e2e"
+  color = "#cdd6f4"
+  border = "#45475a"
+}
+
+@style edge {
+  color = "#585b70"
+}
+
+@style .accent {
+  fill = "#89b4fa"
+  color = "#1e1e2e"
+}
+```

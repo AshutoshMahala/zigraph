@@ -1,0 +1,7 @@
+---
+.title = "Primitives",
+.layout = "section.shtml",
+.description = "Visual building blocks: graph, tree, card, table, gantt, flow, and DAG",
+---
+
+zigraph provides several diagramming primitives. Each primitive has its own layout algorithm and rendering options. All primitives can be rendered to terminal (ASCII/Unicode), SVG, or JSON.

@@ -1,0 +1,7 @@
+---
+.title = "Editor Integration",
+.layout = "section.shtml",
+.description = "Set up syntax highlighting, LSP, and formatting in your editor",
+---
+
+zigraph provides first-class editor support for Neovim and VS Code, with generic LSP support for any editor that implements the protocol.

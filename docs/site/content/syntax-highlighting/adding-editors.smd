@@ -1,0 +1,50 @@
+---
+.title = "Adding New Editors",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "How to add zgraph highlighting to other editors",
+---
+
+## Using the Tree-sitter Grammar
+
+If your editor supports Tree-sitter (Neovim, Helix, Zed, Emacs with tree-sitter), you can use the zgraph grammar directly.
+
+### 1. Build the parser
+
+```bash
+cd tree-sitter-zgraph
+bun install
+bun run generate
+```
+
+This produces `src/parser.c` — the compiled parser.
+
+### 2. Register the parser
+
+Each editor has its own mechanism for registering Tree-sitter parsers. You need:
+
+- **Parser binary**: Compile `src/parser.c` (most editors do this automatically)
+- **Highlight queries**: Copy `queries/highlights.scm` to the editor's query directory
+- **Filetype mapping**: Associate `.zgraph` files with the `zgraph` language
+
+### 3. Write highlight queries
+
+The provided `queries/highlights.scm` uses standard capture names (`@comment`, `@string`, `@operator`, etc.) that work across editors. If your editor uses different names, adapt accordingly.
+
+## Using the TextMate Grammar
+
+For editors that support TextMate grammars (VS Code, Sublime Text, TextMate), use the grammar at `editors/vscode/syntaxes/zgraph.tmLanguage.json`.
+
+### Sublime Text
+
+1. Create `~/.config/sublime-text/Packages/zgraph/`
+2. Copy `zgraph.tmLanguage.json` to that directory
+3. Create a `.sublime-syntax` file or use the JSON grammar directly
+
+## Creating a New Grammar
+
+If neither Tree-sitter nor TextMate work for your editor, refer to:
+
+- `tree-sitter-zgraph/grammar.js` for the canonical syntax definition
+- The [DSL Syntax](/dsl/) documentation for language semantics
+- `tree-sitter-zgraph/test/corpus/` for comprehensive syntax examples

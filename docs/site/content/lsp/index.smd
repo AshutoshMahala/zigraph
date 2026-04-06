@@ -1,0 +1,7 @@
+---
+.title = "LSP & Formatter",
+.layout = "section.shtml",
+.description = "Language server and auto-formatting for .zgraph files",
+---
+
+zigraph includes a Language Server Protocol (LSP) implementation and an auto-formatter for `.zgraph` files.

@@ -1,0 +1,52 @@
+---
+.title = "Directives",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "@-prefixed directives for style, layout, and more",
+---
+
+## Overview
+
+Directives are `@`-prefixed instructions that control rendering behavior. They start with `@` followed by a name.
+
+## @style
+
+Define visual styles for nodes, edges, or classes:
+
+```zgraph
+@style node {
+  color = "white"
+  fill = "#1a1a2e"
+  border = "#333"
+}
+
+@style edge {
+  color = "#666"
+}
+
+@style .highlight {
+  fill = "#f59e0b"
+  color = "#000"
+}
+```
+
+Apply class styles with dot-prefix notation:
+
+```zgraph
+server .highlight [label="Important Server"]
+```
+
+## @layout
+
+Control the layout direction:
+
+```zgraph
+@layout {
+  direction = "lr"    # left-to-right (default is top-to-bottom)
+  spacing = 20
+}
+```
+
+## Custom Directives
+
+Any `@name` is parsed as a directive. Unknown directives are passed through to the rendering engine, allowing extensions.

@@ -1,0 +1,36 @@
+---
+.title = "TextMate Grammar",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "VS Code .tmLanguage.json scope names and patterns",
+---
+
+## Overview
+
+The TextMate grammar at `editors/vscode/syntaxes/zgraph.tmLanguage.json` provides regex-based syntax highlighting for VS Code and other TextMate-compatible editors.
+
+## Scope Names
+
+| Scope | Matches |
+|-------|---------|
+| `comment.line.number-sign.zgraph` | `# ...` comments |
+| `string.quoted.double.zgraph` | `"..."` strings |
+| `constant.character.escape.zgraph` | `\"` escapes in strings |
+| `variable.other.zgraph` | `${name}` interpolation |
+| `keyword.operator.edge.zgraph` | Edge operators (`->`, `<-`, etc.) |
+| `entity.name.type.class.zgraph` | `.className` references |
+| `entity.other.attribute-name.zgraph` | `@directive` names |
+| `keyword.control.zgraph` | `vars`, `headers`, `row` |
+| `support.other.property.zgraph` | Property names in `[key=val]` |
+| `constant.numeric.zgraph` | Number literals |
+| `entity.name.function.zgraph` | Block names before `{` or `[` |
+
+## Limitations
+
+TextMate grammars are regex-based, so they can't handle:
+
+- Context-dependent highlighting (e.g., different colors for nodes in edges vs declarations)
+- Cross-line patterns beyond simple begin/end matching
+- Semantic understanding of the graph structure
+
+For full-fidelity highlighting, use the Tree-sitter grammar in Neovim or Helix.

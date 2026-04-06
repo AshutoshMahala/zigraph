@@ -1,0 +1,7 @@
+---
+.title = "CLI",
+.layout = "section.shtml",
+.description = "Command-line interface for rendering and processing .zgraph files",
+---
+
+The zigraph CLI renders `.zgraph` files to SVG, ASCII, or JSON from the command line.

@@ -1,0 +1,42 @@
+---
+.title = "DAG",
+.layout = "page.shtml",
+.date = @date("2026-04-06T00:00:00"),
+.description = "Directed acyclic graph layouts with topological ordering",
+---
+
+DAGs (Directed Acyclic Graphs) are a specialization of the graph primitive that guarantees no cycles. The layout engine can exploit the acyclic property for more efficient and cleaner layouts.
+
+## Overview
+
+When your graph is known to be acyclic, you can use DAG-specific options that skip cycle detection and produce tighter layouts:
+
+```zig
+var ir = try zigraph.layout(&g, allocator, .{
+    .assume_acyclic = true,
+});
+```
+
+## Use Cases
+
+- **Build systems** — Task dependency graphs
+- **Package managers** — Dependency resolution visualization
+- **Data pipelines** — ETL flow visualization
+- **Git history** — Commit graph rendering
+
+## Example
+
+```zgraph
+# Build pipeline DAG
+fetch [label="Fetch Deps"]
+compile [label="Compile"]
+test [label="Run Tests"]
+link [label="Link"]
+package [label="Package"]
+
+fetch -> compile
+compile -> test
+compile -> link
+test -> package
+link -> package
+```
