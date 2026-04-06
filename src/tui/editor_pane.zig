@@ -6,8 +6,6 @@ const TextBuffer = @import("text_buffer.zig");
 const Highlighter = @import("highlighter.zig");
 const UndoManager = @import("undo.zig");
 
-const Definitions = @import("definitions.zig");
-
 const EditorPane = @This();
 
 const gutter_width: u16 = 5;
@@ -26,7 +24,6 @@ pub const ErrorLine = struct {
 
 buffer: *TextBuffer,
 undo: *UndoManager,
-definitions: ?*Definitions = null,
 cursor_line: usize = 0,
 cursor_col: usize = 0,
 scroll_top: usize = 0,
@@ -170,9 +167,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         return surface;
     }
 
-    const text_width: usize = if (total_width > gutter_width) total_width - gutter_width else 0;
-    _ = text_width;
-
     var row: u16 = 0;
     while (row < max.height) : (row += 1) {
         const buf_line = self.scroll_top + @as(usize, row);
@@ -190,7 +184,7 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
 
         // Write each character with syntax style
         var col: u16 = gutter_width;
-        for (line_content, 0..) |ch, ci| {
+        for (line_content, 0..) |_, ci| {
             if (col >= total_width) break;
             var style = spanStyleAt(spans, ci);
 
@@ -219,7 +213,6 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
                 .char = .{ .grapheme = line_content[ci .. ci + 1], .width = 1 },
                 .style = cell_style,
             });
-            _ = ch;
             col += 1;
         }
 

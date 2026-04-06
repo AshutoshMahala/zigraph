@@ -342,15 +342,11 @@ fn saveCurrentFile(self: *App) !void {
 
 fn rebuildSourceMap(self: *App) void {
     self.source_map.clear();
-    // For now, populate basic node mappings from the parse result.
-    // This is a simplified version — we extract node names from the DSL source
-    // and map them to their byte offsets.
-    // Full implementation would use AST node locations from the parser.
+    // TODO: populate from AST
 }
 
 fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
     const self: *App = @ptrCast(@alignCast(ptr));
-    const vaxis_mod = @import("vaxis");
     switch (event) {
         .key_press => |key| {
             // Ctrl+H toggles keybindings help
@@ -383,7 +379,7 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
             // When command palette is visible, it captures all key events
             if (self.command_palette.visible) {
                 // Check for Enter before forwarding (to capture the action)
-                const is_enter = key.matches(vaxis_mod.Key.enter, .{});
+                const is_enter = key.matches(vaxis.Key.enter, .{});
 
                 const cp_widget = self.command_palette.widget();
                 if (cp_widget.eventHandler) |handler| {

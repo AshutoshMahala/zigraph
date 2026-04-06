@@ -170,9 +170,6 @@ fn isInsideBrackets(before: []const u8) bool {
         } else if (before[i] == '[') {
             if (depth == 0) {
                 // We found an unmatched '[', so we're inside brackets.
-                // Check that the cursor is after '[' or ',' (ignoring whitespace).
-                const after_bracket = std.mem.trimLeft(u8, before[i + 1 ..], " \t");
-                _ = after_bracket;
                 return true;
             }
             depth -= 1;
