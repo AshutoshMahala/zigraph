@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head id="head">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title id="title" :text="$page.title.suffix(' | zigraph')"></title>
+    <link rel="stylesheet" href="$site.asset('style.css').link()">
+    <super>
+  </head>
+  <body id="body">
+    <nav class="top-nav" id="top-nav">
+      <div class="nav-inner">
+        <a href="$site.page('').link()" class="nav-logo">zigraph</a>
+        <button class="nav-toggle" onclick="document.body.classList.toggle('nav-open')" aria-label="Toggle navigation">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="nav-links">
+          <a href="$site.page('getting-started').link()">Guide</a>
+          <a href="$site.page('primitives').link()">Primitives</a>
+          <a href="$site.page('dsl').link()">DSL</a>
+          <a href="$site.page('cli').link()">CLI</a>
+          <a href="$site.page('lsp').link()">LSP</a>
+          <a href="$site.page('editors').link()">Editors</a>
+          <a href="$site.page('zig-api').link()">Zig API</a>
+          <a href="https://github.com/markussagen/zigraph" class="nav-github">GitHub</a>
+        </div>
+      </div>
+    </nav>
+    <div class="layout">
+      <aside class="sidebar" id="sidebar">
+        <super>
+      </aside>
+      <main class="content" id="content">
+        <super>
+      </main>
+      <aside class="toc" id="toc">
+        <super>
+      </aside>
+    </div>
+    <script src="$site.asset('main.js').link()"></script>
+    <super>
+  </body>
+</html>
