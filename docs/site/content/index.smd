@@ -1,5 +1,5 @@
 ---
-.title = "zigraph",
+.title = "Home",
 .date = @date("2026-04-06T00:00:00"),
 .author = "zigraph",
 .layout = "home.shtml",
@@ -11,8 +11,8 @@
   <h1>zigraph</h1>
   <p>Zero-dependency graph layout engine for Zig. Visualize DAGs, dependency trees, and flow graphs in terminals, SVG, or JSON.</p>
   <div class="hero-actions">
-    <a href="/getting-started/" class="btn-primary">Get Started</a>
-    <a href="/primitives/" class="btn-secondary">Browse Primitives</a>
+    <a href="getting-started/" class="btn-primary">Get Started</a>
+    <a href="primitives/" class="btn-secondary">Browse Primitives</a>
   </div>
 </div>
 ```

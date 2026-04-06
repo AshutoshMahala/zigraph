@@ -2,7 +2,12 @@
 <head id="head">
 </head>
 <aside class="sidebar" id="sidebar">
-  <div :html="$page.parentSection().content()"></div>
+  <div class="sidebar-group">
+    <div class="sidebar-heading" :text="$page.parentSection().title"></div>
+    <div :loop="$page.parentSection().subpages()">
+      <a href="$loop.it.link()" :text="$loop.it.title"></a>
+    </div>
+  </div>
 </aside>
 <main class="content" id="content">
   <h1 :text="$page.title"></h1>

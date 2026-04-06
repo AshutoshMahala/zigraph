@@ -21,6 +21,7 @@
           <a href="$site.page('cli').link()">CLI</a>
           <a href="$site.page('lsp').link()">LSP</a>
           <a href="$site.page('editors').link()">Editors</a>
+          <a href="$site.page('syntax-highlighting').link()">Syntax</a>
           <a href="$site.page('zig-api').link()">Zig API</a>
           <a href="https://github.com/markussagen/zigraph" class="nav-github">GitHub</a>
         </div>

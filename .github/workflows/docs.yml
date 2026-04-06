@@ -29,8 +29,8 @@ jobs:
 
       - name: Install Zine
         run: |
-          cd docs/site
-          zig fetch --save git+https://github.com/kristoff-it/zine#v0.11.2
+          curl -L https://github.com/kristoff-it/zine/releases/download/v0.11.2/x86_64-linux.tar.xz | tar xJ
+          sudo mv zine /usr/local/bin/zine
 
       - name: Build site
         run: |
