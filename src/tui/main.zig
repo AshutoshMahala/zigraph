@@ -28,4 +28,5 @@ test {
     _ = @import("tab_bar.zig");
     _ = @import("command_palette.zig");
     _ = @import("definitions.zig");
+    _ = @import("completion.zig");
 }
