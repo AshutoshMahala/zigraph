@@ -854,6 +854,52 @@ pub fn build(b: *std.Build) void {
     const run_cli_step = b.step("run-cli", "Run the zigraph CLI");
     run_cli_step.dependOn(&run_cli.step);
 
+    // TUI editor executable
+    const vaxis_dep = b.dependency("vaxis", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const tui_mod = b.createModule(.{
+        .root_source_file = b.path("src/tui/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zigraph", .module = zigraph_mod },
+            .{ .name = "dsl", .module = dsl_mod },
+            .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
+        },
+    });
+
+    const tui_edit_exe = b.addExecutable(.{
+        .name = "zigraph-edit",
+        .root_module = tui_mod,
+    });
+    b.installArtifact(tui_edit_exe);
+
+    const run_tui_edit = b.addRunArtifact(tui_edit_exe);
+    if (b.args) |a| run_tui_edit.addArgs(a);
+    const run_tui_edit_step = b.step("run-edit", "Run the TUI editor");
+    run_tui_edit_step.dependOn(&run_tui_edit.step);
+
+    // TUI unit tests
+    const tui_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tui/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+                .{ .name = "dsl", .module = dsl_mod },
+                .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
+            },
+        }),
+    });
+    const run_tui_tests = b.addRunArtifact(tui_tests);
+    const tui_test_step = b.step("test-tui", "Run TUI unit tests");
+    tui_test_step.dependOn(&run_tui_tests.step);
+    test_step.dependOn(&run_tui_tests.step);
+
     // LSP server executable
     const lsp_exe = b.addExecutable(.{
         .name = "zgraph-lsp",
