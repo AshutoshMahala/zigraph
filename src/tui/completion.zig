@@ -1,4 +1,6 @@
 const std = @import("std");
+const vaxis = @import("vaxis");
+const vxfw = vaxis.vxfw;
 
 pub const Completion = @This();
 
@@ -78,11 +80,139 @@ const border_completions = [_]CompletionItem{
     .{ .text = "rounded" },
 };
 
+/// Alias used externally (app.zig) to avoid repeating the full type name.
+pub const Item = CompletionItem;
+
 visible: bool = false,
 items: []const CompletionItem = &.{},
 selected: usize = 0,
 prefix: [64]u8 = .{0} ** 64,
 prefix_len: usize = 0,
+
+pub fn widget(self: *Completion) vxfw.Widget {
+    return .{ .userdata = self, .eventHandler = null, .drawFn = typeErasedDrawFn };
+}
+
+pub fn show(self: *Completion, new_items: []const Item) void {
+    self.items = new_items;
+    self.visible = true;
+    self.selected = 0;
+}
+
+pub fn hide(self: *Completion) void {
+    self.visible = false;
+    self.items = &.{};
+    self.selected = 0;
+}
+
+pub fn selectedItem(self: *const Completion) ?Item {
+    if (!self.visible or self.items.len == 0) return null;
+    if (self.selected < self.items.len) return self.items[self.selected];
+    return null;
+}
+
+pub fn moveUp(self: *Completion) void {
+    if (self.selected > 0) self.selected -= 1;
+}
+
+pub fn moveDown(self: *Completion) void {
+    if (self.items.len > 0 and self.selected + 1 < self.items.len) self.selected += 1;
+}
+
+fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
+    const self: *Completion = @ptrCast(@alignCast(ptr));
+
+    if (!self.visible or self.items.len == 0) {
+        return try vxfw.Surface.init(ctx.arena, self.widget(), .{ .width = 0, .height = 0 });
+    }
+
+    const max = ctx.max.size();
+
+    // Calculate popup dimensions.
+    var max_text_len: usize = 0;
+    for (self.items) |it| {
+        if (it.text.len > max_text_len) max_text_len = it.text.len;
+    }
+    const inner_width: u16 = @intCast(max_text_len + 2); // 1 space padding each side
+    const popup_width: u16 = inner_width + 2; // left + right border
+    const max_rows: usize = 8;
+    const visible_rows: u16 = @intCast(@min(self.items.len, max_rows));
+    const popup_height: u16 = visible_rows + 2; // top + bottom border
+
+    var surface = try vxfw.Surface.init(ctx.arena, self.widget(), .{
+        .width = @min(popup_width, max.width),
+        .height = @min(popup_height, max.height),
+    });
+
+    const actual_width = @min(popup_width, max.width);
+    const actual_height = @min(popup_height, max.height);
+
+    const border_style: vaxis.Cell.Style = .{ .dim = true };
+    const selected_style: vaxis.Cell.Style = .{ .reverse = true };
+    const normal_style: vaxis.Cell.Style = .{};
+
+    // Top border: ┌─...─┐
+    surface.writeCell(0, 0, .{ .char = .{ .grapheme = "\xe2\x94\x8c", .width = 1 }, .style = border_style }); // ┌
+    var c: u16 = 1;
+    while (c < actual_width -| 1) : (c += 1) {
+        surface.writeCell(c, 0, .{ .char = .{ .grapheme = "\xe2\x94\x80", .width = 1 }, .style = border_style }); // ─
+    }
+    if (actual_width >= 2) {
+        surface.writeCell(actual_width - 1, 0, .{ .char = .{ .grapheme = "\xe2\x94\x90", .width = 1 }, .style = border_style }); // ┐
+    }
+
+    // Item rows
+    var row: u16 = 1;
+    var item_idx: usize = 0;
+    while (row < actual_height -| 1 and item_idx < self.items.len) : ({
+        row += 1;
+        item_idx += 1;
+    }) {
+        const item = self.items[item_idx];
+        const style = if (item_idx == self.selected) selected_style else normal_style;
+
+        // Left border │
+        surface.writeCell(0, row, .{ .char = .{ .grapheme = "\xe2\x94\x82", .width = 1 }, .style = border_style });
+
+        // Padding space
+        surface.writeCell(1, row, .{ .char = .{ .grapheme = " ", .width = 1 }, .style = style });
+
+        // Item text
+        var col: u16 = 2;
+        for (item.text) |ch| {
+            if (col >= actual_width -| 1) break;
+            surface.writeCell(col, row, .{
+                .char = .{ .grapheme = &[_]u8{ch}, .width = 1 },
+                .style = style,
+            });
+            col += 1;
+        }
+        // Fill remaining inner cells with spaces (for selected highlight)
+        while (col < actual_width -| 1) : (col += 1) {
+            surface.writeCell(col, row, .{ .char = .{ .grapheme = " ", .width = 1 }, .style = style });
+        }
+
+        // Right border │
+        if (actual_width >= 2) {
+            surface.writeCell(actual_width - 1, row, .{ .char = .{ .grapheme = "\xe2\x94\x82", .width = 1 }, .style = border_style });
+        }
+    }
+
+    // Bottom border: └─...─┘
+    if (actual_height >= 2) {
+        const bottom_row = actual_height - 1;
+        surface.writeCell(0, bottom_row, .{ .char = .{ .grapheme = "\xe2\x94\x94", .width = 1 }, .style = border_style }); // └
+        c = 1;
+        while (c < actual_width -| 1) : (c += 1) {
+            surface.writeCell(c, bottom_row, .{ .char = .{ .grapheme = "\xe2\x94\x80", .width = 1 }, .style = border_style }); // ─
+        }
+        if (actual_width >= 2) {
+            surface.writeCell(actual_width - 1, bottom_row, .{ .char = .{ .grapheme = "\xe2\x94\x98", .width = 1 }, .style = border_style }); // ┘
+        }
+    }
+
+    return surface;
+}
 
 /// Detect the completion context by scanning backwards from the cursor position.
 pub fn detectContext(line: []const u8, col: usize) Context {

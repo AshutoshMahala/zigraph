@@ -13,6 +13,7 @@ const TabBar = @import("tab_bar.zig");
 const CommandPalette = @import("command_palette.zig");
 const Keybindings = @import("keybindings.zig");
 const Definitions = @import("definitions.zig");
+const Completion = @import("completion.zig");
 
 const App = @This();
 
@@ -42,10 +43,11 @@ tab_bar: *TabBar,
 command_palette: *CommandPalette,
 keybindings: *Keybindings,
 definitions: *Definitions,
+completion: *Completion,
 buffers: std.ArrayListUnmanaged(BufferState),
 active_tab: usize = 0,
 tab_cache: std.ArrayListUnmanaged(TabBar.Tab),
-children: [6]vxfw.SubSurface = undefined,
+children: [7]vxfw.SubSurface = undefined,
 /// Owned slice of error/warning annotations for the current buffer.
 last_errors: []EditorPane.ErrorLine = &.{},
 /// Set to true when the buffer is modified; cleared and acted on at the start of the next draw frame.
@@ -90,6 +92,9 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     const definitions = try allocator.create(Definitions);
     definitions.* = Definitions.init(allocator);
 
+    const completion = try allocator.create(Completion);
+    completion.* = .{};
+
     const self = try allocator.create(App);
     self.* = .{
         .allocator = allocator,
@@ -103,6 +108,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
         .command_palette = command_palette,
         .keybindings = keybindings,
         .definitions = definitions,
+        .completion = completion,
         .buffers = .{},
         .tab_cache = .{},
         .split = undefined,
@@ -146,6 +152,7 @@ pub fn destroy(self: *App) void {
     self.command_palette.destroy();
     self.allocator.destroy(self.keybindings);
     self.allocator.destroy(self.tab_bar);
+    self.allocator.destroy(self.completion);
     self.allocator.destroy(self);
 }
 
@@ -530,6 +537,58 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 };
                 ctx.redraw = true;
             } else if (self.focus == .editor) {
+                // Ctrl+Space: toggle completion popup explicitly
+                if (key.matches(' ', .{ .ctrl = true })) {
+                    if (self.completion.visible) {
+                        self.completion.hide();
+                    } else {
+                        const line = self.buffer.lineAt(self.editor_pane.cursor_line) catch "";
+                        defer if (line.len > 0) self.buffer.allocator.free(line);
+                        const ctx_kind = Completion.detectContext(line, self.editor_pane.cursor_col);
+                        if (ctx_kind != .none) {
+                            const comp_items = Completion.getCompletions(ctx_kind);
+                            if (comp_items.len > 0) {
+                                self.completion.show(comp_items);
+                            }
+                        }
+                    }
+                    ctx.redraw = true;
+                    return;
+                }
+
+                // When completion popup is visible, intercept navigation/accept/dismiss keys.
+                if (self.completion.visible) {
+                    if (key.matches(vaxis.Key.escape, .{})) {
+                        self.completion.hide();
+                        ctx.redraw = true;
+                        return;
+                    } else if (key.matches(vaxis.Key.up, .{})) {
+                        self.completion.moveUp();
+                        ctx.redraw = true;
+                        return;
+                    } else if (key.matches(vaxis.Key.down, .{})) {
+                        self.completion.moveDown();
+                        ctx.redraw = true;
+                        return;
+                    } else if (key.matches('\t', .{}) or key.matches(vaxis.Key.enter, .{})) {
+                        // Accept selected completion: insert its text at cursor position.
+                        if (self.completion.selectedItem()) |item| {
+                            const pos = self.buffer.lineColToPosition(
+                                self.editor_pane.cursor_line,
+                                self.editor_pane.cursor_col,
+                            );
+                            self.undo.insertText(self.buffer, pos, item.text) catch {};
+                            self.editor_pane.cursor_col += item.text.len;
+                            self.editor_pane.modified = true;
+                            self.preview_dirty = true;
+                        }
+                        self.completion.hide();
+                        ctx.redraw = true;
+                        return;
+                    }
+                }
+
+                // Forward the key event to the editor pane.
                 const ep_widget = self.editor_pane.widget();
                 if (ep_widget.eventHandler) |handler| {
                     try handler(ep_widget.userdata, ctx, event);
@@ -537,6 +596,27 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
 
                 if (self.editor_pane.modified) {
                     self.preview_dirty = true;
+                }
+
+                // After editing, update the completion popup based on context.
+                {
+                    const line = self.buffer.lineAt(self.editor_pane.cursor_line) catch "";
+                    defer if (line.len > 0) self.buffer.allocator.free(line);
+                    const ctx_kind = Completion.detectContext(line, self.editor_pane.cursor_col);
+                    if (ctx_kind != .none) {
+                        const comp_items = Completion.getCompletions(ctx_kind);
+                        if (comp_items.len > 0) {
+                            // Auto-trigger on '@' character or keep popup updated if already visible.
+                            const typed_at = key.text != null and key.text.?[0] == '@';
+                            if (typed_at or self.completion.visible) {
+                                self.completion.show(comp_items);
+                            }
+                        } else {
+                            self.completion.hide();
+                        }
+                    } else {
+                        self.completion.hide();
+                    }
                 }
 
                 const cursor_pos = self.buffer.lineColToPosition(
@@ -683,6 +763,42 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
         self.children[child_idx] = .{
             .origin = .{ .row = 0, .col = 0 },
             .surface = cp_surface,
+        };
+        child_idx += 1;
+    }
+
+    if (self.completion.visible) {
+        // Calculate max items and popup dimensions to position near cursor.
+        var max_text_len: usize = 0;
+        for (self.completion.items) |it| {
+            if (it.text.len > max_text_len) max_text_len = it.text.len;
+        }
+        const popup_w: u16 = @intCast(@min(max_text_len + 4, max.width));
+        const max_rows: usize = 8;
+        const visible_rows: u16 = @intCast(@min(self.completion.items.len, max_rows));
+        const popup_h: u16 = visible_rows + 2;
+
+        // Position popup just below the cursor in the editor area.
+        const gutter_width: u16 = 5;
+        const cursor_screen_col: u16 = gutter_width + @as(u16, @intCast(self.editor_pane.cursor_col));
+        const cursor_screen_row: u16 = @intCast(
+            tab_bar_height + self.editor_pane.cursor_line -| self.editor_pane.scroll_top,
+        );
+        // Place popup below the cursor row; clamp so it stays on screen.
+        const popup_row: u16 = @min(cursor_screen_row + 1, max.height -| popup_h);
+        const popup_col: u16 = if (cursor_screen_col + popup_w <= max.width)
+            cursor_screen_col
+        else
+            max.width -| popup_w;
+
+        const comp_ctx = ctx.withConstraints(
+            .{ .width = popup_w, .height = popup_h },
+            vxfw.MaxSize.fromSize(.{ .width = popup_w, .height = popup_h }),
+        );
+        const comp_surface = try self.completion.widget().draw(comp_ctx);
+        self.children[child_idx] = .{
+            .origin = .{ .row = popup_row, .col = popup_col },
+            .surface = comp_surface,
         };
         child_idx += 1;
     }
