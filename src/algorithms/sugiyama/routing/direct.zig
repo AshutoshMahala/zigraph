@@ -149,9 +149,8 @@ pub fn routeWithDummies(
         }
     };
 
-    // Count children per (source, target_level) group and compute shared bus_y
+    // Shared bus_y for (source, target_level) groups with 2+ children
     const BusGroupInfo = struct {
-        count: usize,
         bus_y: usize,
     };
     var bus_group_info: std.HashMapUnmanaged(
@@ -213,7 +212,6 @@ pub fn routeWithDummies(
                 const min_child_y = entry.value_ptr.min_child_y;
                 const bus_y = from_y_edge + (min_child_y - from_y_edge) / 2;
                 try bus_group_info.put(allocator, entry.key_ptr.*, .{
-                    .count = entry.value_ptr.count,
                     .bus_y = bus_y,
                 });
             }
