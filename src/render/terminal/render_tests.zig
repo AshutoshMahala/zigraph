@@ -1880,7 +1880,7 @@ test "terminal render: bus routing asymmetric tree" {
     try g.addEdge(3, 6);
     try g.addEdge(3, 7);
 
-    var layout_ir = try root.layout(&g, allocator, .{ .routing = .bus });
+    var layout_ir = try root.layout(&g, allocator, .{ .fan_out_style = .bus });
     defer layout_ir.deinit();
 
     const output = try render(&layout_ir, allocator);

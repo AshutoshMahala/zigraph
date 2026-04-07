@@ -256,7 +256,14 @@ pub const Routing = enum {
     direct,
     /// Spline routing (smooth bezier curves)
     spline,
-    /// Bus-style fan-out routing (shared horizontal row for siblings)
+};
+
+/// How fan-out edges (one parent, multiple children) are drawn.
+/// Only affects sources with 2+ children at the same level.
+pub const FanOutStyle = enum {
+    /// Each edge gets its own horizontal corner (default)
+    individual,
+    /// Sibling edges share a single horizontal bus bar
     bus,
 };
 
@@ -297,6 +304,9 @@ pub const LayoutConfig = struct {
     positioning: Positioning = .compact,
     /// Edge routing algorithm (default: direct)
     routing: Routing = .direct,
+    /// Fan-out style for direct routing (default: individual)
+    /// When .bus, sibling edges share a horizontal bar instead of individual corners.
+    fan_out_style: FanOutStyle = .individual,
 
     // Tuning parameters
     /// Horizontal spacing between nodes
@@ -930,7 +940,6 @@ fn propagateEdgeLabels(result: *LayoutIR(usize), g: *const Graph, allocator: std
                     edge.from_y + 1;
                 edge_x_at_label = edge.from_x;
             },
-            .bus => {},
         }
 
         const label_width = orig_label.len + 2;
@@ -1375,6 +1384,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             &dummy_positions,
             allocator,
             reversed_edges,
+            config.fan_out_style,
         ),
         .spline => try routing.spline.routeWithDummies(
             g,
@@ -1383,14 +1393,6 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
             &dummy_positions,
             allocator,
             .{},
-            reversed_edges,
-        ),
-        .bus => try routing.direct.routeBusWithDummies(
-            g,
-            result.nodes.items,
-            &result.id_to_index,
-            &dummy_positions,
-            allocator,
             reversed_edges,
         ),
     };

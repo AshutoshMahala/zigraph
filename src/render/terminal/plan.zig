@@ -791,7 +791,6 @@ fn edgeContains(edge: LayoutEdge, px: usize, py: usize) bool {
             // (splines are rare in terminal rendering; this is a reasonable approximation)
             return segmentContains(from_x, from_y, to_x, to_y, px, py);
         },
-        .bus => return false,
     }
 }
 
@@ -1038,9 +1037,6 @@ fn transformEdge(edge: LayoutEdge, num_levels: usize, level_ir_ys: []const usize
         .spline => |*sp| {
             sp.cp1_y = yTransform(sp.cp1_y, num_levels, level_ir_ys, cumulative_extra);
             sp.cp2_y = yTransform(sp.cp2_y, num_levels, level_ir_ys, cumulative_extra);
-        },
-        .bus => |*b| {
-            b.horizontal_y = yTransform(b.horizontal_y, num_levels, level_ir_ys, cumulative_extra);
         },
     }
     return e;

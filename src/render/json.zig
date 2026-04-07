@@ -150,7 +150,6 @@ fn serializeImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord),
                 try writer.writeAll("]}");
             },
             .spline => |sp| try writer.print("{{\"type\": \"spline\", \"cp1_x\": {d}, \"cp1_y\": {d}, \"cp2_x\": {d}, \"cp2_y\": {d}}}", .{ sp.cp1_x, sp.cp1_y, sp.cp2_x, sp.cp2_y }),
-            .bus => |b| try writer.print("{{\"type\": \"bus\", \"horizontal_y\": {d}, \"sibling_count\": {d}, \"is_stem\": {}}}", .{ b.horizontal_y, b.sibling_count, b.is_stem }),
         }
 
         // Label (optional)

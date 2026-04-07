@@ -112,9 +112,6 @@ pub fn paintEdge(buffer: *Buffer2D, edge: *const LayoutEdge, color: Color, weigh
         .spline => {
             paintSplineEdge(buffer, edge, ec, arm, marker_end, marker_start);
         },
-        .bus => |bus| {
-            paintBusEdge(buffer, edge, bus, ec, arm, marker_end, marker_start);
-        },
     }
 }
 
@@ -291,109 +288,6 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
             }
         } else {
             drawLineCell(buffer, x2, y, true, ec.at(y), arm);
-        }
-    }
-}
-
-/// Paint a bus-style fan-out edge.
-///
-/// Stem edges draw: vertical trunk from parent -> bus_y, horizontal bus across
-/// all sibling_xs, with a T-junction at the stem and drop junctions at each child.
-/// Non-stem edges draw: vertical drop from bus_y+1 -> child, with arrow marker.
-fn paintBusEdge(
-    buffer: *Buffer2D,
-    edge: *const LayoutEdge,
-    bus: anytype,
-    ec: EdgeColor,
-    arm: ArmWeight,
-    marker_end: MarkerShape,
-    marker_start: MarkerShape,
-) void {
-    const h_y = bus.horizontal_y;
-
-    if (bus.is_stem) {
-        // --- Stem edge: draw trunk + full horizontal bus ---
-
-        // 1. Vertical trunk from parent center_x, from_y to h_y
-        const trunk_x = edge.from_x;
-        var y = edge.from_y;
-        while (y < h_y) : (y += 1) {
-            if (edge.reversed and edge.directed and y == edge.from_y) {
-                if (markerChar(marker_start, .up, arm)) |ch| {
-                    buffer.setWithColor(trunk_x, y, ch, ec.at(y));
-                } else {
-                    drawLineCell(buffer, trunk_x, y, true, ec.at(y), arm);
-                }
-            } else {
-                drawLineCell(buffer, trunk_x, y, true, ec.at(y), arm);
-            }
-        }
-
-        // 2. Find bus extents from sibling_xs
-        const sibling_xs = bus.sibling_xs[0..bus.sibling_count];
-        var min_x: usize = trunk_x;
-        var max_x: usize = trunk_x;
-        for (sibling_xs) |sx| {
-            min_x = @min(min_x, sx);
-            max_x = @max(max_x, sx);
-        }
-
-        // 3. Horizontal bus line at h_y (excluding endpoints — junctions handle those)
-        {
-            const cc = ec.at(h_y);
-            if (max_x > min_x + 1) {
-                var x = min_x + 1;
-                while (x < max_x) : (x += 1) {
-                    drawLineCell(buffer, x, h_y, false, cc, arm);
-                }
-            }
-        }
-
-        // 4. Junction where trunk meets bus (up + left + right, maybe down)
-        {
-            const cc = ec.at(h_y);
-            const current = buffer.get(trunk_x, h_y);
-            buffer.setWithColor(trunk_x, h_y, mergeJunctionWeighted(current, .{
-                .up = arm,
-                .left = if (trunk_x > min_x) arm else .none,
-                .right = if (trunk_x < max_x) arm else .none,
-                .down = blk: {
-                    // Check if trunk_x is also a child position
-                    for (sibling_xs) |sx| {
-                        if (sx == trunk_x) break :blk arm;
-                    }
-                    break :blk .none;
-                },
-            }), cc);
-        }
-
-        // 5. Junctions at each child drop-off point
-        for (sibling_xs) |child_x| {
-            if (child_x == trunk_x) continue; // Already handled above
-            const cc = ec.at(h_y);
-            const current = buffer.get(child_x, h_y);
-            buffer.setWithColor(child_x, h_y, mergeJunctionWeighted(current, .{
-                .down = arm,
-                .left = if (child_x > min_x) arm else .none,
-                .right = if (child_x < max_x) arm else .none,
-            }), cc);
-        }
-    }
-
-    // --- All edges (stem and non-stem): draw vertical drop to child ---
-    {
-        const h_y_start = bus.horizontal_y + 1;
-        var y2 = h_y_start;
-        while (y2 < edge.to_y) : (y2 += 1) {
-            if (!edge.reversed and edge.directed and y2 == edge.to_y - 1) {
-                if (markerChar(marker_end, .down, arm)) |ch| {
-                    buffer.setWithColor(edge.to_x, y2, ch, ec.at(y2));
-                } else {
-                    drawLineCell(buffer, edge.to_x, y2, true, ec.at(y2), arm);
-                }
-            } else {
-                drawLineCell(buffer, edge.to_x, y2, true, ec.at(y2), arm);
-            }
         }
     }
 }

@@ -17,6 +17,8 @@ const EdgePath = ir_mod.EdgePath(usize);
 const LayoutNode = ir_mod.LayoutNode(usize);
 const virtual_mod = @import("../layering/virtual.zig");
 const DummyPositions = virtual_mod.DummyPositions;
+const root = @import("../../../root.zig");
+const FanOutStyle = root.FanOutStyle;
 
 /// Route all edges using direct (straight-line) routing.
 ///
@@ -111,6 +113,7 @@ pub fn routeWithDummies(
     dummy_positions: *const DummyPositions,
     allocator: Allocator,
     reversed_edges: ?[]const bool,
+    fan_out_style: FanOutStyle,
 ) !std.ArrayListUnmanaged(LayoutEdge) {
     var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
     errdefer {
@@ -127,6 +130,95 @@ pub fn routeWithDummies(
     var level_slot_counts = try allocator.alloc(usize, max_level + 1);
     defer allocator.free(level_slot_counts);
     @memset(level_slot_counts, 0);
+
+    // Pre-compute shared horizontal_y for bus fan-out groups.
+    // Key: (source_id, target_level) → shared horizontal_y for all edges in the group.
+    const BusGroupKey = struct {
+        source_id: usize,
+        target_level: usize,
+    };
+    const BusGroupKeyContext = struct {
+        pub fn hash(_: @This(), key: BusGroupKey) u64 {
+            var hasher = std.hash.Wyhash.init(0);
+            hasher.update(std.mem.asBytes(&key.source_id));
+            hasher.update(std.mem.asBytes(&key.target_level));
+            return hasher.final();
+        }
+        pub fn eql(_: @This(), a: BusGroupKey, b: BusGroupKey) bool {
+            return a.source_id == b.source_id and a.target_level == b.target_level;
+        }
+    };
+
+    // Count children per (source, target_level) group and compute shared bus_y
+    const BusGroupInfo = struct {
+        count: usize,
+        bus_y: usize,
+    };
+    var bus_group_info: std.HashMapUnmanaged(
+        BusGroupKey,
+        BusGroupInfo,
+        BusGroupKeyContext,
+        std.hash_map.default_max_load_percentage,
+    ) = .{};
+    defer bus_group_info.deinit(allocator);
+
+    if (fan_out_style == .bus) {
+        // First pass: count children per group and find min_child_y
+        const BusGroupAccum = struct {
+            count: usize,
+            from_y_edge: usize,
+            min_child_y: usize,
+        };
+        var accum: std.HashMapUnmanaged(
+            BusGroupKey,
+            BusGroupAccum,
+            BusGroupKeyContext,
+            std.hash_map.default_max_load_percentage,
+        ) = .{};
+        defer accum.deinit(allocator);
+
+        for (g.edges.items, 0..) |edge, edge_index| {
+            const is_reversed = if (reversed_edges) |re| (edge_index < re.len and re[edge_index]) else false;
+            const edge_from = if (is_reversed) edge.to else edge.from;
+            const edge_to = if (is_reversed) edge.from else edge.to;
+
+            const from_ir_idx = node_id_to_ir_index.get(edge_from) orelse continue;
+            const to_ir_idx = node_id_to_ir_index.get(edge_to) orelse continue;
+
+            const from_node = &nodes[from_ir_idx];
+            const to_node = &nodes[to_ir_idx];
+
+            const waypoints = dummy_positions.getWaypoints(edge_index);
+            if (waypoints.len > 0) continue; // Skip-level edges are not bus candidates
+
+            const key = BusGroupKey{ .source_id = edge_from, .target_level = to_node.level };
+            const gop = try accum.getOrPut(allocator, key);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{
+                    .count = 1,
+                    .from_y_edge = from_node.y + from_node.height,
+                    .min_child_y = to_node.y,
+                };
+            } else {
+                gop.value_ptr.count += 1;
+                gop.value_ptr.min_child_y = @min(gop.value_ptr.min_child_y, to_node.y);
+            }
+        }
+
+        // Second pass: for groups with 2+ children, compute shared bus_y
+        var accum_iter = accum.iterator();
+        while (accum_iter.next()) |entry| {
+            if (entry.value_ptr.count >= 2) {
+                const from_y_edge = entry.value_ptr.from_y_edge;
+                const min_child_y = entry.value_ptr.min_child_y;
+                const bus_y = from_y_edge + (min_child_y - from_y_edge) / 2;
+                try bus_group_info.put(allocator, entry.key_ptr.*, .{
+                    .count = entry.value_ptr.count,
+                    .bus_y = bus_y,
+                });
+            }
+        }
+    }
 
     for (g.edges.items, 0..) |edge, edge_index| {
         // For reversed (back) edges, flip from/to so the edge routes downward
@@ -199,6 +291,12 @@ pub fn routeWithDummies(
         } else if (from_node.center_x == to_node.center_x) blk: {
             break :blk .{ .direct = {} };
         } else blk: {
+            // Check if this edge belongs to a bus fan-out group
+            const bus_key = BusGroupKey{ .source_id = edge_from, .target_level = to_node.level };
+            if (bus_group_info.get(bus_key)) |info| {
+                // Bus group: all siblings share the same horizontal_y
+                break :blk .{ .corner = .{ .horizontal_y = info.bus_y } };
+            }
             // Stagger horizontal_y by slot so edges from the same source
             // don't all land on the same row — reserve 1 row above target for arrows
             const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
@@ -221,369 +319,6 @@ pub fn routeWithDummies(
             .edge_index = edge_index,
             .directed = edge.directed,
         });
-    }
-
-    return edges;
-}
-
-/// Route edges using bus-style fan-out.
-///
-/// Groups edges by source node. When a parent has 2+ children,
-/// sibling edges share a single horizontal_y (bus row) with
-/// T-junction rendering. Single-child edges fall back to
-/// direct/corner routing.
-pub fn routeBus(
-    g: *const Graph,
-    nodes: []const LayoutNode,
-    node_id_to_ir_index: *const std.AutoHashMapUnmanaged(usize, usize),
-    allocator: Allocator,
-) !std.ArrayListUnmanaged(LayoutEdge) {
-    var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
-    errdefer {
-        for (edges.items) |*e| e.path.deinit();
-        edges.deinit(allocator);
-    }
-
-    // Phase 1: Group edges by (source node ID, target level).
-    const BusGroupKey = struct {
-        source_id: usize,
-        target_level: usize,
-    };
-
-    const BusGroupKeyContext = struct {
-        pub fn hash(_: @This(), key: BusGroupKey) u64 {
-            var hasher = std.hash.Wyhash.init(0);
-            hasher.update(std.mem.asBytes(&key.source_id));
-            hasher.update(std.mem.asBytes(&key.target_level));
-            return hasher.final();
-        }
-        pub fn eql(_: @This(), a: BusGroupKey, b: BusGroupKey) bool {
-            return a.source_id == b.source_id and a.target_level == b.target_level;
-        }
-    };
-
-    var source_groups: std.HashMapUnmanaged(BusGroupKey, std.ArrayListUnmanaged(EdgeGroupEntry), BusGroupKeyContext, std.hash_map.default_max_load_percentage) = .{};
-    defer {
-        var it = source_groups.valueIterator();
-        while (it.next()) |list| list.deinit(allocator);
-        source_groups.deinit(allocator);
-    }
-
-    for (g.edges.items, 0..) |graph_edge, edge_index| {
-        const edge_from = graph_edge.from;
-        const edge_to = graph_edge.to;
-        const from_ir_idx = node_id_to_ir_index.get(edge_from) orelse continue;
-        const to_ir_idx = node_id_to_ir_index.get(edge_to) orelse continue;
-        _ = from_ir_idx;
-        const to_node = &nodes[to_ir_idx];
-
-        const key = BusGroupKey{ .source_id = edge_from, .target_level = to_node.level };
-        const gop = try source_groups.getOrPut(allocator, key);
-        if (!gop.found_existing) {
-            gop.value_ptr.* = .{};
-        }
-        try gop.value_ptr.append(allocator, .{
-            .edge_from = edge_from,
-            .edge_to = edge_to,
-            .edge_index = edge_index,
-        });
-    }
-
-    // Phase 2: For each group, decide routing strategy.
-    var group_iter = source_groups.iterator();
-    while (group_iter.next()) |entry| {
-        const source_id = entry.key_ptr.source_id;
-        const group = entry.value_ptr.items;
-        const from_ir_idx = node_id_to_ir_index.get(source_id).?;
-        const from_node = &nodes[from_ir_idx];
-        const from_y_edge = from_node.y + from_node.height;
-
-        if (group.len == 1) {
-            // Single child: use direct/corner routing
-            const ge = group[0];
-            const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-            const to_node = &nodes[to_ir_idx];
-            const to_y_edge = to_node.y;
-
-            const path: EdgePath = if (from_node.center_x == to_node.center_x)
-                .{ .direct = {} }
-            else blk: {
-                const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
-                const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
-                break :blk .{ .corner = .{ .horizontal_y = from_y_edge + (0 % available) } };
-            };
-
-            try edges.append(allocator, .{
-                .from_id = ge.edge_from,
-                .to_id = ge.edge_to,
-                .from_x = from_node.center_x,
-                .from_y = from_y_edge,
-                .to_x = to_node.center_x,
-                .to_y = to_y_edge,
-                .path = path,
-                .edge_index = ge.edge_index,
-            });
-        } else {
-            // Multiple children: bus routing.
-            var min_child_y: usize = std.math.maxInt(usize);
-            for (group) |ge| {
-                const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-                const to_node = &nodes[to_ir_idx];
-                min_child_y = @min(min_child_y, to_node.y);
-            }
-            const bus_y = from_y_edge + (min_child_y - from_y_edge) / 2;
-
-            // Build sibling_xs array (allocated, lives as long as edges)
-            const sibling_xs = try allocator.alloc(usize, group.len);
-            for (group, 0..) |ge, i| {
-                const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-                sibling_xs[i] = nodes[to_ir_idx].center_x;
-            }
-
-            for (group, 0..) |ge, i| {
-                const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-                const to_node = &nodes[to_ir_idx];
-
-                try edges.append(allocator, .{
-                    .from_id = ge.edge_from,
-                    .to_id = ge.edge_to,
-                    .from_x = from_node.center_x,
-                    .from_y = from_y_edge,
-                    .to_x = to_node.center_x,
-                    .to_y = to_node.y,
-                    .path = .{ .bus = .{
-                        .horizontal_y = bus_y,
-                        .sibling_xs = sibling_xs.ptr,
-                        .sibling_count = group.len,
-                        .is_stem = (i == 0),
-                        .allocator = if (i == 0) allocator else null,
-                    } },
-                    .edge_index = ge.edge_index,
-                });
-            }
-        }
-    }
-
-    return edges;
-}
-
-const EdgeGroupEntry = struct {
-    edge_from: usize,
-    edge_to: usize,
-    edge_index: usize,
-};
-
-/// Route edges using bus-style fan-out with dummy node support.
-///
-/// Like `routeBus`, groups sibling edges into shared bus rows. Additionally:
-/// - Handles reversed (back) edges by flipping from/to
-/// - Routes skip-level edges through dummy waypoints as multi-segment paths
-/// - Only groups adjacent-level fan-outs into buses
-pub fn routeBusWithDummies(
-    g: *const Graph,
-    nodes: []const LayoutNode,
-    node_id_to_ir_index: *const std.AutoHashMapUnmanaged(usize, usize),
-    dummy_positions: *const DummyPositions,
-    allocator: Allocator,
-    reversed_edges: ?[]const bool,
-) !std.ArrayListUnmanaged(LayoutEdge) {
-    var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
-    errdefer {
-        for (edges.items) |*e| e.path.deinit();
-        edges.deinit(allocator);
-    }
-
-    // Separate edges into two buckets:
-    // 1. Edges with dummy waypoints → multi-segment paths (handled individually)
-    // 2. Adjacent-level edges → grouped for bus routing
-
-    // Collect adjacent-level edges grouped by (source_id, target_level)
-    const BusGroupKey = struct {
-        source_id: usize,
-        target_level: usize,
-    };
-
-    const BusGroupKeyContext = struct {
-        pub fn hash(_: @This(), key: BusGroupKey) u64 {
-            var hasher = std.hash.Wyhash.init(0);
-            hasher.update(std.mem.asBytes(&key.source_id));
-            hasher.update(std.mem.asBytes(&key.target_level));
-            return hasher.final();
-        }
-        pub fn eql(_: @This(), a: BusGroupKey, b: BusGroupKey) bool {
-            return a.source_id == b.source_id and a.target_level == b.target_level;
-        }
-    };
-
-    var bus_groups: std.HashMapUnmanaged(BusGroupKey, std.ArrayListUnmanaged(EdgeGroupEntry), BusGroupKeyContext, std.hash_map.default_max_load_percentage) = .{};
-    defer {
-        var it = bus_groups.valueIterator();
-        while (it.next()) |list| list.deinit(allocator);
-        bus_groups.deinit(allocator);
-    }
-
-    for (g.edges.items, 0..) |edge, edge_index| {
-        // Handle reversed edges
-        const is_reversed = if (reversed_edges) |re| (edge_index < re.len and re[edge_index]) else false;
-        const edge_from = if (is_reversed) edge.to else edge.from;
-        const edge_to = if (is_reversed) edge.from else edge.to;
-
-        const from_ir_idx = node_id_to_ir_index.get(edge_from) orelse continue;
-        const to_ir_idx = node_id_to_ir_index.get(edge_to) orelse continue;
-
-        const from_node = &nodes[from_ir_idx];
-        const to_node = &nodes[to_ir_idx];
-
-        // Check for dummy waypoints
-        const waypoints = dummy_positions.getWaypoints(edge_index);
-
-        if (waypoints.len > 0) {
-            // Multi-segment path through dummy nodes (same as routeWithDummies)
-            const from_y_edge = from_node.y + from_node.height;
-            const to_y_edge = to_node.y;
-
-            var ms_waypoints: std.ArrayListUnmanaged(EdgePath.Waypoint) = .{};
-            errdefer ms_waypoints.deinit(allocator);
-
-            var curr_x = from_node.center_x;
-            var curr_y = from_y_edge;
-            try ms_waypoints.append(allocator, .{ .x = curr_x, .y = curr_y });
-
-            for (waypoints) |wp| {
-                const target_x = wp.x;
-                const target_y = wp.level;
-
-                if (curr_y != target_y) {
-                    try ms_waypoints.append(allocator, .{ .x = curr_x, .y = target_y });
-                    curr_y = target_y;
-                }
-
-                if (curr_x != target_x) {
-                    try ms_waypoints.append(allocator, .{ .x = target_x, .y = curr_y });
-                    curr_x = target_x;
-                }
-            }
-
-            const end_x = to_node.center_x;
-            const end_y = to_y_edge;
-
-            if (curr_y != end_y) {
-                try ms_waypoints.append(allocator, .{ .x = curr_x, .y = end_y });
-                curr_y = end_y;
-            }
-
-            if (curr_x != end_x) {
-                try ms_waypoints.append(allocator, .{ .x = end_x, .y = curr_y });
-            }
-
-            try edges.append(allocator, .{
-                .from_id = edge_from,
-                .to_id = edge_to,
-                .from_x = from_node.center_x,
-                .from_y = from_y_edge,
-                .to_x = to_node.center_x,
-                .to_y = to_y_edge,
-                .path = .{
-                    .multi_segment = .{
-                        .waypoints = ms_waypoints,
-                        .allocator = allocator,
-                    },
-                },
-                .edge_index = edge_index,
-                .directed = edge.directed,
-            });
-        } else {
-            // Adjacent-level edge: group by (source, target_level) for bus routing
-            const key = BusGroupKey{ .source_id = edge_from, .target_level = to_node.level };
-            const gop = try bus_groups.getOrPut(allocator, key);
-            if (!gop.found_existing) {
-                gop.value_ptr.* = .{};
-            }
-            try gop.value_ptr.append(allocator, .{
-                .edge_from = edge_from,
-                .edge_to = edge_to,
-                .edge_index = edge_index,
-            });
-        }
-    }
-
-    // Phase 2: For each bus group, decide routing strategy
-    var group_iter = bus_groups.iterator();
-    while (group_iter.next()) |entry| {
-        const source_id = entry.key_ptr.source_id;
-        const group = entry.value_ptr.items;
-        const from_ir_idx = node_id_to_ir_index.get(source_id).?;
-        const from_node = &nodes[from_ir_idx];
-        const from_y_edge = from_node.y + from_node.height;
-
-        if (group.len == 1) {
-            // Single child at this level: use direct/corner routing
-            const ge = group[0];
-            const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-            const to_node = &nodes[to_ir_idx];
-            const to_y_edge = to_node.y;
-
-            const graph_edge = g.edges.items[ge.edge_index];
-
-            const path: EdgePath = if (from_node.center_x == to_node.center_x)
-                .{ .direct = {} }
-            else blk: {
-                const max_h_y = if (to_y_edge >= 2) to_y_edge - 2 else from_y_edge;
-                const available = if (max_h_y >= from_y_edge) max_h_y - from_y_edge + 1 else 1;
-                break :blk .{ .corner = .{ .horizontal_y = from_y_edge + (0 % available) } };
-            };
-
-            try edges.append(allocator, .{
-                .from_id = ge.edge_from,
-                .to_id = ge.edge_to,
-                .from_x = from_node.center_x,
-                .from_y = from_y_edge,
-                .to_x = to_node.center_x,
-                .to_y = to_y_edge,
-                .path = path,
-                .edge_index = ge.edge_index,
-                .directed = graph_edge.directed,
-            });
-        } else {
-            // Multiple children at same level: bus routing
-            var min_child_y: usize = std.math.maxInt(usize);
-            for (group) |ge| {
-                const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-                const to_node = &nodes[to_ir_idx];
-                min_child_y = @min(min_child_y, to_node.y);
-            }
-            const bus_y = from_y_edge + (min_child_y - from_y_edge) / 2;
-
-            const sibling_xs = try allocator.alloc(usize, group.len);
-            for (group, 0..) |ge, i| {
-                const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-                sibling_xs[i] = nodes[to_ir_idx].center_x;
-            }
-
-            for (group, 0..) |ge, i| {
-                const to_ir_idx = node_id_to_ir_index.get(ge.edge_to).?;
-                const to_node = &nodes[to_ir_idx];
-                const graph_edge = g.edges.items[ge.edge_index];
-
-                try edges.append(allocator, .{
-                    .from_id = ge.edge_from,
-                    .to_id = ge.edge_to,
-                    .from_x = from_node.center_x,
-                    .from_y = from_y_edge,
-                    .to_x = to_node.center_x,
-                    .to_y = to_node.y,
-                    .path = .{ .bus = .{
-                        .horizontal_y = bus_y,
-                        .sibling_xs = sibling_xs.ptr,
-                        .sibling_count = group.len,
-                        .is_stem = (i == 0),
-                        .allocator = if (i == 0) allocator else null,
-                    } },
-                    .edge_index = ge.edge_index,
-                    .directed = graph_edge.directed,
-                });
-            }
-        }
     }
 
     return edges;
@@ -834,164 +569,3 @@ test "direct routing: edge coordinates match node positions" {
     try std.testing.expectEqual(@as(usize, 5), e.to_y);
 }
 
-test "bus routing: fan-out produces bus paths" {
-    const allocator = std.testing.allocator;
-
-    var g = Graph.init(allocator);
-    defer g.deinit();
-
-    try g.addNode(1, "Root");
-    try g.addNode(2, "A");
-    try g.addNode(3, "B");
-    try g.addNode(4, "C");
-    try g.addEdge(1, 2);
-    try g.addEdge(1, 3);
-    try g.addEdge(1, 4);
-
-    const nodes = [_]LayoutNode{
-        .{ .id = 1, .label = "Root", .x = 5, .y = 0, .width = 6, .height = 1, .center_x = 8, .level = 0, .level_position = 0 },
-        .{ .id = 2, .label = "A", .x = 0, .y = 5, .width = 3, .height = 1, .center_x = 1, .level = 1, .level_position = 0 },
-        .{ .id = 3, .label = "B", .x = 5, .y = 5, .width = 3, .height = 1, .center_x = 6, .level = 1, .level_position = 1 },
-        .{ .id = 4, .label = "C", .x = 10, .y = 5, .width = 3, .height = 1, .center_x = 11, .level = 1, .level_position = 2 },
-    };
-
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
-    defer id_map.deinit(allocator);
-    try id_map.put(allocator, 1, 0);
-    try id_map.put(allocator, 2, 1);
-    try id_map.put(allocator, 3, 2);
-    try id_map.put(allocator, 4, 3);
-
-    var edges = try routeBus(&g, &nodes, &id_map, allocator);
-    defer {
-        for (edges.items) |*e| e.path.deinit();
-        edges.deinit(allocator);
-    }
-
-    try std.testing.expectEqual(@as(usize, 3), edges.items.len);
-
-    for (edges.items) |e| {
-        try std.testing.expect(e.path == .bus);
-    }
-
-    const h_y = edges.items[0].path.bus.horizontal_y;
-    for (edges.items) |e| {
-        try std.testing.expectEqual(h_y, e.path.bus.horizontal_y);
-    }
-
-    // horizontal_y should be midpoint between from_y_edge(1) and to_y(5) = 3
-    try std.testing.expectEqual(@as(usize, 3), h_y);
-
-    var stem_count: usize = 0;
-    for (edges.items) |e| {
-        if (e.path.bus.is_stem) stem_count += 1;
-    }
-    try std.testing.expectEqual(@as(usize, 1), stem_count);
-
-    for (edges.items) |e| {
-        try std.testing.expectEqual(@as(usize, 3), e.path.bus.sibling_count);
-    }
-}
-
-test "bus routing: single child stays direct or corner" {
-    const allocator = std.testing.allocator;
-
-    var g = Graph.init(allocator);
-    defer g.deinit();
-
-    try g.addNode(1, "A");
-    try g.addNode(2, "B");
-    try g.addEdge(1, 2);
-
-    const nodes = [_]LayoutNode{
-        .{ .id = 1, .label = "A", .x = 0, .y = 0, .width = 3, .height = 1, .center_x = 1, .level = 0, .level_position = 0 },
-        .{ .id = 2, .label = "B", .x = 5, .y = 4, .width = 3, .height = 1, .center_x = 6, .level = 1, .level_position = 0 },
-    };
-
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
-    defer id_map.deinit(allocator);
-    try id_map.put(allocator, 1, 0);
-    try id_map.put(allocator, 2, 1);
-
-    var edges = try routeBus(&g, &nodes, &id_map, allocator);
-    defer {
-        for (edges.items) |*e| e.path.deinit();
-        edges.deinit(allocator);
-    }
-
-    try std.testing.expectEqual(@as(usize, 1), edges.items.len);
-    try std.testing.expect(edges.items[0].path == .corner);
-}
-
-test "bus routing: vertically aligned child in group gets bus path" {
-    const allocator = std.testing.allocator;
-
-    var g = Graph.init(allocator);
-    defer g.deinit();
-
-    try g.addNode(1, "Root");
-    try g.addNode(2, "A");
-    try g.addNode(3, "B");
-    try g.addEdge(1, 2);
-    try g.addEdge(1, 3);
-
-    const nodes = [_]LayoutNode{
-        .{ .id = 1, .label = "Root", .x = 3, .y = 0, .width = 5, .height = 1, .center_x = 5, .level = 0, .level_position = 0 },
-        .{ .id = 2, .label = "A", .x = 3, .y = 5, .width = 3, .height = 1, .center_x = 5, .level = 1, .level_position = 0 },
-        .{ .id = 3, .label = "B", .x = 8, .y = 5, .width = 3, .height = 1, .center_x = 10, .level = 1, .level_position = 1 },
-    };
-
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
-    defer id_map.deinit(allocator);
-    try id_map.put(allocator, 1, 0);
-    try id_map.put(allocator, 2, 1);
-    try id_map.put(allocator, 3, 2);
-
-    var edges = try routeBus(&g, &nodes, &id_map, allocator);
-    defer {
-        for (edges.items) |*e| e.path.deinit();
-        edges.deinit(allocator);
-    }
-
-    for (edges.items) |e| {
-        try std.testing.expect(e.path == .bus);
-    }
-}
-
-test "bus routing: skip-level edges do not share bus with adjacent" {
-    const allocator = std.testing.allocator;
-
-    var g = Graph.init(allocator);
-    defer g.deinit();
-
-    try g.addNode(1, "A");
-    try g.addNode(2, "B");
-    try g.addNode(3, "C");
-    try g.addEdge(1, 2);
-    try g.addEdge(1, 3);
-
-    const nodes = [_]LayoutNode{
-        .{ .id = 1, .label = "A", .x = 0, .y = 0, .width = 3, .height = 1, .center_x = 1, .level = 0, .level_position = 0 },
-        .{ .id = 2, .label = "B", .x = 5, .y = 4, .width = 3, .height = 1, .center_x = 6, .level = 1, .level_position = 0 },
-        .{ .id = 3, .label = "C", .x = 10, .y = 8, .width = 3, .height = 1, .center_x = 11, .level = 2, .level_position = 0 },
-    };
-
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
-    defer id_map.deinit(allocator);
-    try id_map.put(allocator, 1, 0);
-    try id_map.put(allocator, 2, 1);
-    try id_map.put(allocator, 3, 2);
-
-    var edges = try routeBus(&g, &nodes, &id_map, allocator);
-    defer {
-        for (edges.items) |*e| e.path.deinit();
-        edges.deinit(allocator);
-    }
-
-    try std.testing.expectEqual(@as(usize, 2), edges.items.len);
-    // Both are from same source but different target levels.
-    // They should NOT be on the same bus.
-    for (edges.items) |e| {
-        try std.testing.expect(e.path != .bus);
-    }
-}

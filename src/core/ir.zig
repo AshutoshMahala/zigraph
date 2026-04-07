@@ -122,24 +122,6 @@ pub fn EdgePath(comptime Coord: type) type {
             cp2_y: Coord,
         },
 
-        /// Bus-style fan-out: sibling edges share a horizontal row.
-        /// The stem edge (parent → bus row) draws the vertical trunk + full horizontal bus.
-        /// Non-stem edges (bus row → each child) draw only the vertical drop.
-        bus: struct {
-            /// Shared Y coordinate of the horizontal bus row
-            horizontal_y: Coord,
-            /// X positions of all siblings on this bus (borrowed, not owned)
-            sibling_xs: [*]const Coord,
-            /// Number of siblings
-            sibling_count: usize,
-            /// True for the first/stem edge that draws the trunk + horizontal bus.
-            /// False for non-stem edges that only draw vertical drops to children.
-            is_stem: bool,
-            /// Optional allocator for owned sibling_xs (only set on stem edge).
-            /// When set, deinit will free the sibling_xs slice.
-            allocator: ?Allocator = null,
-        },
-
         const Self = @This();
 
         pub const Waypoint = struct {
@@ -151,11 +133,6 @@ pub fn EdgePath(comptime Coord: type) type {
         pub fn deinit(self: *Self) void {
             switch (self.*) {
                 .multi_segment => |*ms| ms.waypoints.deinit(ms.allocator),
-                .bus => |*b| {
-                    if (b.allocator) |alloc| {
-                        alloc.free(b.sibling_xs[0..b.sibling_count]);
-                    }
-                },
                 else => {},
             }
         }
@@ -438,12 +415,6 @@ pub fn LayoutIR(comptime Coord: type) type {
                         .cp2_x = coordCast(Target, Coord, sp.cp2_x),
                         .cp2_y = coordCast(Target, Coord, sp.cp2_y),
                     } },
-                    .bus => |b| .{ .bus = .{
-                        .horizontal_y = coordCast(Target, Coord, b.horizontal_y),
-                        .sibling_xs = undefined, // borrowed pointer not valid across coord types
-                        .sibling_count = b.sibling_count,
-                        .is_stem = b.is_stem,
-                    } },
                 };
 
                 // If append fails, clean up the path (not yet owned by result)
@@ -682,18 +653,6 @@ test "convertCoord: usize to f32" {
     try std.testing.expectEqual(@as(f32, 50.0), converted.nodes.items[0].x);
     try std.testing.expectEqual(@as(f32, 200.0), converted.width);
     try std.testing.expectEqual(@as(f32, 150.0), converted.height);
-}
-
-test "EdgePath: bus variant round-trip" {
-    const path: EdgePath(usize) = .{ .bus = .{
-        .horizontal_y = 3,
-        .sibling_xs = undefined,
-        .sibling_count = 2,
-        .is_stem = true,
-    } };
-    try std.testing.expect(path == .bus);
-    try std.testing.expectEqual(@as(usize, 3), path.bus.horizontal_y);
-    try std.testing.expectEqual(true, path.bus.is_stem);
 }
 
 // JSON export tests moved to render/json.zig

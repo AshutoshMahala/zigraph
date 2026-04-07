@@ -247,7 +247,6 @@ fn renderEdgeInner(writer: anytype, edge: LayoutEdge, config: SvgConfig, style: 
                 });
             }
         },
-        .bus => {},
     }
 
     // Edge label (if present)
