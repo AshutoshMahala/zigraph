@@ -326,6 +326,75 @@ pub fn renderStreamingWithConfig(layout_ir: *const LayoutIR, writer: anytype, al
         subgraph_render.paintSubgraphBox(&buffer, sp.x, sp.y, sp.w, sp.h, sp.style);
     }
 
+    // Z0.5: Paint bus bars (before individual edges so junctions merge correctly)
+    // Group corner edges by (from_id, horizontal_y) — groups with 2+ edges are buses
+    {
+        const BusBarKey = struct {
+            from_id: usize,
+            h_y: usize,
+        };
+        const BusBarKeyContext = struct {
+            pub fn hash(_: @This(), key: BusBarKey) u64 {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update(std.mem.asBytes(&key.from_id));
+                hasher.update(std.mem.asBytes(&key.h_y));
+                return hasher.final();
+            }
+            pub fn eql(_: @This(), a: BusBarKey, b: BusBarKey) bool {
+                return a.from_id == b.from_id and a.h_y == b.h_y;
+            }
+        };
+
+        const BusBarInfo = struct {
+            child_xs: std.ArrayListUnmanaged(usize),
+            trunk_x: usize,
+            color: Color,
+            from_y: usize,
+            to_y: usize,
+            weight: LineWeight,
+        };
+
+        var bus_bars: std.HashMapUnmanaged(BusBarKey, BusBarInfo, BusBarKeyContext, std.hash_map.default_max_load_percentage) = .{};
+        defer {
+            var it = bus_bars.valueIterator();
+            while (it.next()) |info| info.child_xs.deinit(allocator);
+            bus_bars.deinit(allocator);
+        }
+
+        for (plan.edge_plans) |ep| {
+            if (ep.edge.path != .corner) continue;
+            const key = BusBarKey{ .from_id = ep.edge.from_id, .h_y = ep.edge.path.corner.horizontal_y };
+            const gop = bus_bars.getOrPut(allocator, key) catch continue;
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{
+                    .child_xs = .{},
+                    .trunk_x = ep.edge.from_x,
+                    .color = ep.style_color,
+                    .from_y = ep.edge.from_y,
+                    .to_y = ep.edge.to_y,
+                    .weight = ep.weight,
+                };
+            }
+            gop.value_ptr.child_xs.append(allocator, ep.edge.to_x) catch continue;
+        }
+
+        var bar_iter = bus_bars.iterator();
+        while (bar_iter.next()) |entry| {
+            const info = entry.value_ptr;
+            if (info.child_xs.items.len < 2) continue; // Not a bus group
+            edge_render.paintBusBar(
+                &buffer,
+                entry.key_ptr.h_y,
+                info.trunk_x,
+                info.child_xs.items,
+                info.color,
+                info.from_y,
+                info.to_y,
+                info.weight,
+            );
+        }
+    }
+
     // Z1: Paint edges
     for (plan.edge_plans) |ep| {
         edge_render.paintEdge(&buffer, &ep.edge, ep.style_color, ep.weight, ep.marker_end, ep.marker_start);

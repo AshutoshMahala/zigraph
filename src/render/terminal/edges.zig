@@ -292,6 +292,108 @@ fn paintCornerEdge(buffer: *Buffer2D, edge: *const LayoutEdge, h_y: usize, ec: E
     }
 }
 
+/// Paint a shared horizontal bus bar for a group of sibling corner edges.
+///
+/// Draws the horizontal bar at `h_y` spanning from `min_x` to `max_x`,
+/// with T-junction drops at each child_x and a junction where the trunk
+/// meets the bar at `trunk_x`.
+pub fn paintBusBar(
+    buffer: *Buffer2D,
+    h_y: usize,
+    trunk_x: usize,
+    child_xs: []const usize,
+    color: Color,
+    from_y: usize,
+    to_y: usize,
+    weight: LineWeight,
+) void {
+    const ec = EdgeColor.init(color, from_y, to_y);
+    const arm = ArmWeight.fromLineWeight(weight);
+
+    // Find bus extents
+    var min_x: usize = trunk_x;
+    var max_x: usize = trunk_x;
+    for (child_xs) |cx| {
+        min_x = @min(min_x, cx);
+        max_x = @max(max_x, cx);
+    }
+
+    // Horizontal bus line (excluding endpoints — junctions handle those)
+    {
+        const cc = ec.at(h_y);
+        if (max_x > min_x + 1) {
+            var x = min_x + 1;
+            while (x < max_x) : (x += 1) {
+                drawLineCell(buffer, x, h_y, false, cc, arm);
+            }
+        }
+    }
+
+    // Junction where trunk meets bus (up + left + right, maybe down)
+    {
+        const cc = ec.at(h_y);
+        const current = buffer.get(trunk_x, h_y);
+        buffer.setWithColor(trunk_x, h_y, mergeJunctionWeighted(current, .{
+            .up = arm,
+            .left = if (trunk_x > min_x) arm else .none,
+            .right = if (trunk_x < max_x) arm else .none,
+            .down = blk: {
+                for (child_xs) |cx| {
+                    if (cx == trunk_x) break :blk arm;
+                }
+                break :blk .none;
+            },
+        }), cc);
+    }
+
+    // Junctions at each child drop-off point
+    for (child_xs) |child_x| {
+        if (child_x == trunk_x) continue;
+        const cc = ec.at(h_y);
+        const current = buffer.get(child_x, h_y);
+        buffer.setWithColor(child_x, h_y, mergeJunctionWeighted(current, .{
+            .down = arm,
+            .left = if (child_x > min_x) arm else .none,
+            .right = if (child_x < max_x) arm else .none,
+        }), cc);
+    }
+
+    // Corner endpoints (use corner chars instead of T-junctions at the extremes)
+    {
+        const cc = ec.at(h_y);
+        // Left endpoint
+        {
+            const current = buffer.get(min_x, h_y);
+            var dirs: DirWeights = .{
+                .right = arm,
+                .down = blk: {
+                    for (child_xs) |cx| {
+                        if (cx == min_x) break :blk arm;
+                    }
+                    break :blk .none;
+                },
+            };
+            if (min_x == trunk_x) dirs.up = arm;
+            buffer.setWithColor(min_x, h_y, mergeJunctionWeighted(current, dirs), cc);
+        }
+        // Right endpoint
+        {
+            const current = buffer.get(max_x, h_y);
+            var dirs: DirWeights = .{
+                .left = arm,
+                .down = blk: {
+                    for (child_xs) |cx| {
+                        if (cx == max_x) break :blk arm;
+                    }
+                    break :blk .none;
+                },
+            };
+            if (max_x == trunk_x) dirs.up = arm;
+            buffer.setWithColor(max_x, h_y, mergeJunctionWeighted(current, dirs), cc);
+        }
+    }
+}
+
 fn paintSideChannelEdge(buffer: *Buffer2D, edge: *const LayoutEdge, ch_x: usize, start_y: usize, end_y: usize, ec: EdgeColor, arm: ArmWeight, marker_end: MarkerShape, marker_start: MarkerShape) void {
     const x1 = edge.from_x;
     const x2 = edge.to_x;
