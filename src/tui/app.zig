@@ -48,6 +48,8 @@ tab_cache: std.ArrayListUnmanaged(TabBar.Tab),
 children: [6]vxfw.SubSurface = undefined,
 /// Owned slice of error/warning annotations for the current buffer.
 last_errors: []EditorPane.ErrorLine = &.{},
+/// Set to true when the buffer is modified; cleared and acted on at the start of the next draw frame.
+preview_dirty: bool = false,
 
 pub fn create(allocator: std.mem.Allocator) !*App {
     const buffer = try allocator.create(TextBuffer);
@@ -528,17 +530,13 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
                 };
                 ctx.redraw = true;
             } else if (self.focus == .editor) {
-                const was_modified = self.editor_pane.modified;
-
                 const ep_widget = self.editor_pane.widget();
                 if (ep_widget.eventHandler) |handler| {
                     try handler(ep_widget.userdata, ctx, event);
                 }
 
-                if (self.editor_pane.modified and !was_modified) {
-                    self.refreshPreview();
-                } else if (self.editor_pane.modified) {
-                    self.refreshPreview();
+                if (self.editor_pane.modified) {
+                    self.preview_dirty = true;
                 }
 
                 const cursor_pos = self.buffer.lineColToPosition(
@@ -562,6 +560,11 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
 fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
     const self: *App = @ptrCast(@alignCast(ptr));
     const max = ctx.max.size();
+
+    if (self.preview_dirty) {
+        self.preview_dirty = false;
+        self.refreshPreview();
+    }
 
     self.rebuildTabCache();
 
