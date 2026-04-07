@@ -310,7 +310,6 @@ pub fn paintBusBar(
     const ec = EdgeColor.init(color, from_y, to_y);
     const arm = ArmWeight.fromLineWeight(weight);
 
-    // Find bus extents
     var min_x: usize = trunk_x;
     var max_x: usize = trunk_x;
     for (child_xs) |cx| {

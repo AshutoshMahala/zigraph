@@ -149,7 +149,6 @@ pub fn routeWithDummies(
         }
     };
 
-    // Shared bus_y for (source, target_level) groups with 2+ children
     const BusGroupInfo = struct {
         bus_y: usize,
     };
@@ -289,10 +288,8 @@ pub fn routeWithDummies(
         } else if (from_node.center_x == to_node.center_x) blk: {
             break :blk .{ .direct = {} };
         } else blk: {
-            // Check if this edge belongs to a bus fan-out group
             const bus_key = BusGroupKey{ .source_id = edge_from, .target_level = to_node.level };
             if (bus_group_info.get(bus_key)) |info| {
-                // Bus group: all siblings share the same horizontal_y
                 break :blk .{ .corner = .{ .horizontal_y = info.bus_y } };
             }
             // Stagger horizontal_y by slot so edges from the same source
