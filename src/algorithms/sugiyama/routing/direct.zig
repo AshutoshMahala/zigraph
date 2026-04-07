@@ -569,3 +569,130 @@ test "direct routing: edge coordinates match node positions" {
     try std.testing.expectEqual(@as(usize, 5), e.to_y);
 }
 
+test "bus fan-out: siblings share horizontal_y" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "Root");
+    try g.addNode(2, "A");
+    try g.addNode(3, "B");
+    try g.addNode(4, "C");
+    try g.addEdge(1, 2);
+    try g.addEdge(1, 3);
+    try g.addEdge(1, 4);
+
+    const nodes_arr = [_]LayoutNode{
+        .{ .id = 1, .label = "Root", .x = 5, .y = 0, .width = 6, .height = 1, .center_x = 8, .level = 0, .level_position = 0 },
+        .{ .id = 2, .label = "A", .x = 0, .y = 5, .width = 3, .height = 1, .center_x = 1, .level = 1, .level_position = 0 },
+        .{ .id = 3, .label = "B", .x = 5, .y = 5, .width = 3, .height = 1, .center_x = 6, .level = 1, .level_position = 1 },
+        .{ .id = 4, .label = "C", .x = 10, .y = 5, .width = 3, .height = 1, .center_x = 11, .level = 1, .level_position = 2 },
+    };
+
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    defer id_map.deinit(allocator);
+    try id_map.put(allocator, 1, 0);
+    try id_map.put(allocator, 2, 1);
+    try id_map.put(allocator, 3, 2);
+    try id_map.put(allocator, 4, 3);
+
+    var dummy_positions = DummyPositions{ .waypoints = .{}, .allocator = allocator };
+
+    var edges = try routeWithDummies(&g, &nodes_arr, &id_map, &dummy_positions, allocator, null, .bus);
+    defer {
+        for (edges.items) |*e| e.path.deinit();
+        edges.deinit(allocator);
+    }
+
+    try std.testing.expectEqual(@as(usize, 3), edges.items.len);
+
+    // All edges should be .corner (not .bus — that variant no longer exists)
+    for (edges.items) |e| {
+        try std.testing.expect(e.path == .corner);
+    }
+
+    // All siblings should share the same horizontal_y
+    const h_y = edges.items[0].path.corner.horizontal_y;
+    for (edges.items) |e| {
+        try std.testing.expectEqual(h_y, e.path.corner.horizontal_y);
+    }
+
+    // horizontal_y should be midpoint: from_y_edge=1, min_child_y=5, bus_y = 1 + (5-1)/2 = 3
+    try std.testing.expectEqual(@as(usize, 3), h_y);
+}
+
+test "bus fan-out: single child uses individual staggering" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "A");
+    try g.addNode(2, "B");
+    try g.addEdge(1, 2);
+
+    const nodes_arr = [_]LayoutNode{
+        .{ .id = 1, .label = "A", .x = 0, .y = 0, .width = 3, .height = 1, .center_x = 1, .level = 0, .level_position = 0 },
+        .{ .id = 2, .label = "B", .x = 5, .y = 4, .width = 3, .height = 1, .center_x = 6, .level = 1, .level_position = 0 },
+    };
+
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    defer id_map.deinit(allocator);
+    try id_map.put(allocator, 1, 0);
+    try id_map.put(allocator, 2, 1);
+
+    var dummy_positions = DummyPositions{ .waypoints = .{}, .allocator = allocator };
+
+    var edges = try routeWithDummies(&g, &nodes_arr, &id_map, &dummy_positions, allocator, null, .bus);
+    defer {
+        for (edges.items) |*e| e.path.deinit();
+        edges.deinit(allocator);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), edges.items.len);
+    // Single child: no bus grouping, uses normal corner routing
+    try std.testing.expect(edges.items[0].path == .corner);
+}
+
+test "bus fan-out: individual style does not group siblings" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+
+    try g.addNode(1, "Root");
+    try g.addNode(2, "A");
+    try g.addNode(3, "B");
+    try g.addEdge(1, 2);
+    try g.addEdge(1, 3);
+
+    const nodes_arr = [_]LayoutNode{
+        .{ .id = 1, .label = "Root", .x = 3, .y = 0, .width = 5, .height = 1, .center_x = 5, .level = 0, .level_position = 0 },
+        .{ .id = 2, .label = "A", .x = 0, .y = 5, .width = 3, .height = 1, .center_x = 1, .level = 1, .level_position = 0 },
+        .{ .id = 3, .label = "B", .x = 8, .y = 5, .width = 3, .height = 1, .center_x = 10, .level = 1, .level_position = 1 },
+    };
+
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    defer id_map.deinit(allocator);
+    try id_map.put(allocator, 1, 0);
+    try id_map.put(allocator, 2, 1);
+    try id_map.put(allocator, 3, 2);
+
+    var dummy_positions = DummyPositions{ .waypoints = .{}, .allocator = allocator };
+
+    // With .individual, siblings should NOT share horizontal_y (staggered instead)
+    var edges = try routeWithDummies(&g, &nodes_arr, &id_map, &dummy_positions, allocator, null, .individual);
+    defer {
+        for (edges.items) |*e| e.path.deinit();
+        edges.deinit(allocator);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), edges.items.len);
+    for (edges.items) |e| {
+        try std.testing.expect(e.path == .corner);
+    }
+    // With individual style, staggering means they may get different h_y values
+    // (bus_group_info map is empty so no forced grouping)
+}
+

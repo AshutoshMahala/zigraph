@@ -1886,9 +1886,6 @@ test "terminal render: bus routing asymmetric tree" {
     const output = try render(&layout_ir, allocator);
     defer allocator.free(output);
 
-    // Print for visual inspection during development
-    std.debug.print("\n{s}\n", .{output});
-
     // Verify all nodes present
     try std.testing.expect(std.mem.indexOf(u8, output, "Root") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "Leaf") != null);
@@ -1897,4 +1894,13 @@ test "terminal render: bus routing asymmetric tree" {
     try std.testing.expect(std.mem.indexOf(u8, output, "[X]") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "[Y]") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "[Z]") != null);
+
+    // Verify bus-specific box-drawing characters are present in the output.
+    // Horizontal bar segments prove the bus bar was drawn.
+    try std.testing.expect(std.mem.indexOf(u8, output, "\xe2\x94\x80") != null); // "─" horizontal line
+    // At least one junction or corner character should be present
+    const has_t_junction = std.mem.indexOf(u8, output, "\xe2\x94\xac") != null; // "┬"
+    const has_corner_right = std.mem.indexOf(u8, output, "\xe2\x94\x90") != null; // "┐"
+    const has_corner_left = std.mem.indexOf(u8, output, "\xe2\x94\x8c") != null; // "┌"
+    try std.testing.expect(has_t_junction or has_corner_right or has_corner_left);
 }
