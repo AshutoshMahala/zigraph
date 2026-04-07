@@ -53,6 +53,8 @@ pub fn deinit(self: *UndoManager) void {
     }
 }
 
+/// Inserts `text` at byte position `pos` in `buf` and records the operation in the
+/// current undo group. Clears the redo stack.
 pub fn insertText(self: *UndoManager, buf: *TextBuffer, pos: usize, text: []const u8) Allocator.Error!void {
     try buf.insert(pos, text);
 
@@ -63,6 +65,8 @@ pub fn insertText(self: *UndoManager, buf: *TextBuffer, pos: usize, text: []cons
     self.clearRedoStack();
 }
 
+/// Deletes `len` bytes starting at `pos` from `buf` and records the operation in
+/// the current undo group. Clears the redo stack.
 pub fn deleteText(self: *UndoManager, buf: *TextBuffer, pos: usize, len: usize) Allocator.Error!void {
     const deleted = try buf.delete(pos, len);
 
@@ -72,6 +76,9 @@ pub fn deleteText(self: *UndoManager, buf: *TextBuffer, pos: usize, len: usize) 
     self.clearRedoStack();
 }
 
+/// Finalizes the current edit group so that subsequent edits start a new undo step.
+/// Call this at logical edit boundaries (e.g., after a word is completed, on cursor
+/// movement, or before a structurally distinct operation).
 pub fn breakGroup(self: *UndoManager) Allocator.Error!void {
     if (self.current_group) |group| {
         if (group.ops.items.len > 0) {

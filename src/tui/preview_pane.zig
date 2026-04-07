@@ -178,6 +178,30 @@ fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.
         .mouse => |mouse| {
             switch (mouse.type) {
                 .press => {
+                    // Handle scroll wheel events
+                    switch (mouse.button) {
+                        .wheel_up => {
+                            self.scroll_y -|= 3;
+                            ctx.consumeAndRedraw();
+                            return;
+                        },
+                        .wheel_down => {
+                            self.scroll_y += 3;
+                            ctx.consumeAndRedraw();
+                            return;
+                        },
+                        .wheel_left => {
+                            self.scroll_x -|= 3;
+                            ctx.consumeAndRedraw();
+                            return;
+                        },
+                        .wheel_right => {
+                            self.scroll_x += 3;
+                            ctx.consumeAndRedraw();
+                            return;
+                        },
+                        else => {},
+                    }
                     // Start drag on mouse press (basic infrastructure)
                     if (self.selected_node) |node_id| {
                         self.drag_active = true;

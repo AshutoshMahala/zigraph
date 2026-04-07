@@ -53,6 +53,8 @@ last_errors: []EditorPane.ErrorLine = &.{},
 /// Set to true when the buffer is modified; cleared and acted on at the start of the next draw frame.
 preview_dirty: bool = false,
 
+/// Allocates and initializes a new App and all of its owned resources.
+/// Caller must call `destroy` to free all resources when done.
 pub fn create(allocator: std.mem.Allocator) !*App {
     const buffer = try allocator.create(TextBuffer);
     buffer.* = try TextBuffer.init(allocator, "# Example\n@layout sugiyama\n\nA -> B -> C\nB -> D\n");
@@ -132,6 +134,7 @@ pub fn create(allocator: std.mem.Allocator) !*App {
     return self;
 }
 
+/// Frees all owned resources including self. Do not use the App after calling this.
 pub fn destroy(self: *App) void {
     self.allocator.free(self.last_errors);
     self.preview_pane.destroy();
@@ -164,6 +167,9 @@ pub fn widget(self: *App) vxfw.Widget {
     };
 }
 
+/// Adds a new buffer with the given `filename` and `content`, then switches to it.
+/// `filename` is borrowed — not duplicated — so the caller must ensure the backing
+/// memory outlives the App.
 pub fn addBuffer(self: *App, filename: []const u8, content: []const u8) !void {
     const buffer = try self.allocator.create(TextBuffer);
     buffer.* = try TextBuffer.init(self.allocator, content);

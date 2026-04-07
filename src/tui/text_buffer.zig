@@ -21,6 +21,8 @@ pub const LineCol = struct {
     col: usize,
 };
 
+/// Initializes a TextBuffer with a copy of `content`. The caller retains ownership
+/// of the input slice; the buffer maintains its own independent copy.
 pub fn init(allocator: Allocator, content: []const u8) Allocator.Error!TextBuffer {
     const original = try allocator.alloc(u8, content.len);
     @memcpy(original, content);
@@ -113,6 +115,8 @@ pub fn insert(self: *TextBuffer, pos: usize, text: []const u8) Allocator.Error!v
     }
 }
 
+/// Removes `len` bytes starting at `pos` from the buffer and returns them as a
+/// newly allocated slice. The caller owns the returned memory and must free it.
 pub fn delete(self: *TextBuffer, pos: usize, len: usize) Allocator.Error![]u8 {
     const deleted = try self.slice(self.allocator, pos, pos + len);
 
@@ -175,10 +179,14 @@ pub fn delete(self: *TextBuffer, pos: usize, len: usize) Allocator.Error![]u8 {
     return deleted;
 }
 
+/// Returns all buffer content as a newly allocated slice. The caller owns the
+/// returned memory and must free it.
 pub fn contents(self: *const TextBuffer, allocator: Allocator) Allocator.Error![]u8 {
     return self.slice(allocator, 0, self.totalLen());
 }
 
+/// Returns the byte range `[start, end)` of the buffer as a newly allocated slice.
+/// The caller owns the returned memory and must free it.
 pub fn slice(self: *const TextBuffer, allocator: Allocator, start: usize, end: usize) Allocator.Error![]u8 {
     const len = end - start;
     var result = try allocator.alloc(u8, len);
@@ -221,6 +229,8 @@ pub fn lineCount(self: *const TextBuffer) usize {
     return count;
 }
 
+/// Returns the content of line `line_num` (0-based) as a newly allocated slice,
+/// without the trailing newline. The caller owns the returned memory and must free it.
 pub fn lineAt(self: *const TextBuffer, line_num: usize) Allocator.Error![]u8 {
     // Find byte range for the line
     var current_line: usize = 0;

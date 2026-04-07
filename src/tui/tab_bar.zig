@@ -82,27 +82,14 @@ fn typeErasedDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
             }
         }
 
-        // " × " close indicator and trailing space
-        const close = " \xc3\x97 ";
-        var ci: usize = 0;
-        while (ci < close.len) {
+        // " x " close indicator — plain ASCII avoids multi-byte UTF-8 complexity
+        const close = " x ";
+        for (close) |ch| {
             if (col >= max.width) break;
-            // × is a 2-byte UTF-8 sequence (0xC3 0x97)
-            if (ci == 0 or ci == 3) {
-                // single-byte chars: space
-                surface.writeCell(col, 0, .{
-                    .char = .{ .grapheme = close[ci .. ci + 1], .width = 1 },
-                    .style = style,
-                });
-                ci += 1;
-            } else {
-                // 2-byte × character
-                surface.writeCell(col, 0, .{
-                    .char = .{ .grapheme = close[ci .. ci + 2], .width = 1 },
-                    .style = style,
-                });
-                ci += 2;
-            }
+            surface.writeCell(col, 0, .{
+                .char = .{ .grapheme = &[_]u8{ch}, .width = 1 },
+                .style = style,
+            });
             col += 1;
         }
     }

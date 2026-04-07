@@ -15,6 +15,11 @@ pub const Definition = struct {
 allocator: std.mem.Allocator,
 defs: std.StringHashMapUnmanaged(Definition),
 
+/// Initializes an empty Definitions store.
+///
+/// Lifetime contract: all `name` slices passed to `add*` methods are borrowed, not
+/// duplicated. Callers must ensure the backing memory for those slices outlives this
+/// Definitions instance.
 pub fn init(allocator: std.mem.Allocator) Definitions {
     return .{
         .allocator = allocator,
