@@ -67,6 +67,7 @@ pub const resolveColor = config_mod.resolveColor;
 pub const resolveColorAt = config_mod.resolveColorAt;
 pub const TerminalEdgeStyle = config_mod.TerminalEdgeStyle;
 pub const TerminalNodeStyle = config_mod.TerminalNodeStyle;
+pub const NodePaintContext = config_mod.NodePaintContext;
 pub const TerminalEdgeLabelStyle = config_mod.TerminalEdgeLabelStyle;
 pub const TerminalSubgraphStyle = config_mod.TerminalSubgraphStyle;
 pub const defaultEdgeStyle = config_mod.defaultEdgeStyle;

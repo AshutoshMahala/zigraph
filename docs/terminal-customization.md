@@ -13,8 +13,8 @@ This guide covers every knob the terminal renderer exposes, from simple border c
 > | 4 | `zig build run-terminal-edge-labels` | Edge label placement |
 > | 5 | `zig build run-terminal-subgraph-styles` | Subgraph borders + nesting |
 > | 6 | `zig build run-output-formats` | ASCII charset, HTML output |
-> | 7 | `zig build run-terminal-record-nodes` | Custom record-style nodes |
-> | 8 | `zig build run-terminal-db-diagram` | Full ER diagram with FK edges |
+| 7 | `zig build run-terminal-record-nodes` | Custom record-style nodes (paint_fn) |
+| 8 | `zig build run-terminal-db-diagram` | Full ER diagram with FK edges (paint_fn) |
 > | 9 | `zig build run-streaming` | Streaming render to stdout (zero-copy) |
 > | 10 | `zig build run-tui` | Interactive click-to-select with hit-testing |
 > | 11 | `zig build run-terminal-text-attrs` | Bold, dim, italic, underline on labels |
@@ -96,7 +96,7 @@ pub const NodeStyleContext = struct {
     label:       []const u8,  // node label text
     total_nodes: usize,       // total non-dummy nodes in graph
     width:       usize,       // layout-computed column width
-    height:      usize,       // layout-computed height (always 1 in terminal style context; visual height is determined by border.height())
+    height:      usize,       // layout-computed height from NodeOptions (default 1)
     is_implicit: bool,        // true = auto-created via addEdgeAutoCreate
     arena:       Allocator,   // allocator freed after the render pass
 };
@@ -111,6 +111,25 @@ pub const TerminalNodeStyle = struct {
     text_color:   Color      = .default,  // label text color
     bg_color:     Color      = .default,  // cell background color
     attrs:        TextAttrs  = .{},       // bold / dim / italic / underline
+    paint_fn:     ?*const fn (*Buffer2D, NodePaintContext) void = null,
+    // When non-null, paintNode delegates entirely to this function.
+    // The layout engine uses NodeOptions.height for level spacing,
+    // so edges route correctly around custom-height nodes.
+};
+```
+
+### NodePaintContext fields
+
+Passed to `paint_fn` with the node's bounding box coordinates:
+
+```zig
+pub const NodePaintContext = struct {
+    x:       usize,       // bounding box left (column)
+    y:       usize,       // bounding box top (row)
+    width:   usize,       // bounding box width
+    height:  usize,       // bounding box height (from NodeOptions)
+    label:   []const u8,  // node label text
+    node_id: usize,       // original graph ID
 };
 ```
 
@@ -535,11 +554,85 @@ The default `html_pre_style` is `"font-family:monospace;line-height:1.2"`.
 
 ---
 
-## Advanced: custom rendering pipeline
+## Advanced: custom node content via paint_fn
 
 > **See it:** [`examples/terminal/record_nodes.zig`](../examples/terminal/record_nodes.zig) and [`examples/terminal/db_diagram.zig`](../examples/terminal/db_diagram.zig)
 
-For fully custom node shapes (e.g., ER-diagram record boxes with multiple field rows), drop down to the low-level API: build a `RenderPlan`, allocate a `Buffer2D`, paint manually, then serialize.
+For custom node shapes (e.g., ER-diagram record boxes with multiple field rows), use `paint_fn` on `TerminalNodeStyle`. This is the terminal equivalent of SVG's `shape_svg`.
+
+The key idea: declare the node's full height via `NodeOptions`, then provide a `paint_fn` that draws whatever you want inside that bounding box. The layout engine respects the declared height, so edges route correctly around the full node.
+
+### Pattern
+
+1. Define your content struct with auto-computed dimensions:
+
+```zig
+const Entity = struct {
+    name: []const u8,
+    fields: []const Field,
+
+    fn boxWidth(self: Entity) usize {
+        var max_len: usize = self.name.len;
+        for (self.fields) |f| {
+            if (f.text.len > max_len) max_len = f.text.len;
+        }
+        return max_len + 2; // +2 for border columns
+    }
+
+    fn boxHeight(self: Entity) usize {
+        return 4 + self.fields.len; // top + header + separator + fields + bottom
+    }
+
+    fn nodeOptions(self: Entity) zigraph.NodeOptions {
+        return .{ .label = self.name, .width = self.boxWidth(), .height = self.boxHeight() };
+    }
+
+    fn paint(self: Entity, buf: *T.Buffer2D, ctx: T.NodePaintContext) void {
+        // draw top border, header, separator, field rows, bottom border
+        // within ctx.x, ctx.y, ctx.width, ctx.height
+    }
+};
+```
+
+2. Create file-scope instances and thin paint wrappers:
+
+```zig
+const server = Entity{ .name = "Server", .fields = &.{ ... } };
+
+fn paintServer(buf: *T.Buffer2D, ctx: T.NodePaintContext) void {
+    server.paint(buf, ctx);
+}
+```
+
+3. Wire it up via `node_style_fn`:
+
+```zig
+fn nodeStyle(ctx: T.NodeStyleContext) T.TerminalNodeStyle {
+    if (std.mem.eql(u8, ctx.label, "Server"))
+        return .{ .border = .none, .paint_fn = &paintServer };
+    return .{ .border = .single_box };
+}
+```
+
+4. Build the graph with auto-computed dimensions and render normally:
+
+```zig
+try g.addNode(1, server.nodeOptions());  // width and height from content
+var ir = try zigraph.layout(&g, alloc, .{});
+const output = try T.renderWithConfig(&ir, alloc, .{ .node_style_fn = &nodeStyle });
+```
+
+No manual `RenderPlan`, `Buffer2D`, or `serializeBuffer` needed. The content struct is the single source of truth for dimensions and painting, so they can never go out of sync.
+
+### Why paint_fn needs a wrapper
+
+Zig function pointers cannot capture runtime state. The `paint_fn` signature is `*const fn (*Buffer2D, NodePaintContext) void`, so it cannot close over an `Entity` instance. The pattern is to use file-scope (comptime-known) content structs and a thin wrapper function per entity that calls `entity.paint(buf, ctx)`.
+
+---
+
+## Escape hatch: manual Buffer2D pipeline
+
+For cases where `paint_fn` is not sufficient (e.g., painting outside the node bounding box, custom edge rendering, overlays), the low-level pipeline is still available.
 
 `RenderPlan` also exposes **hit-testing** via `plan.elementAt(x, y)`, which returns which node, edge, or subgraph occupies a given cell. See [`examples/terminal/interactive_tui.zig`](../examples/terminal/interactive_tui.zig) for a complete mouse-interactive terminal demo using this API.
 
@@ -550,8 +643,8 @@ For fully custom node shapes (e.g., ER-diagram record boxes with multiple field 
 var plan = try zigraph.terminal.RenderPlan.build(alloc, &ir, config);
 defer plan.deinit();
 
-// Allocate a 2D character + color buffer, optionally taller than the plan
-var buf = try zigraph.terminal.Buffer2D.init(alloc, plan.width, plan.height + extra_rows);
+// Allocate a 2D character + color buffer
+var buf = try zigraph.terminal.Buffer2D.init(alloc, plan.width, plan.height);
 defer buf.deinit(alloc);
 
 // Paint in Z-order using the public paint functions:
@@ -562,8 +655,6 @@ const nodes = ir.getNodes();
 for (plan.node_plans) |np| {
     zigraph.terminal.paintNode(&buf, &nodes[np.node_index], false, np.style, np.rendered_y, np.level_height);
 }
-
-// ...manually paint additional rows into buf...
 
 // Serialize to any writer
 const stdout = std.io.getStdOut().writer();
@@ -593,27 +684,6 @@ To convert a `Color` (from a style function) to a `CellColor` for manual buffer 
 ```zig
 const cc = zigraph.terminal.resolveColorAt(my_color, 0.0);  // t=0.0 for flat colors
 ```
-
-### Record-node pattern
-
-The technique used in the DB diagram examples:
-
-```
-Plan height:  3 rows  (top border, label, bottom border)
-Buffer height: 3 + N + 1 rows  (N = field count,  +1 = closing └──┘)
-
-Z1  paintEdge  — routes connectors, may paint through future field area
-Z4  paintNode  — draws 3-row header box
-Z5  manual     — overpaint └─┘ corners → ├─┤, then paint N field rows + └─┘
-```
-
-Key points:
-- `buf.set(x, y, '├')` changes only the glyph; existing color from `paintNode` is kept.
-- Clear inner cells after painting text to overwrite any edge-routing chars that bleed through:
-  ```zig
-  while (lx < node.x + w - 1) : (lx += 1) buf.set(lx, fy, ' ');
-  ```
-- Set `level_spacing = max_fields_at_source_level + 2` in `LayoutConfig` so the gap between levels is large enough to fit the source entity's field rows.
 
 ---
 

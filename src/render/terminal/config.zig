@@ -18,6 +18,7 @@
 const std = @import("std");
 const types = @import("../types.zig");
 const colormaps = @import("../color/colormaps.zig");
+const Buffer2D = @import("buffer.zig").Buffer2D;
 
 // ── Re-exports from shared types ────────────────────────────────────────────
 
@@ -259,6 +260,25 @@ pub const TerminalEdgeStyle = struct {
     marker_start: MarkerShape = .none,
 };
 
+/// Context passed to `paint_fn` for custom node rendering.
+///
+/// Provides the bounding box coordinates and label so the painter
+/// knows exactly where and how large to draw.
+pub const NodePaintContext = struct {
+    /// Bounding box left (column)
+    x: usize,
+    /// Bounding box top (row)
+    y: usize,
+    /// Bounding box width (from layout)
+    width: usize,
+    /// Bounding box height (from layout / NodeOptions)
+    height: usize,
+    /// Node label text
+    label: []const u8,
+    /// Original node ID from the graph
+    node_id: usize,
+};
+
 /// Style returned by `node_style_fn` for each node.
 ///
 /// Colors: `border_color` applies to box-drawing chars, `text_color` to the
@@ -271,6 +291,12 @@ pub const TerminalNodeStyle = struct {
     text_color: Color = .default,
     bg_color: Color = .default,
     attrs: TextAttrs = .{},
+
+    /// Custom paint function. When non-null, `paintNode` delegates to this
+    /// instead of drawing the standard box+label. The function receives the
+    /// Buffer2D and a bounding-box context. This is the terminal equivalent
+    /// of SVG's `shape_svg`.
+    paint_fn: ?*const fn (*Buffer2D, NodePaintContext) void = null,
 };
 
 /// Style returned by `edge_label_style_fn` for each edge label.

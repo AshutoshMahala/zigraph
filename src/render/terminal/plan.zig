@@ -183,11 +183,13 @@ pub const RenderPlan = struct {
                 .label = node.label,
                 .total_nodes = total_nodes,
                 .width = node.width,
-                .height = 1,
+                .height = node.height,
                 .is_implicit = node.kind == .implicit,
                 .arena = alloc,
             });
-            const h: usize = ns.border.height();
+            // When paint_fn is set, use the node's declared height from the IR;
+            // otherwise use the border's intrinsic height (1 or 3).
+            const h: usize = if (ns.paint_fn != null) node.height else ns.border.height();
             if (h > level_max_height[node.level]) level_max_height[node.level] = h;
         }
 
@@ -334,7 +336,7 @@ pub const RenderPlan = struct {
                     .label = node.label,
                     .total_nodes = total_nodes,
                     .width = node.width,
-                    .height = 1,
+                    .height = node.height,
                     .is_implicit = node.kind == .implicit,
                     .arena = alloc,
                 });

@@ -5,6 +5,7 @@ const LayoutNode = ir_mod.LayoutNode(usize);
 const Buffer2D = @import("buffer.zig").Buffer2D;
 const config_mod = @import("config.zig");
 const TerminalNodeStyle = config_mod.TerminalNodeStyle;
+const NodePaintContext = config_mod.NodePaintContext;
 const CellColor = config_mod.CellColor;
 const Color = config_mod.Color;
 const TextAttrs = config_mod.TextAttrs;
@@ -71,6 +72,19 @@ pub fn paintNode(buffer: *Buffer2D, node: *const LayoutNode, show_dummy_nodes: b
                 buffer.set(node.center_x, dy, '│');
             }
         }
+        return;
+    }
+
+    // Custom paint function: delegate entirely to user code
+    if (style.paint_fn) |paint| {
+        paint(buffer, .{
+            .x = node.x,
+            .y = rendered_y,
+            .width = node.width,
+            .height = level_height,
+            .label = node.label,
+            .node_id = node.id,
+        });
         return;
     }
 

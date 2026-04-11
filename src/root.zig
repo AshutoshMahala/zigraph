@@ -189,6 +189,7 @@ pub const subgraph_presets = svg.subgraph_presets;
 // Terminal renderer types
 pub const TerminalEdgeStyle = terminal.TerminalEdgeStyle;
 pub const TerminalNodeStyle = terminal.TerminalNodeStyle;
+pub const NodePaintContext = terminal.NodePaintContext;
 pub const TerminalEdgeLabelStyle = terminal.TerminalEdgeLabelStyle;
 pub const TerminalSubgraphStyle = terminal.TerminalSubgraphStyle;
 pub const LineWeight = terminal.LineWeight;
