@@ -481,9 +481,260 @@ fn layoutFdg(
             items[idx].y -|= shift;
         }
 
-        // Update center_x (unchanged) — but we must refresh after Y shift
+        // Update center after Y shift
         for (items) |*nd| {
             nd.center_x = nd.x + nd.width / 2;
+            nd.center_y = nd.y + nd.height / 2;
+        }
+    }
+
+    // Post-processing: resolve node collisions.
+    // After scaling + rounding + gap compression, two nodes may occupy
+    // overlapping terminal cells. Detect and fix by nudging horizontally.
+    // Runs a few sweeps because nudging one pair can cause a new overlap.
+    {
+        const items = result.nodes.items;
+        const node_count = items.len;
+        if (node_count > 1) {
+            const h_pad: usize = 1; // minimum horizontal gap between nodes
+
+            var passes: usize = 0;
+            while (passes < 10) : (passes += 1) {
+                var changed = false;
+                for (0..node_count) |i| {
+                    for ((i + 1)..node_count) |j| {
+                        // Check vertical overlap: node occupies rows [y .. y+height)
+                        const a_y0 = items[i].y;
+                        const a_y1 = a_y0 + items[i].height;
+                        const b_y0 = items[j].y;
+                        const b_y1 = b_y0 + items[j].height;
+
+                        if (a_y1 <= b_y0 or b_y1 <= a_y0) continue; // no vertical overlap
+
+                        // Check horizontal overlap: node occupies cols [x .. x+width+pad)
+                        const a_x0 = items[i].x;
+                        const a_x1 = a_x0 + items[i].width + h_pad;
+                        const b_x0 = items[j].x;
+                        const b_x1 = b_x0 + items[j].width + h_pad;
+
+                        if (a_x1 <= b_x0 or b_x1 <= a_x0) continue; // no horizontal overlap
+
+                        // Collision detected — nudge the right-most node further right
+                        // (or if they share x, nudge j right)
+                        changed = true;
+                        if (items[i].x <= items[j].x) {
+                            items[j].x = items[i].x + items[i].width + h_pad;
+                        } else {
+                            items[i].x = items[j].x + items[j].width + h_pad;
+                        }
+                    }
+                }
+
+                // Refresh centers after nudging
+                for (items) |*nd| {
+                    nd.center_x = nd.x + nd.width / 2;
+                }
+
+                if (!changed) break;
+            }
+        }
+    }
+
+    // Post-processing: resolve subgraph bounding-box overlaps.
+    // After node collision resolution, sibling subgraphs may still overlap
+    // because their rendered bounding boxes (with padding, label rows, and
+    // parent-child gaps) can intersect. We compute the full padded bboxes
+    // (same algorithm as computeBoundingBoxes in bbox.zig) and shift entire
+    // groups of nodes to eliminate sibling-subgraph overlap.
+    if (g.hasSubgraphs()) {
+        const items = result.nodes.items;
+        const sg_count = g.subgraphCount();
+        const sg_items = g.subgraphs.items;
+
+        // Build transitive membership: for each node, walk up the ancestry
+        // chain and add the node to each ancestor subgraph's member list.
+        var sg_members = try allocator.alloc(std.ArrayListUnmanaged(usize), sg_count);
+        defer {
+            for (sg_members) |*m| m.deinit(allocator);
+            allocator.free(sg_members);
+        }
+        for (sg_members) |*m| m.* = .{};
+
+        for (0..n) |node_idx| {
+            const node = g.nodeAt(node_idx) orelse continue;
+            var sg_id_opt = g.nodeSubgraph(node.id);
+            while (sg_id_opt) |sg_id| {
+                const sg_idx = g.subgraph_id_to_index.get(sg_id) orelse break;
+                try sg_members[sg_idx].append(allocator, node_idx);
+                if (sg_idx < sg_items.len) {
+                    sg_id_opt = sg_items[sg_idx].parent_id;
+                } else break;
+            }
+        }
+
+        // Compute depth of each subgraph for bottom-up ordering.
+        const depths = try allocator.alloc(usize, sg_count);
+        defer allocator.free(depths);
+        var max_depth: usize = 0;
+        for (0..sg_count) |i| {
+            var depth: usize = 0;
+            var pid = sg_items[i].parent_id;
+            while (pid) |p| {
+                depth += 1;
+                const pidx = g.subgraph_id_to_index.get(p) orelse break;
+                if (pidx < sg_items.len) {
+                    pid = sg_items[pidx].parent_id;
+                } else break;
+            }
+            depths[i] = depth;
+            max_depth = @max(max_depth, depth);
+        }
+
+        // Allocate per-subgraph bbox accumulators (recomputed each pass).
+        const bb_x0 = try allocator.alloc(usize, sg_count);
+        defer allocator.free(bb_x0);
+        const bb_y0 = try allocator.alloc(usize, sg_count);
+        defer allocator.free(bb_y0);
+        const bb_x1 = try allocator.alloc(usize, sg_count);
+        defer allocator.free(bb_x1);
+        const bb_y1 = try allocator.alloc(usize, sg_count);
+        defer allocator.free(bb_y1);
+        const bb_ok = try allocator.alloc(bool, sg_count);
+        defer allocator.free(bb_ok);
+
+        const sg_gap: usize = 1; // extra gap between sibling bboxes
+
+        var sg_pass: usize = 0;
+        while (sg_pass < 15) : (sg_pass += 1) {
+            // Recompute padded bboxes from current node positions
+            // (mirrors computeBoundingBoxes in bbox.zig exactly).
+            @memset(bb_x0, std.math.maxInt(usize));
+            @memset(bb_y0, std.math.maxInt(usize));
+            @memset(bb_x1, 0);
+            @memset(bb_y1, 0);
+            @memset(bb_ok, false);
+
+            // Pass 1: envelope of DIRECT member nodes
+            for (items) |nd| {
+                const node_sg = g.nodeSubgraph(nd.id) orelse continue;
+                const sg_idx = g.subgraph_id_to_index.get(node_sg) orelse continue;
+                bb_ok[sg_idx] = true;
+                bb_x0[sg_idx] = @min(bb_x0[sg_idx], nd.x);
+                bb_y0[sg_idx] = @min(bb_y0[sg_idx], nd.y);
+                bb_x1[sg_idx] = @max(bb_x1[sg_idx], nd.x + nd.width);
+                bb_y1[sg_idx] = @max(bb_y1[sg_idx], nd.y + nd.height);
+            }
+
+            // Pass 2: bottom-up — pad, ensure label width, propagate to parent
+            {
+                var d: usize = max_depth;
+                while (true) {
+                    for (0..sg_count) |sg_idx| {
+                        if (depths[sg_idx] != d) continue;
+                        if (!bb_ok[sg_idx]) continue;
+                        const sg = sg_items[sg_idx];
+                        const pad: usize = 2; // default_padding
+                        const label_row: usize = 1;
+                        const pcg: usize = 1; // PARENT_CHILD_H_GAP
+
+                        bb_x0[sg_idx] = if (bb_x0[sg_idx] >= pad) bb_x0[sg_idx] - pad else 0;
+                        bb_y0[sg_idx] = if (bb_y0[sg_idx] >= pad + label_row) bb_y0[sg_idx] - (pad + label_row) else 0;
+                        bb_x1[sg_idx] += pad;
+                        bb_y1[sg_idx] += pad;
+
+                        if (sg.label.len > 0) {
+                            const min_w = sg.label.len + 4;
+                            const cur_w = bb_x1[sg_idx] - bb_x0[sg_idx];
+                            if (cur_w < min_w) bb_x1[sg_idx] += min_w - cur_w;
+                        }
+
+                        if (sg.parent_id) |pid| {
+                            if (g.subgraph_id_to_index.get(pid)) |pi| {
+                                bb_ok[pi] = true;
+                                const cmin = if (bb_x0[sg_idx] >= pcg) bb_x0[sg_idx] - pcg else 0;
+                                bb_x0[pi] = @min(bb_x0[pi], cmin);
+                                bb_y0[pi] = @min(bb_y0[pi], bb_y0[sg_idx]);
+                                bb_x1[pi] = @max(bb_x1[pi], bb_x1[sg_idx] + pcg);
+                                bb_y1[pi] = @max(bb_y1[pi], bb_y1[sg_idx]);
+                            }
+                        }
+                    }
+                    if (d == 0) break;
+                    d -= 1;
+                }
+            }
+
+            // Check sibling pairs for overlap using padded bboxes.
+            // Process bottom-up so inner siblings are resolved before parents.
+            var sg_changed = false;
+            {
+                var d: usize = max_depth;
+                while (true) {
+                    for (0..sg_count) |si| {
+                        if (depths[si] != d) continue;
+                        if (!bb_ok[si]) continue;
+                        for ((si + 1)..sg_count) |sj| {
+                            if (depths[sj] != d) continue;
+                            if (!bb_ok[sj]) continue;
+
+                            // Only resolve siblings (same parent_id)
+                            const pi_ = sg_items[si].parent_id;
+                            const pj_ = sg_items[sj].parent_id;
+                            const same_parent = (pi_ == null and pj_ == null) or
+                                (pi_ != null and pj_ != null and pi_.? == pj_.?);
+                            if (!same_parent) continue;
+
+                            // Check overlap (with small gap for breathing room)
+                            const ax1 = bb_x1[si] + sg_gap;
+                            const ay1 = bb_y1[si] + sg_gap;
+                            const bx1 = bb_x1[sj] + sg_gap;
+                            const by1 = bb_y1[sj] + sg_gap;
+
+                            if (ax1 <= bb_x0[sj] or bx1 <= bb_x0[si]) continue;
+                            if (ay1 <= bb_y0[sj] or by1 <= bb_y0[si]) continue;
+
+                            const h_overlap = @min(ax1, bx1) -| @max(bb_x0[si], bb_x0[sj]);
+                            const v_overlap = @min(ay1, by1) -| @max(bb_y0[si], bb_y0[sj]);
+
+                            sg_changed = true;
+
+                            if (h_overlap <= v_overlap) {
+                                const shift = h_overlap;
+                                if (bb_x0[si] <= bb_x0[sj]) {
+                                    for (sg_members[sj].items) |idx| {
+                                        items[idx].x += shift;
+                                    }
+                                } else {
+                                    for (sg_members[si].items) |idx| {
+                                        items[idx].x += shift;
+                                    }
+                                }
+                            } else {
+                                const shift = v_overlap;
+                                if (bb_y0[si] <= bb_y0[sj]) {
+                                    for (sg_members[sj].items) |idx| {
+                                        items[idx].y += shift;
+                                    }
+                                } else {
+                                    for (sg_members[si].items) |idx| {
+                                        items[idx].y += shift;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (d == 0) break;
+                    d -= 1;
+                }
+            }
+
+            if (!sg_changed) break;
+        }
+
+        // Refresh centers after subgraph separation
+        for (items) |*nd| {
+            nd.center_x = nd.x + nd.width / 2;
+            nd.center_y = nd.y + nd.height / 2;
         }
     }
 

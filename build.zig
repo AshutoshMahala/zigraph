@@ -192,6 +192,24 @@ pub fn build(b: *std.Build) void {
     const run_asciidag_stress_step = b.step("run-asciidag-stress", "Run the ascii-dag stress port");
     run_asciidag_stress_step.dependOn(&run_asciidag_stress.step);
 
+    // FDG subgraph stress test
+    const fdg_sg_stress = b.addExecutable(.{
+        .name = "fdg_subgraph_stress",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/fdg_subgraph_stress.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_mod },
+            },
+        }),
+    });
+    b.installArtifact(fdg_sg_stress);
+
+    const run_fdg_sg_stress = b.addRunArtifact(fdg_sg_stress);
+    const run_fdg_sg_stress_step = b.step("run-fdg-subgraph-stress", "Run the FDG subgraph stress test");
+    run_fdg_sg_stress_step.dependOn(&run_fdg_sg_stress.step);
+
     // Error handling example
     const error_example = b.addExecutable(.{
         .name = "error_handling",

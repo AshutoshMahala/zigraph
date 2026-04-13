@@ -87,6 +87,15 @@ pub const Config = struct {
     /// Default: 0.5 (32768 in Q16.16).
     /// Only effective when the graph has subgraphs.
     subgraph_cohesion: FP = 32768, // floor(0.5 * 65536)
+
+    /// Inter-cluster separation strength (Q16.16).
+    /// Pushes sibling subgraphs apart with Coulomb-like repulsion
+    /// between their centroids. Complements cohesion to prevent
+    /// clusters from overlapping.
+    /// 0 = disabled, 0.5–2.0 = typical range.
+    /// Default: 1.0 (65536 in Q16.16).
+    /// Only effective when the graph has subgraphs.
+    cluster_separation: FP = fp.ONE,
 };
 
 // ============================================================================
@@ -160,6 +169,11 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
         // === Subgraph cohesion: pull members toward group centroid ===
         if (has_subgraphs and config.subgraph_cohesion > 0) {
             forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
+        }
+
+        // === Inter-cluster separation: push sibling subgraphs apart ===
+        if (has_subgraphs and config.cluster_separation > 0) {
+            forces.applySeparation(positions, force_accum, &sg_index, g, config.cluster_separation, k_squared);
         }
 
         // === Apply forces with temperature clamping (respects pin constraints) ===
@@ -256,6 +270,11 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
         // === Subgraph cohesion: pull members toward group centroid ===
         if (has_subgraphs and config.subgraph_cohesion > 0) {
             forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
+        }
+
+        // === Inter-cluster separation: push sibling subgraphs apart ===
+        if (has_subgraphs and config.cluster_separation > 0) {
+            forces.applySeparation(positions, force_accum, &sg_index, g, config.cluster_separation, k_squared);
         }
 
         // === Apply forces with temperature clamping (respects pin constraints) ===

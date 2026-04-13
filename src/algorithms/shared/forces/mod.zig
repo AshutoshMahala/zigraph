@@ -23,6 +23,7 @@ pub const applyGravity = gravity.applyToCenter;
 pub const applyStrongGravity = gravity.applyStrongGravity;
 pub const computeCentroid = gravity.computeCentroid;
 pub const applyCohesion = cohesion.applyCohesion;
+pub const applySeparation = cohesion.applySeparation;
 pub const SubgraphIndex = cohesion.SubgraphIndex;
 
 test {

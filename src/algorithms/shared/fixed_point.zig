@@ -94,20 +94,27 @@ pub fn sub(a: FP, b: FP) FP {
 
 /// Multiplication: a * b in Q16.16.
 /// Uses i64 intermediate to prevent overflow.
+/// Saturates to MAX/MIN if the result exceeds i32 range.
 pub fn mul(a: FP, b: FP) FP {
     const wide: i64 = @as(i64, a) * @as(i64, b);
-    return @intCast(wide >> SHIFT);
+    const result = wide >> SHIFT;
+    if (result > std.math.maxInt(i32)) return MAX;
+    if (result < std.math.minInt(i32)) return MIN;
+    return @intCast(result);
 }
 
 /// Division: a / b in Q16.16.
 /// Uses i64 intermediate for precision.
-/// Returns MAX or MIN on division by zero (saturates).
+/// Returns MAX or MIN on division by zero or overflow (saturates).
 pub fn div(a: FP, b: FP) FP {
     if (b == 0) {
         return if (a >= 0) MAX else MIN;
     }
     const wide: i64 = @as(i64, a) << SHIFT;
-    return @intCast(@divTrunc(wide, @as(i64, b)));
+    const result = @divTrunc(wide, @as(i64, b));
+    if (result > std.math.maxInt(i32)) return MAX;
+    if (result < std.math.minInt(i32)) return MIN;
+    return @intCast(result);
 }
 
 /// Negate.
