@@ -1909,17 +1909,17 @@ pub fn exportSvgTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.
 // Version info
 // ============================================================================
 
-pub const version = "0.2.1";
+pub const version = "0.3.0";
 pub const version_major = 0;
-pub const version_minor = 2;
-pub const version_patch = 1;
+pub const version_minor = 3;
+pub const version_patch = 0;
 
 // ============================================================================
 // Tests
 // ============================================================================
 
 test "version is defined" {
-    try std.testing.expectEqualStrings("0.2.1", version);
+    try std.testing.expectEqualStrings("0.3.0", version);
 }
 
 test "core modules are accessible" {
