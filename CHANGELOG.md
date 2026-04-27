@@ -48,6 +48,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **FDG edge label placement** — Labels positioned at geometric midpoint of each edge
 
+- **FDG inter-cluster separation force** — `applySeparation()` in `forces/cohesion.zig` applies Coulomb-like repulsion between sibling subgraph centroids (same `parent_id`), preventing clusters from overlapping
+  - New `cluster_separation: FP` config param on `fruchterman_reingold.Config` (default `1.0`; `0` disables)
+  - Applied every iteration in both `compute()` (O(N²)) and `computeFast()` (Barnes-Hut)
+  - Re-exported as `forces.applySeparation` from `forces/mod.zig`
+  - `fdg_subgraph_stress` example (`examples/fdg_subgraph_stress.zig`) exercises all tiers, cyclic clusters, cohesion sweep, and large-scale (500-node) graphs
+
+- **Sugiyama subgraph overlap repair** (`sugiyama/subgraph/overlap.zig`) — new post-positioning pass that detects and fixes overlapping sibling subgraph bounding boxes by shifting node x-coordinates outward; bounded iterations prevent infinite loops
+  - `fixSubgraphOverlaps()` — iterative repair with configurable minimum gap between sibling cluster borders
+  - `refineAndCompact()` — 3-round refine+compact sweep matching the ascii-dag pipeline quality level
+  - `asciidag_stress` example added for regression coverage
+
+- **Terminal renderer: custom node paint functions** — `TerminalNodeStyle` gains a `paint_fn` field (`NodePaintContext → void`)
+  - `NodePaintContext` provides bounding box dimensions and node label to the callback
+  - `RenderPlan` respects custom node heights declared via `paint_fn` dimensions
+  - `NodePaintContext` re-exported from `root.zig`
+
 ### Changed
 
 - **`zigraph.colors` → `zigraph.color`** — Palette module renamed and expanded into `src/render/color/` sub-module.
@@ -63,6 +79,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Vertical spacing** — Sub-linear formula `2 + sqrt(max_fan)` (cap 8) produces more compact layouts
 - **SVG horizontal edges** — Dome-shaped cubic Bézier curves for near-horizontal edges
 - **FDG horizontal edge routing** — Edges routed from box edges instead of node centers
+- **Sugiyama subgraph group centroid** — `reorderByGroup()` in `subgraph/compact.zig` now uses a neighbor-weighted centroid for "bridge" subgroups (few members, many external edges): these groups are positioned where their cross-cluster edges pull them, reducing crossings; large self-contained groups continue to use their own centroid
+- **Sugiyama horizontal edge routing** — `findSafeHorizontalY()` in `routing/direct.zig` searches outward from the initial h_y to find a row that does not visually collide with any intermediate node, eliminating edge-through-node artifacts on long skip-level connections
 
 ## [0.2.1] — 2026-02-21
 
