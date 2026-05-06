@@ -81,14 +81,18 @@ std.debug.print("{s}\n", .{output});
 ### 2. SVG Renderer (Web/Vector)
 
 ```zig
-// Render directly layout IR to SVG
-const svg = try zigraph.svg.render(&ir, allocator, .{
-    .edge_palette = &zigraph.color.radix,
-    .color_edges = true,
-    .stitch_splines = true, // Smooth curves
-});
+// Default: edges colored via Radix UI palette, smooth splines on by default
+const svg = try zigraph.svg.render(&ir, allocator, .{});
 defer allocator.free(svg);
+
+// Monochrome instead of palette cycling
+const svg_mono = try zigraph.svg.render(&ir, allocator, .{
+    .edge_style_fn = &zigraph.svg.monoEdgeStyle,
+});
+defer allocator.free(svg_mono);
 ```
+
+> Per-edge color, markers, and CSS are all controlled by `edge_style_fn`. See [SVG Customization Guide](docs/svg-customization.md).
 
 ### 3. JSON Renderer (Integration)
 
@@ -242,8 +246,8 @@ try graph.putSubgraphs(&.{auth}).inside(services); // nest auth inside services
 | **JSON** | `subgraphs` array with `id`, `label`, `parent_id`, bounding box (`x`, `y`, `width`, `height`) |
 
 Both Sugiyama and FDG layouts are subgraph-aware:
-- **Sugiyama**: Contiguous level enforcement, block-based crossing reduction, subgraph padding, bounding box computation
-- **FDG**: Cohesion force pulls subgraph members toward group centroid
+- **Sugiyama**: Contiguous level enforcement, block-based crossing reduction, overlap repair, subgraph padding, bounding box computation
+- **FDG**: Cohesion force pulls subgraph members toward group centroid; inter-cluster separation force (`cluster_separation`) pushes sibling clusters apart
 
 ## Directed & Undirected Edges
 
@@ -315,13 +319,10 @@ defer ir_custom.deinit();
 
 ```zig
 // Default: labels centered at edge midpoint
-const svg = try zigraph.svg.render(&ir, allocator, .{
-    .color_edges = true,
-});
+const svg = try zigraph.svg.render(&ir, allocator, .{});
 
 // Text-on-path: labels follow the edge curve
 const svg_path = try zigraph.svg.render(&ir, allocator, .{
-    .color_edges = true,
     .labels_on_path = true,  // uses SVG <textPath>
 });
 ```
@@ -342,12 +343,21 @@ const output = try zigraph.render(&graph, allocator, .{});
 var ir = try zigraph.layout(&graph, allocator, .{ .routing = .spline });
 defer ir.deinit();
 
+// Default config — Radix palette colors, smooth splines, arrow markers
 const svg = try zigraph.svg.render(&ir, allocator, .{
-    .edge_palette = &zigraph.color.radix,  // Colored edges
-    .stitch_splines = true,                  // Smooth curves (default)
-    .labels_on_path = true,                  // Labels follow edge curves
-    .show_control_points = true,             // Debug splines
+    .labels_on_path = true,          // Labels follow edge curves
+    .show_control_points = true,     // Debug splines
 });
+
+// Custom palette via edge_style_fn (replaces the old `edge_palette` field)
+fn neonStyle(ctx: zigraph.svg.EdgeStyleContext) zigraph.svg.EdgeStyle {
+    const palette = [_][]const u8{ "#ff00ff", "#00ffff", "#ffff00" };
+    return .{
+        .stroke = palette[ctx.edge_index % palette.len],
+        .marker_end = if (ctx.directed) .arrow else .none,
+    };
+}
+const svg_neon = try zigraph.svg.render(&ir, allocator, .{ .edge_style_fn = &neonStyle });
 ```
 
 ### JSON
@@ -498,13 +508,13 @@ The SVG renderer supports full style customization via function pointers. Each g
 <summary><strong>Run individual examples</strong></summary>
 
 ```bash
-zig build run-svg-01       # Basic
-zig build run-svg-02       # Shape presets
-zig build run-svg-03       # Flowchart
-zig build run-svg-04       # Clusters
-zig build run-svg-05       # Dark theme
-zig build run-svg-06       # Interactive
-zig build run-svg-07       # Heatmap
+zig build run-svg_01_basic         # Basic
+zig build run-svg_02_presets       # Shape presets
+zig build run-svg_03_flowchart     # Flowchart
+zig build run-svg_04_clusters      # Clusters
+zig build run-svg_05_dark_theme    # Dark theme
+zig build run-svg_06_interactive   # Interactive
+zig build run-svg_07_heatmap       # Heatmap
 ```
 </details>
 
