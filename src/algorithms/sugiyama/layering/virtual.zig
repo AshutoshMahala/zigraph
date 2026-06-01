@@ -100,10 +100,10 @@ pub fn buildVirtualLevelsWithReversed(
     const level_count = max_level + 1;
 
     // Initialize empty levels
-    var levels: std.ArrayListUnmanaged(std.ArrayListUnmanaged(VNode)) = .{};
+    var levels: std.ArrayListUnmanaged(std.ArrayListUnmanaged(VNode)) = .empty;
     try levels.ensureTotalCapacity(allocator, level_count);
     for (0..level_count) |_| {
-        try levels.append(allocator, .{});
+        try levels.append(allocator, .empty);
     }
 
     // Add real nodes to their levels
@@ -145,11 +145,11 @@ pub fn extractRealNodeLevels(
     virtual_levels: *const VirtualLevels,
     allocator: Allocator,
 ) !std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) {
-    var result: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) = .{};
+    var result: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) = .empty;
     try result.ensureTotalCapacity(allocator, virtual_levels.levels.items.len);
 
     for (virtual_levels.levels.items) |level| {
-        var real_level: std.ArrayListUnmanaged(usize) = .{};
+        var real_level: std.ArrayListUnmanaged(usize) = .empty;
         for (level.items) |vnode| {
             if (vnode.realIndex()) |idx| {
                 try real_level.append(allocator, idx);
@@ -220,10 +220,10 @@ pub fn extractDummyPositions(
     allocator: Allocator,
 ) !DummyPositions {
     // Initialize empty waypoint lists for each edge
-    var waypoints: std.ArrayListUnmanaged(std.ArrayListUnmanaged(DummyPositions.Waypoint)) = .{};
+    var waypoints: std.ArrayListUnmanaged(std.ArrayListUnmanaged(DummyPositions.Waypoint)) = .empty;
     try waypoints.ensureTotalCapacity(allocator, edge_count);
     for (0..edge_count) |_| {
-        try waypoints.append(allocator, .{});
+        try waypoints.append(allocator, .empty);
     }
 
     // Collect dummy positions from each level
@@ -293,7 +293,7 @@ pub fn computeVirtualPositionsWithHints(
     real_node_x_hints: ?[]const usize,
     allocator: Allocator,
 ) !VirtualPositions {
-    var x_positions: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) = .{};
+    var x_positions: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) = .empty;
     errdefer {
         for (x_positions.items) |*level| level.deinit(allocator);
         x_positions.deinit(allocator);
@@ -310,7 +310,7 @@ pub fn computeVirtualPositionsWithHints(
 
         // First pass: place real nodes from hints, collect dummy node info
         for (virtual_levels.levels.items) |level| {
-            var level_x: std.ArrayListUnmanaged(usize) = .{};
+            var level_x: std.ArrayListUnmanaged(usize) = .empty;
             try level_x.ensureTotalCapacity(allocator, level.items.len);
 
             for (level.items) |vnode| {
@@ -414,7 +414,7 @@ pub fn computeVirtualPositionsWithHints(
         defer allocator.free(level_widths);
 
         for (virtual_levels.levels.items, 0..) |level, level_idx| {
-            var level_x: std.ArrayListUnmanaged(usize) = .{};
+            var level_x: std.ArrayListUnmanaged(usize) = .empty;
             try level_x.ensureTotalCapacity(allocator, level.items.len);
 
             var x: usize = 0;
@@ -615,7 +615,7 @@ pub fn extractDummyPositionsFromEdges(
     allocator: Allocator,
 ) !DummyPositions {
     // Initialize empty waypoint lists for each edge
-    var waypoints: std.ArrayListUnmanaged(std.ArrayListUnmanaged(DummyPositions.Waypoint)) = .{};
+    var waypoints: std.ArrayListUnmanaged(std.ArrayListUnmanaged(DummyPositions.Waypoint)) = .empty;
     errdefer {
         for (waypoints.items) |*wps| wps.deinit(allocator);
         waypoints.deinit(allocator);
@@ -623,7 +623,7 @@ pub fn extractDummyPositionsFromEdges(
 
     try waypoints.ensureTotalCapacity(allocator, g.edges.items.len);
     for (0..g.edges.items.len) |_| {
-        try waypoints.append(allocator, .{});
+        try waypoints.append(allocator, .empty);
     }
 
     // For each edge, find its dummy nodes in the virtual levels and compute positions

@@ -261,7 +261,7 @@ test "simple positioning: single level" {
     try g.addNode(2, "BB");
     try g.addNode(3, "CCC");
 
-    var level0: std.ArrayListUnmanaged(usize) = .{};
+    var level0: std.ArrayListUnmanaged(usize) = .empty;
     try level0.append(allocator, 0);
     try level0.append(allocator, 1);
     try level0.append(allocator, 2);
@@ -292,11 +292,11 @@ test "simple positioning: two levels" {
     try g.addNode(2, "Bottom");
     try g.addEdge(1, 2);
 
-    var level0: std.ArrayListUnmanaged(usize) = .{};
+    var level0: std.ArrayListUnmanaged(usize) = .empty;
     try level0.append(allocator, 0);
     defer level0.deinit(allocator);
 
-    var level1: std.ArrayListUnmanaged(usize) = .{};
+    var level1: std.ArrayListUnmanaged(usize) = .empty;
     try level1.append(allocator, 1);
     defer level1.deinit(allocator);
 
@@ -323,11 +323,11 @@ test "simple positioning: parent centres over children" {
     try g.addEdge(0, 1);
     try g.addEdge(0, 2);
 
-    var level0: std.ArrayListUnmanaged(usize) = .{};
+    var level0: std.ArrayListUnmanaged(usize) = .empty;
     defer level0.deinit(allocator);
     try level0.append(allocator, 0);
 
-    var level1: std.ArrayListUnmanaged(usize) = .{};
+    var level1: std.ArrayListUnmanaged(usize) = .empty;
     defer level1.deinit(allocator);
     try level1.append(allocator, 1);
     try level1.append(allocator, 2);
@@ -363,16 +363,16 @@ test "simple positioning: asymmetric tree differs from left-packing" {
     try g.addEdge(2, 3);
     try g.addEdge(2, 4);
 
-    var level0: std.ArrayListUnmanaged(usize) = .{};
+    var level0: std.ArrayListUnmanaged(usize) = .empty;
     defer level0.deinit(allocator);
     try level0.append(allocator, 0); // Root
 
-    var level1: std.ArrayListUnmanaged(usize) = .{};
+    var level1: std.ArrayListUnmanaged(usize) = .empty;
     defer level1.deinit(allocator);
     try level1.append(allocator, 1); // Leaf
     try level1.append(allocator, 2); // Branch
 
-    var level2: std.ArrayListUnmanaged(usize) = .{};
+    var level2: std.ArrayListUnmanaged(usize) = .empty;
     defer level2.deinit(allocator);
     try level2.append(allocator, 3); // A
     try level2.append(allocator, 4); // B

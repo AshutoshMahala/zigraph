@@ -177,10 +177,10 @@ pub fn renderGeneric(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coo
 
 /// Render any GenericLayoutIR to a Unicode string with configuration.
 pub fn renderGenericWithConfig(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator, config: Config) ![]u8 {
-    var list: std.ArrayListUnmanaged(u8) = .{};
-    errdefer list.deinit(allocator);
-    try renderGenericStreamingWithConfig(Coord, layout_ir, list.writer(allocator), allocator, config);
-    return try list.toOwnedSlice(allocator);
+    var list = std.Io.Writer.Allocating.init(allocator);
+    errdefer list.deinit();
+    try renderGenericStreamingWithConfig(Coord, layout_ir, &list.writer, allocator, config);
+    return list.toOwnedSlice();
 }
 
 /// Stream-render any GenericLayoutIR to a writer.
@@ -205,10 +205,10 @@ pub fn render(layout_ir: *const LayoutIR, allocator: Allocator) ![]u8 {
 
 /// Render a LayoutIR to a Unicode string with configuration.
 pub fn renderWithConfig(layout_ir: *const LayoutIR, allocator: Allocator, config: Config) ![]u8 {
-    var list: std.ArrayListUnmanaged(u8) = .{};
-    errdefer list.deinit(allocator);
-    try renderStreamingWithConfig(layout_ir, list.writer(allocator), allocator, config);
-    return try list.toOwnedSlice(allocator);
+    var list = std.Io.Writer.Allocating.init(allocator);
+    errdefer list.deinit();
+    try renderStreamingWithConfig(layout_ir, &list.writer, allocator, config);
+    return list.toOwnedSlice();
 }
 
 /// Serialize a Buffer2D to a writer using the `.raw` terminal format.

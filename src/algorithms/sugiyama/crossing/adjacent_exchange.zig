@@ -203,13 +203,13 @@ test "adjacent exchange - simple swap" {
 
     // Build virtual levels manually
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 });
     try vlevels.levels.items[1].append(allocator, .{ .real = 2 });
@@ -239,13 +239,13 @@ test "adjacent exchange - crossing reduction" {
     try g.addEdge(1, 2); // B -> C
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B
     try vlevels.levels.items[1].append(allocator, .{ .real = 2 }); // C

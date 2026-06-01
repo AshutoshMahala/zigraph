@@ -29,8 +29,9 @@ const FdgBenchResult = struct {
     fr_fast_mem_bytes: usize,
 };
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print("\n", .{});
     std.debug.print("╔════════════════════════════════════════════════════════════════════════════╗\n", .{});
@@ -42,7 +43,7 @@ pub fn main() !void {
 
     // Warm up
     std.debug.print("Warming up...\n\n", .{});
-    _ = try benchmarkRing(allocator, 10);
+    _ = try benchmarkRing(allocator, io, 10);
 
     // =========================================================================
     // 1. SIZE SCALING
@@ -55,7 +56,7 @@ pub fn main() !void {
     var scale_results: [sizes.len]FdgBenchResult = undefined;
 
     for (sizes, 0..) |n, i| {
-        scale_results[i] = try benchmarkRing(allocator, n);
+        scale_results[i] = try benchmarkRing(allocator, io, n);
     }
 
     printSizeTable(&scale_results);
@@ -69,12 +70,12 @@ pub fn main() !void {
 
     const topo_n: usize = 200;
     const topo_results = [_]struct { name: []const u8, result: FdgBenchResult }{
-        .{ .name = "Ring (cycle)        ", .result = try benchmarkRing(allocator, topo_n) },
-        .{ .name = "Star (hub → N)      ", .result = try benchmarkStar(allocator, topo_n) },
-        .{ .name = "Grid (√N × √N mesh) ", .result = try benchmarkGrid(allocator, topo_n) },
-        .{ .name = "Random (3 edges/node)", .result = try benchmarkRandom(allocator, topo_n, 3) },
-        .{ .name = "Complete bipartite   ", .result = try benchmarkBipartite(allocator, topo_n) },
-        .{ .name = "Disconnected clusters", .result = try benchmarkClusters(allocator, topo_n) },
+        .{ .name = "Ring (cycle)        ", .result = try benchmarkRing(allocator, io, topo_n) },
+        .{ .name = "Star (hub → N)      ", .result = try benchmarkStar(allocator, io, topo_n) },
+        .{ .name = "Grid (√N × √N mesh) ", .result = try benchmarkGrid(allocator, io, topo_n) },
+        .{ .name = "Random (3 edges/node)", .result = try benchmarkRandom(allocator, io, topo_n, 3) },
+        .{ .name = "Complete bipartite   ", .result = try benchmarkBipartite(allocator, io, topo_n) },
+        .{ .name = "Disconnected clusters", .result = try benchmarkClusters(allocator, io, topo_n) },
     };
 
     std.debug.print("┌───────────────────────┬────────┬──────────────┬──────────────┬───────┬───────┐\n", .{});
@@ -106,8 +107,7 @@ pub fn main() !void {
     std.debug.print("├──────────┼──────────────┼──────────────┼──────────────┼──────────────┤\n", .{});
 
     for (sizes) |n| {
-        // We already have these results from section 1
-        const r = try benchmarkRing(allocator, n);
+        const r = try benchmarkRing(allocator, io, n);
         const fr_per = if (r.fr_iters > 0) r.fr_us / @as(u64, r.fr_iters) else 0;
         const ff_per = if (r.fr_fast_iters > 0) r.fr_fast_us / @as(u64, r.fr_fast_iters) else 0;
 
@@ -130,7 +130,7 @@ pub fn main() !void {
     std.debug.print("├──────────┼──────────────┼──────────────┼──────────────┼──────────────┤\n", .{});
 
     for (sizes) |n| {
-        const r = try benchmarkRingWithMemory(allocator, n);
+        const r = try benchmarkRingWithMemory(allocator, io, n);
         const fr_per_n = if (n > 0) r.fr_mem_bytes / n else 0;
         const ff_per_n = if (n > 0) r.fr_fast_mem_bytes / n else 0;
 
@@ -153,7 +153,7 @@ pub fn main() !void {
     std.debug.print("├──────────┼──────────────┼──────────────┼────────────┤\n", .{});
 
     for (sizes) |n| {
-        const r = try benchmarkRing(allocator, n);
+        const r = try benchmarkRing(allocator, io, n);
         const speedup_10x = if (r.fr_fast_us > 0) (r.fr_us * 10) / r.fr_fast_us else 0;
 
         std.debug.print("│ {d:>8} │ {d:>12} │ {d:>12} │ {d:>7}.{d}×  │\n", .{
@@ -341,34 +341,34 @@ fn buildClusters(alloc: std.mem.Allocator, n: usize) !zigraph.Graph {
 
 const bench_config: fr.Config = .{ .seed = 42 };
 
-fn benchmarkRing(allocator: std.mem.Allocator, n: usize) !FdgBenchResult {
-    return benchmarkWithTopology(allocator, n, .ring);
+fn benchmarkRing(allocator: std.mem.Allocator, io: std.Io, n: usize) !FdgBenchResult {
+    return benchmarkWithTopology(allocator, io, n, .ring);
 }
 
-fn benchmarkStar(allocator: std.mem.Allocator, n: usize) !FdgBenchResult {
-    return benchmarkWithTopology(allocator, n, .star);
+fn benchmarkStar(allocator: std.mem.Allocator, io: std.Io, n: usize) !FdgBenchResult {
+    return benchmarkWithTopology(allocator, io, n, .star);
 }
 
-fn benchmarkGrid(allocator: std.mem.Allocator, n: usize) !FdgBenchResult {
-    return benchmarkWithTopology(allocator, n, .grid);
+fn benchmarkGrid(allocator: std.mem.Allocator, io: std.Io, n: usize) !FdgBenchResult {
+    return benchmarkWithTopology(allocator, io, n, .grid);
 }
 
-fn benchmarkBipartite(allocator: std.mem.Allocator, n: usize) !FdgBenchResult {
-    return benchmarkWithTopology(allocator, n, .bipartite);
+fn benchmarkBipartite(allocator: std.mem.Allocator, io: std.Io, n: usize) !FdgBenchResult {
+    return benchmarkWithTopology(allocator, io, n, .bipartite);
 }
 
-fn benchmarkClusters(allocator: std.mem.Allocator, n: usize) !FdgBenchResult {
-    return benchmarkWithTopology(allocator, n, .clusters);
+fn benchmarkClusters(allocator: std.mem.Allocator, io: std.Io, n: usize) !FdgBenchResult {
+    return benchmarkWithTopology(allocator, io, n, .clusters);
 }
 
-fn benchmarkRandom(allocator: std.mem.Allocator, n: usize, epn: usize) !FdgBenchResult {
+fn benchmarkRandom(allocator: std.mem.Allocator, io: std.Io, n: usize, epn: usize) !FdgBenchResult {
     _ = epn;
-    return benchmarkWithTopology(allocator, n, .random);
+    return benchmarkWithTopology(allocator, io, n, .random);
 }
 
 const Topology = enum { ring, star, grid, random, bipartite, clusters };
 
-fn benchmarkWithTopology(allocator: std.mem.Allocator, n: usize, topo: Topology) !FdgBenchResult {
+fn benchmarkWithTopology(allocator: std.mem.Allocator, io: std.Io, n: usize, topo: Topology) !FdgBenchResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -385,24 +385,24 @@ fn benchmarkWithTopology(allocator: std.mem.Allocator, n: usize, topo: Topology)
     const edge_count = graph.edges.items.len;
 
     // --- FR standard ---
-    const fr_start = std.time.nanoTimestamp();
+    const fr_start = std.Io.Clock.now(.awake, io);
     var r1 = try fr.compute(&graph, alloc, bench_config);
-    const fr_end = std.time.nanoTimestamp();
+    const fr_end = std.Io.Clock.now(.awake, io);
     const fr_iters = r1.iterations;
     r1.deinit();
 
     // --- FR fast (Barnes-Hut) ---
-    const ff_start = std.time.nanoTimestamp();
+    const ff_start = std.Io.Clock.now(.awake, io);
     var r2 = try fr.computeFast(&graph, alloc, bench_config);
-    const ff_end = std.time.nanoTimestamp();
+    const ff_end = std.Io.Clock.now(.awake, io);
     const ff_iters = r2.iterations;
     r2.deinit();
 
     return .{
         .nodes = n,
         .edges = edge_count,
-        .fr_us = @intCast(@divFloor(fr_end - fr_start, 1000)),
-        .fr_fast_us = @intCast(@divFloor(ff_end - ff_start, 1000)),
+        .fr_us = @intCast(@divFloor(fr_end.nanoseconds - fr_start.nanoseconds, 1000)),
+        .fr_fast_us = @intCast(@divFloor(ff_end.nanoseconds - ff_start.nanoseconds, 1000)),
         .fr_iters = fr_iters,
         .fr_fast_iters = ff_iters,
         .fr_mem_bytes = 0,
@@ -411,7 +411,7 @@ fn benchmarkWithTopology(allocator: std.mem.Allocator, n: usize, topo: Topology)
 }
 
 /// Benchmark with memory tracking using separate arenas for FR and FR-Fast
-fn benchmarkRingWithMemory(allocator: std.mem.Allocator, n: usize) !FdgBenchResult {
+fn benchmarkRingWithMemory(allocator: std.mem.Allocator, io: std.Io, n: usize) !FdgBenchResult {
     // --- Build graph in its own arena ---
     var graph_arena = std.heap.ArenaAllocator.init(allocator);
     defer graph_arena.deinit();
@@ -429,12 +429,12 @@ fn benchmarkRingWithMemory(allocator: std.mem.Allocator, n: usize) !FdgBenchResu
         break :blk peak;
     };
 
-    const fr_start = std.time.nanoTimestamp();
+    const fr_start = std.Io.Clock.now(.awake, io);
     var r1 = blk: {
         var tmp_arena = std.heap.ArenaAllocator.init(allocator);
         break :blk .{ try fr.compute(&graph, tmp_arena.allocator(), bench_config), tmp_arena };
     };
-    const fr_end = std.time.nanoTimestamp();
+    const fr_end = std.Io.Clock.now(.awake, io);
     const fr_iters = r1[0].iterations;
     r1[0].deinit();
     r1[1].deinit();
@@ -450,12 +450,12 @@ fn benchmarkRingWithMemory(allocator: std.mem.Allocator, n: usize) !FdgBenchResu
         break :blk peak;
     };
 
-    const ff_start = std.time.nanoTimestamp();
+    const ff_start = std.Io.Clock.now(.awake, io);
     var r2 = blk: {
         var tmp_arena = std.heap.ArenaAllocator.init(allocator);
         break :blk .{ try fr.computeFast(&graph, tmp_arena.allocator(), bench_config), tmp_arena };
     };
-    const ff_end = std.time.nanoTimestamp();
+    const ff_end = std.Io.Clock.now(.awake, io);
     const ff_iters = r2[0].iterations;
     r2[0].deinit();
     r2[1].deinit();
@@ -463,8 +463,8 @@ fn benchmarkRingWithMemory(allocator: std.mem.Allocator, n: usize) !FdgBenchResu
     return .{
         .nodes = n,
         .edges = edge_count,
-        .fr_us = @intCast(@divFloor(fr_end - fr_start, 1000)),
-        .fr_fast_us = @intCast(@divFloor(ff_end - ff_start, 1000)),
+        .fr_us = @intCast(@divFloor(fr_end.nanoseconds - fr_start.nanoseconds, 1000)),
+        .fr_fast_us = @intCast(@divFloor(ff_end.nanoseconds - ff_start.nanoseconds, 1000)),
         .fr_iters = fr_iters,
         .fr_fast_iters = ff_iters,
         .fr_mem_bytes = fr_mem,

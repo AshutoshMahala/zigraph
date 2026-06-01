@@ -6,10 +6,9 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print("\n=== zigraph SVG Export Example ===\n\n", .{});
 
@@ -45,9 +44,11 @@ pub fn main() !void {
 
     // Write to file
     {
-        const file = try std.fs.cwd().createFile("graph_direct.svg", .{});
-        defer file.close();
-        try file.writeAll(svg_direct);
+        var file = try std.Io.Dir.cwd().createFile(io, "graph_direct.svg", .{});
+        defer file.close(io);
+        var wbuf1: [4096]u8 = undefined;
+        var fw1 = std.Io.File.writer(file, io, &wbuf1);
+        try fw1.interface.writeAll(svg_direct);
         std.debug.print("Written to: graph_direct.svg\n\n", .{});
     }
 
@@ -66,9 +67,11 @@ pub fn main() !void {
     std.debug.print("Generated SVG with spline routing ({d} bytes)\n", .{svg_spline.len});
 
     {
-        const file = try std.fs.cwd().createFile("graph_spline.svg", .{});
-        defer file.close();
-        try file.writeAll(svg_spline);
+        var file = try std.Io.Dir.cwd().createFile(io, "graph_spline.svg", .{});
+        defer file.close(io);
+        var wbuf2: [4096]u8 = undefined;
+        var fw2 = std.Io.File.writer(file, io, &wbuf2);
+        try fw2.interface.writeAll(svg_spline);
         std.debug.print("Written to: graph_spline.svg\n\n", .{});
     }
 
@@ -87,9 +90,11 @@ pub fn main() !void {
     std.debug.print("Generated debug SVG ({d} bytes)\n", .{svg_debug.len});
 
     {
-        const file = try std.fs.cwd().createFile("graph_spline_debug.svg", .{});
-        defer file.close();
-        try file.writeAll(svg_debug);
+        var file = try std.Io.Dir.cwd().createFile(io, "graph_spline_debug.svg", .{});
+        defer file.close(io);
+        var wbuf3: [4096]u8 = undefined;
+        var fw3 = std.Io.File.writer(file, io, &wbuf3);
+        try fw3.interface.writeAll(svg_debug);
         std.debug.print("Written to: graph_spline_debug.svg\n\n", .{});
     }
 

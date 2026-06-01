@@ -22,8 +22,9 @@ const BenchmarkResult = struct {
     memory_bytes: usize = 0,
 };
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print("\n", .{});
     std.debug.print("╔════════════════════════════════════════════════════════════════════════════╗\n", .{});
@@ -34,7 +35,7 @@ pub fn main() !void {
 
     // Warm up
     std.debug.print("Warming up...\n\n", .{});
-    _ = try benchmarkGraph(allocator, 10, 20, .{});
+    _ = try benchmarkGraph(allocator, io, 10, 20, .{});
 
     // =========================================================================
     // 1. SIZE SCALING
@@ -43,7 +44,7 @@ pub fn main() !void {
     std.debug.print("  1. SIZE SCALING (layered DAG, ~2 edges per node)\n", .{});
     std.debug.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n", .{});
 
-    var results: std.ArrayListUnmanaged(BenchmarkResult) = .{};
+    var results: std.ArrayListUnmanaged(BenchmarkResult) = .empty;
     defer results.deinit(allocator);
 
     const sizes = [_]struct { nodes: usize, edges_per_node: usize }{
@@ -61,7 +62,7 @@ pub fn main() !void {
 
     for (sizes) |size| {
         const edge_count = size.nodes * size.edges_per_node;
-        const result = try benchmarkGraph(allocator, size.nodes, edge_count, .{});
+        const result = try benchmarkGraph(allocator, io, size.nodes, edge_count, .{});
         try results.append(allocator, result);
     }
 
@@ -90,11 +91,11 @@ pub fn main() !void {
     std.debug.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n", .{});
 
     const topology_results = [_]struct { name: []const u8, result: BenchmarkResult }{
-        .{ .name = "Linear chain       ", .result = try benchmarkLinear(allocator, 100) },
-        .{ .name = "Binary tree        ", .result = try benchmarkBinaryTree(allocator, 100) },
-        .{ .name = "Wide fan (1→99)    ", .result = try benchmarkWide(allocator, 100) },
-        .{ .name = "Diamond lattice    ", .result = try benchmarkDiamond(allocator, 100) },
-        .{ .name = "Random DAG         ", .result = try benchmarkRandomDAG(allocator, 100, 200) },
+        .{ .name = "Linear chain       ", .result = try benchmarkLinear(allocator, io, 100) },
+        .{ .name = "Binary tree        ", .result = try benchmarkBinaryTree(allocator, io, 100) },
+        .{ .name = "Wide fan (1→99)    ", .result = try benchmarkWide(allocator, io, 100) },
+        .{ .name = "Diamond lattice    ", .result = try benchmarkDiamond(allocator, io, 100) },
+        .{ .name = "Random DAG         ", .result = try benchmarkRandomDAG(allocator, io, 100, 200) },
     };
 
     std.debug.print("┌─────────────────────┬──────────┬────────────────┬────────────────┐\n", .{});
@@ -119,7 +120,7 @@ pub fn main() !void {
     std.debug.print("  3. POSITIONING ALGORITHM (100-node layered DAG)\n", .{});
     std.debug.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n", .{});
 
-    const positioning_results = try benchmarkPositioning(allocator, 100);
+    const positioning_results = try benchmarkPositioning(allocator, io, 100);
 
     std.debug.print("┌─────────────────────┬────────────────┐\n", .{});
     std.debug.print("│  Algorithm          │   Layout (µs)  │\n", .{});
@@ -135,7 +136,7 @@ pub fn main() !void {
     std.debug.print("  4. CROSSING REDUCTION (100-node layered DAG)\n", .{});
     std.debug.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n", .{});
 
-    const crossing_results = try benchmarkCrossingReducers(allocator, 100);
+    const crossing_results = try benchmarkCrossingReducers(allocator, io, 100);
 
     std.debug.print("┌─────────────────────┬────────────────┬─────────────────────────────────────┐\n", .{});
     std.debug.print("│  Preset             │   Layout (µs)  │  Description                        │\n", .{});
@@ -153,7 +154,7 @@ pub fn main() !void {
     std.debug.print("  5. EDGE ROUTING (100-node layered DAG)\n", .{});
     std.debug.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n", .{});
 
-    const routing_results = try benchmarkRouting(allocator, 100);
+    const routing_results = try benchmarkRouting(allocator, io, 100);
 
     std.debug.print("┌─────────────────────┬────────────────┬─────────────────────────────────────┐\n", .{});
     std.debug.print("│  Routing            │   Layout (µs)  │  Description                        │\n", .{});
@@ -169,7 +170,7 @@ pub fn main() !void {
     std.debug.print("  6. RENDERER COMPARISON (100-node layered DAG, pre-computed layout)\n", .{});
     std.debug.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n", .{});
 
-    const renderer_results = try benchmarkRenderers(allocator, 100);
+    const renderer_results = try benchmarkRenderers(allocator, io, 100);
 
     std.debug.print("┌─────────────────────┬────────────────┬────────────────┐\n", .{});
     std.debug.print("│  Renderer           │   Render (µs)  │  Output (bytes)│\n", .{});
@@ -187,10 +188,10 @@ pub fn main() !void {
     std.debug.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n", .{});
 
     const stress_results = [_]struct { name: []const u8, result: BenchmarkResult }{
-        .{ .name = "Diamond mesh (20K)      ", .result = try benchmarkDiamondMesh(allocator, 20000) },
-        .{ .name = "Wide fan (20K)          ", .result = try benchmarkWideFan(allocator, 20000) },
-        .{ .name = "Neural net (5×100 = 500)", .result = try benchmarkNeuralNet(allocator, 5, 100) },
-        .{ .name = "Deep chain (1000)       ", .result = try benchmarkLinear(allocator, 1000) },
+        .{ .name = "Diamond mesh (20K)      ", .result = try benchmarkDiamondMesh(allocator, io, 20000) },
+        .{ .name = "Wide fan (20K)          ", .result = try benchmarkWideFan(allocator, io, 20000) },
+        .{ .name = "Neural net (5x100 = 500)", .result = try benchmarkNeuralNet(allocator, io, 5, 100) },
+        .{ .name = "Deep chain (1000)       ", .result = try benchmarkLinear(allocator, io, 1000) },
     };
 
     std.debug.print("┌───────────────────────────┬──────────┬─────────────┬────────────────┬────────────────┐\n", .{});
@@ -240,7 +241,7 @@ const BenchmarkConfig = struct {
     routing: zigraph.Routing = .direct,
 };
 
-fn benchmarkGraph(allocator: std.mem.Allocator, node_count: usize, edge_count: usize, config: BenchmarkConfig) !BenchmarkResult {
+fn benchmarkGraph(allocator: std.mem.Allocator, io: std.Io, node_count: usize, edge_count: usize, config: BenchmarkConfig) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -292,27 +293,27 @@ fn benchmarkGraph(allocator: std.mem.Allocator, node_count: usize, edge_count: u
         }
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{
         .crossing_reducers = config.crossing_reducers,
         .positioning = config.positioning,
         .routing = config.routing,
     });
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
-fn benchmarkLinear(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResult {
+fn benchmarkLinear(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -329,23 +330,23 @@ fn benchmarkLinear(allocator: std.mem.Allocator, node_count: usize) !BenchmarkRe
         try graph.addEdge(i, i + 1);
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{});
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
-fn benchmarkBinaryTree(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResult {
+fn benchmarkBinaryTree(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -365,23 +366,23 @@ fn benchmarkBinaryTree(allocator: std.mem.Allocator, node_count: usize) !Benchma
         if (right <= node_count) try graph.addEdge(i, right);
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{});
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
-fn benchmarkWide(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResult {
+fn benchmarkWide(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -398,23 +399,23 @@ fn benchmarkWide(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResu
         try graph.addEdge(1, i);
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{});
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
-fn benchmarkDiamond(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResult {
+fn benchmarkDiamond(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -433,23 +434,23 @@ fn benchmarkDiamond(allocator: std.mem.Allocator, node_count: usize) !BenchmarkR
         if (i + layer_size + 1 <= node_count) try graph.addEdge(i, i + layer_size + 1);
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{});
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
-fn benchmarkRandomDAG(allocator: std.mem.Allocator, node_count: usize, edge_count: usize) !BenchmarkResult {
+fn benchmarkRandomDAG(allocator: std.mem.Allocator, io: std.Io, node_count: usize, edge_count: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -474,19 +475,19 @@ fn benchmarkRandomDAG(allocator: std.mem.Allocator, node_count: usize, edge_coun
         edges_added += 1;
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{});
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
@@ -495,7 +496,7 @@ const PositioningResults = struct {
     brandes_kopf_us: u64,
 };
 
-fn benchmarkPositioning(allocator: std.mem.Allocator, node_count: usize) !PositioningResults {
+fn benchmarkPositioning(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !PositioningResults {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -524,20 +525,20 @@ fn benchmarkPositioning(allocator: std.mem.Allocator, node_count: usize) !Positi
     }
 
     // Benchmark barycentric
-    const simple_start = std.time.nanoTimestamp();
+    const simple_start = std.Io.Clock.now(.awake, io);
     var ir1 = try zigraph.layout(&graph, alloc, .{ .positioning = .barycentric });
     _ = &ir1;
-    const simple_end = std.time.nanoTimestamp();
+    const simple_end = std.Io.Clock.now(.awake, io);
 
     // Benchmark brandes_kopf
-    const bk_start = std.time.nanoTimestamp();
+    const bk_start = std.Io.Clock.now(.awake, io);
     var ir2 = try zigraph.layout(&graph, alloc, .{ .positioning = .brandes_kopf });
     _ = &ir2;
-    const bk_end = std.time.nanoTimestamp();
+    const bk_end = std.Io.Clock.now(.awake, io);
 
     return .{
-        .barycentric_us = @as(u64, @intCast(@divFloor(simple_end - simple_start, 1000))),
-        .brandes_kopf_us = @as(u64, @intCast(@divFloor(bk_end - bk_start, 1000))),
+        .barycentric_us = @as(u64, @intCast(@divFloor(simple_end.nanoseconds - simple_start.nanoseconds, 1000))),
+        .brandes_kopf_us = @as(u64, @intCast(@divFloor(bk_end.nanoseconds - bk_start.nanoseconds, 1000))),
     };
 }
 
@@ -548,7 +549,7 @@ const CrossingResults = struct {
     quality_us: u64,
 };
 
-fn benchmarkCrossingReducers(allocator: std.mem.Allocator, node_count: usize) !CrossingResults {
+fn benchmarkCrossingReducers(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !CrossingResults {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -578,34 +579,34 @@ fn benchmarkCrossingReducers(allocator: std.mem.Allocator, node_count: usize) !C
     }
 
     // None
-    const none_start = std.time.nanoTimestamp();
+    const none_start = std.Io.Clock.now(.awake, io);
     var ir1 = try zigraph.layout(&graph, alloc, .{ .crossing_reducers = &zigraph.crossing.none });
     _ = &ir1;
-    const none_end = std.time.nanoTimestamp();
+    const none_end = std.Io.Clock.now(.awake, io);
 
     // Fast
-    const fast_start = std.time.nanoTimestamp();
+    const fast_start = std.Io.Clock.now(.awake, io);
     var ir2 = try zigraph.layout(&graph, alloc, .{ .crossing_reducers = &zigraph.crossing.fast });
     _ = &ir2;
-    const fast_end = std.time.nanoTimestamp();
+    const fast_end = std.Io.Clock.now(.awake, io);
 
     // Balanced
-    const balanced_start = std.time.nanoTimestamp();
+    const balanced_start = std.Io.Clock.now(.awake, io);
     var ir3 = try zigraph.layout(&graph, alloc, .{ .crossing_reducers = &zigraph.crossing.balanced });
     _ = &ir3;
-    const balanced_end = std.time.nanoTimestamp();
+    const balanced_end = std.Io.Clock.now(.awake, io);
 
     // Quality
-    const quality_start = std.time.nanoTimestamp();
+    const quality_start = std.Io.Clock.now(.awake, io);
     var ir4 = try zigraph.layout(&graph, alloc, .{ .crossing_reducers = &zigraph.crossing.quality });
     _ = &ir4;
-    const quality_end = std.time.nanoTimestamp();
+    const quality_end = std.Io.Clock.now(.awake, io);
 
     return .{
-        .none_us = @as(u64, @intCast(@divFloor(none_end - none_start, 1000))),
-        .fast_us = @as(u64, @intCast(@divFloor(fast_end - fast_start, 1000))),
-        .balanced_us = @as(u64, @intCast(@divFloor(balanced_end - balanced_start, 1000))),
-        .quality_us = @as(u64, @intCast(@divFloor(quality_end - quality_start, 1000))),
+        .none_us = @as(u64, @intCast(@divFloor(none_end.nanoseconds - none_start.nanoseconds, 1000))),
+        .fast_us = @as(u64, @intCast(@divFloor(fast_end.nanoseconds - fast_start.nanoseconds, 1000))),
+        .balanced_us = @as(u64, @intCast(@divFloor(balanced_end.nanoseconds - balanced_start.nanoseconds, 1000))),
+        .quality_us = @as(u64, @intCast(@divFloor(quality_end.nanoseconds - quality_start.nanoseconds, 1000))),
     };
 }
 
@@ -614,7 +615,7 @@ const RoutingResults = struct {
     spline_us: u64,
 };
 
-fn benchmarkRouting(allocator: std.mem.Allocator, node_count: usize) !RoutingResults {
+fn benchmarkRouting(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !RoutingResults {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -643,20 +644,20 @@ fn benchmarkRouting(allocator: std.mem.Allocator, node_count: usize) !RoutingRes
     }
 
     // Direct
-    const direct_start = std.time.nanoTimestamp();
+    const direct_start = std.Io.Clock.now(.awake, io);
     var ir1 = try zigraph.layout(&graph, alloc, .{ .routing = .direct });
     _ = &ir1;
-    const direct_end = std.time.nanoTimestamp();
+    const direct_end = std.Io.Clock.now(.awake, io);
 
     // Spline
-    const spline_start = std.time.nanoTimestamp();
+    const spline_start = std.Io.Clock.now(.awake, io);
     var ir2 = try zigraph.layout(&graph, alloc, .{ .routing = .spline });
     _ = &ir2;
-    const spline_end = std.time.nanoTimestamp();
+    const spline_end = std.Io.Clock.now(.awake, io);
 
     return .{
-        .direct_us = @as(u64, @intCast(@divFloor(direct_end - direct_start, 1000))),
-        .spline_us = @as(u64, @intCast(@divFloor(spline_end - spline_start, 1000))),
+        .direct_us = @as(u64, @intCast(@divFloor(direct_end.nanoseconds - direct_start.nanoseconds, 1000))),
+        .spline_us = @as(u64, @intCast(@divFloor(spline_end.nanoseconds - spline_start.nanoseconds, 1000))),
     };
 }
 
@@ -669,7 +670,7 @@ const RendererResults = struct {
     json_bytes: usize,
 };
 
-fn benchmarkRenderers(allocator: std.mem.Allocator, node_count: usize) !RendererResults {
+fn benchmarkRenderers(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !RendererResults {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -700,31 +701,31 @@ fn benchmarkRenderers(allocator: std.mem.Allocator, node_count: usize) !Renderer
     var ir = try zigraph.layout(&graph, alloc, .{});
 
     // Unicode
-    const unicode_start = std.time.nanoTimestamp();
+    const unicode_start = std.Io.Clock.now(.awake, io);
     const unicode_out = try zigraph.terminal.render(&ir, alloc);
-    const unicode_end = std.time.nanoTimestamp();
+    const unicode_end = std.Io.Clock.now(.awake, io);
 
     // SVG
-    const svg_start = std.time.nanoTimestamp();
+    const svg_start = std.Io.Clock.now(.awake, io);
     const svg_out = try zigraph.svg.render(&ir, alloc, .{});
-    const svg_end = std.time.nanoTimestamp();
+    const svg_end = std.Io.Clock.now(.awake, io);
 
     // JSON
-    const json_start = std.time.nanoTimestamp();
+    const json_start = std.Io.Clock.now(.awake, io);
     const json_out = try zigraph.json.render(&ir, alloc);
-    const json_end = std.time.nanoTimestamp();
+    const json_end = std.Io.Clock.now(.awake, io);
 
     return .{
-        .unicode_us = @as(u64, @intCast(@divFloor(unicode_end - unicode_start, 1000))),
+        .unicode_us = @as(u64, @intCast(@divFloor(unicode_end.nanoseconds - unicode_start.nanoseconds, 1000))),
         .unicode_bytes = unicode_out.len,
-        .svg_us = @as(u64, @intCast(@divFloor(svg_end - svg_start, 1000))),
+        .svg_us = @as(u64, @intCast(@divFloor(svg_end.nanoseconds - svg_start.nanoseconds, 1000))),
         .svg_bytes = svg_out.len,
-        .json_us = @as(u64, @intCast(@divFloor(json_end - json_start, 1000))),
+        .json_us = @as(u64, @intCast(@divFloor(json_end.nanoseconds - json_start.nanoseconds, 1000))),
         .json_bytes = json_out.len,
     };
 }
 
-fn benchmarkDiamondMesh(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResult {
+fn benchmarkDiamondMesh(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -755,23 +756,23 @@ fn benchmarkDiamondMesh(allocator: std.mem.Allocator, node_count: usize) !Benchm
         }
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{ .crossing_reducers = &zigraph.crossing.fast });
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
-fn benchmarkWideFan(allocator: std.mem.Allocator, node_count: usize) !BenchmarkResult {
+fn benchmarkWideFan(allocator: std.mem.Allocator, io: std.Io, node_count: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -788,23 +789,23 @@ fn benchmarkWideFan(allocator: std.mem.Allocator, node_count: usize) !BenchmarkR
         try graph.addEdge(1, i);
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{ .crossing_reducers = &zigraph.crossing.fast });
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }
 
-fn benchmarkNeuralNet(allocator: std.mem.Allocator, num_layers: usize, nodes_per_layer: usize) !BenchmarkResult {
+fn benchmarkNeuralNet(allocator: std.mem.Allocator, io: std.Io, num_layers: usize, nodes_per_layer: usize) !BenchmarkResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -833,18 +834,18 @@ fn benchmarkNeuralNet(allocator: std.mem.Allocator, num_layers: usize, nodes_per
         }
     }
 
-    const layout_start = std.time.nanoTimestamp();
+    const layout_start = std.Io.Clock.now(.awake, io);
     var ir = try zigraph.layout(&graph, alloc, .{ .crossing_reducers = &zigraph.crossing.fast });
-    const layout_end = std.time.nanoTimestamp();
+    const layout_end = std.Io.Clock.now(.awake, io);
 
-    const render_start = std.time.nanoTimestamp();
+    const render_start = std.Io.Clock.now(.awake, io);
     _ = try zigraph.terminal.render(&ir, alloc);
-    const render_end = std.time.nanoTimestamp();
+    const render_end = std.Io.Clock.now(.awake, io);
 
     return .{
         .nodes = graph.nodeCount(),
         .edges = graph.edges.items.len,
-        .layout_us = @as(u64, @intCast(@divFloor(layout_end - layout_start, 1000))),
-        .render_us = @as(u64, @intCast(@divFloor(render_end - render_start, 1000))),
+        .layout_us = @as(u64, @intCast(@divFloor(layout_end.nanoseconds - layout_start.nanoseconds, 1000))),
+        .render_us = @as(u64, @intCast(@divFloor(render_end.nanoseconds - render_start.nanoseconds, 1000))),
     };
 }

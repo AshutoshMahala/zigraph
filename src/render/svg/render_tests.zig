@@ -775,10 +775,10 @@ test "helpers: xmlEscape returns original when no escaping needed" {
 
 test "helpers: writeXmlEscaped streams escaped output" {
     var buf: [256]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
+    var fbs_writer = std.Io.Writer.fixed(&buf);
+    const writer = &fbs_writer;
     try helpers.writeXmlEscaped(writer, "<script>alert('xss')</script>");
-    const written = fbs.getWritten();
+    const written = fbs_writer.buffered();
     try std.testing.expectEqualStrings("&lt;script&gt;alert(&apos;xss&apos;)&lt;/script&gt;", written);
 }
 

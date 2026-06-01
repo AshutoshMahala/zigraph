@@ -55,7 +55,7 @@ pub fn refineAndCompact(
         if (ni < g.parents.items.len) deg += g.parents.items[ni].items.len;
         max_degree = @max(max_degree, deg);
     }
-    var median_buf = std.ArrayListUnmanaged(usize){};
+    var median_buf = std.ArrayListUnmanaged(usize).empty;
     defer median_buf.deinit(allocator);
     try median_buf.ensureTotalCapacity(allocator, max_degree);
 
@@ -82,7 +82,7 @@ fn buildLevelLists(
     allocator: Allocator,
 ) ![]std.ArrayListUnmanaged(usize) {
     const lists = try allocator.alloc(std.ArrayListUnmanaged(usize), ml + 1);
-    for (lists) |*ln| ln.* = .{};
+    for (lists) |*ln| ln.* = .empty;
 
     for (0..node_count) |ni| {
         const lvl = node_level[ni];
@@ -213,9 +213,9 @@ fn groupSiblingSubgraphs(
     //    Large self-contained groups keep their OWN centroid.
 
     // 3a. Own centroid.
-    var own_sum = std.AutoHashMapUnmanaged(usize, u64){};
+    var own_sum = std.AutoHashMapUnmanaged(usize, u64).empty;
     defer own_sum.deinit(allocator);
-    var own_cnt = std.AutoHashMapUnmanaged(usize, u64){};
+    var own_cnt = std.AutoHashMapUnmanaged(usize, u64).empty;
     defer own_cnt.deinit(allocator);
     for (0..node_count) |ni| {
         const grp = node_group[ni];
@@ -229,9 +229,9 @@ fn groupSiblingSubgraphs(
     }
 
     // 3b. Neighbor centroid: sum center-x of external neighbors per group.
-    var nbr_sum = std.AutoHashMapUnmanaged(usize, u64){};
+    var nbr_sum = std.AutoHashMapUnmanaged(usize, u64).empty;
     defer nbr_sum.deinit(allocator);
-    var nbr_cnt = std.AutoHashMapUnmanaged(usize, u64){};
+    var nbr_cnt = std.AutoHashMapUnmanaged(usize, u64).empty;
     defer nbr_cnt.deinit(allocator);
     for (0..node_count) |ni| {
         const grp = node_group[ni];
@@ -269,7 +269,7 @@ fn groupSiblingSubgraphs(
 
     // 3c. Final centroid: use neighbor centroid for small bridge groups
     //     (few members with external connections), own for large groups.
-    var grp_centroid = std.AutoHashMapUnmanaged(usize, u64){};
+    var grp_centroid = std.AutoHashMapUnmanaged(usize, u64).empty;
     defer grp_centroid.deinit(allocator);
     {
         var it = own_sum.iterator();
@@ -297,7 +297,7 @@ fn groupSiblingSubgraphs(
         centroid: u64,
         orig_pos: usize,
     };
-    var sort_buf = std.ArrayListUnmanaged(SortEntry){};
+    var sort_buf = std.ArrayListUnmanaged(SortEntry).empty;
     defer sort_buf.deinit(allocator);
 
     for (level_lists) |*ln| {
@@ -540,11 +540,11 @@ fn compactSubgraphs(
     resortLevels(level_lists, node_x, node_to_pos);
 
     // Scratch for members and distances
-    var members = std.ArrayListUnmanaged(usize){};
+    var members = std.ArrayListUnmanaged(usize).empty;
     defer members.deinit(allocator);
 
     const DistEntry = struct { node_idx: usize, dist: usize };
-    var by_distance = std.ArrayListUnmanaged(DistEntry){};
+    var by_distance = std.ArrayListUnmanaged(DistEntry).empty;
     defer by_distance.deinit(allocator);
 
     _ = ml;

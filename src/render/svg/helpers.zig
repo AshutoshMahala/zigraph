@@ -125,7 +125,7 @@ test "xmlEscape returns original for safe strings" {
 
 test "writeXmlEscaped streams correctly" {
     var buf: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    try writeXmlEscaped(stream.writer(), "a\"b'c");
-    try testing.expectEqualStrings("a&quot;b&apos;c", stream.getWritten());
+    var stream_writer = std.Io.Writer.fixed(&buf);
+    try writeXmlEscaped(&stream_writer, "a\"b'c");
+    try testing.expectEqualStrings("a&quot;b&apos;c", stream_writer.buffered());
 }

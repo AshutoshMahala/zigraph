@@ -20,12 +20,14 @@ const zigraph = @import("zigraph");
 const Color = zigraph.color.Color;
 const ColorMap = zigraph.color.ColorMap;
 
-fn writeSvg(name: []const u8, svg: []const u8) !void {
+fn writeSvg(io: std.Io, name: []const u8, svg: []const u8) !void {
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "assets/gallery/{s}.svg", .{name}) catch return;
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(svg);
+    var file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var wbuf: [4096]u8 = undefined;
+    var fw = std.Io.File.writer(file, io, &wbuf);
+    try fw.interface.writeAll(svg);
     std.debug.print("  \xe2\x9c\x93 {s} ({d} bytes)\n", .{ path, svg.len });
 }
 
@@ -289,8 +291,9 @@ fn buildLegend(allocator: std.mem.Allocator) ![]const u8 {
     const n_stops = 32;
     const turbo_lut = comptime ColorMap.turbo.quantize(n_stops);
 
-    var buf = std.ArrayList(u8).init(allocator);
-    const w = buf.writer();
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    errdefer buf.deinit();
+    const w = &buf.writer;
 
     // Legend dimensions
     const bar_w: usize = 16;
@@ -350,10 +353,9 @@ fn buildLegend(allocator: std.mem.Allocator) ![]const u8 {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print("\n\xe2\x94\x80\xe2\x94\x80 07: Stress Heatmap (ColorMap.turbo) \xe2\x94\x80\xe2\x94\x80\n\n", .{});
 
@@ -434,7 +436,7 @@ pub fn main() !void {
     });
     defer allocator.free(svg);
 
-    try writeSvg("07_heatmap", svg);
+    try writeSvg(io, "07_heatmap", svg);
 
     std.debug.print("\n  FEA stress-diagram heatmap with color spill.\n", .{});
     std.debug.print("  Node fill = ColorMap.turbo(throughput), 0.0 \xe2\x86\x92 1.0\n", .{});

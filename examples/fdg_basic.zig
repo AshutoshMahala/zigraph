@@ -8,10 +8,9 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print(
         \\zigraph - Force-Directed Graph Layout
@@ -75,8 +74,8 @@ pub fn main() !void {
         defer allocator.free(svg_output);
 
         // Write SVG to file
-        const cwd = std.fs.cwd();
-        cwd.writeFile(.{ .sub_path = "fdg_example.svg", .data = svg_output }) catch |err| {
+        const cwd = std.Io.Dir.cwd();
+        cwd.writeFile(io, .{ .sub_path = "fdg_example.svg", .data = svg_output }) catch |err| {
             std.debug.print("  Could not write fdg_example.svg: {}\n", .{err});
         };
         std.debug.print("  Wrote fdg_example.svg ({d} bytes)\n\n", .{svg_output.len});
@@ -217,8 +216,8 @@ pub fn main() !void {
         const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
-        const cwd = std.fs.cwd();
-        cwd.writeFile(.{ .sub_path = "fdg_subgraph.svg", .data = svg_output }) catch |err| {
+        const cwd = std.Io.Dir.cwd();
+        cwd.writeFile(io, .{ .sub_path = "fdg_subgraph.svg", .data = svg_output }) catch |err| {
             std.debug.print("  Could not write fdg_subgraph.svg: {}\n", .{err});
         };
         std.debug.print("  → Wrote fdg_subgraph.svg ({d} bytes)\n\n", .{svg_output.len});

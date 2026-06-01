@@ -107,8 +107,8 @@ fn buildFan(allocator: std.mem.Allocator) !zigraph.Graph {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
     std.debug.print(

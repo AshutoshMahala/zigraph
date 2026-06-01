@@ -558,7 +558,7 @@ fn layoutFdg(
             for (sg_members) |*m| m.deinit(allocator);
             allocator.free(sg_members);
         }
-        for (sg_members) |*m| m.* = .{};
+        for (sg_members) |*m| m.* = .empty;
 
         for (0..n) |node_idx| {
             const node = g.nodeAt(node_idx) orelse continue;
@@ -878,8 +878,8 @@ fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: La
             if (config.cycle_breaking == .none) {
                 // Build human-readable detail (capped at 5 nodes)
                 var detail_buf: [256]u8 = undefined;
-                var fbs = std.io.fixedBufferStream(&detail_buf);
-                const w = fbs.writer();
+                var fbs_writer = std.Io.Writer.fixed(&detail_buf);
+                const w = &fbs_writer;
                 const max_shown = 5;
                 const path = cycle_info.path;
                 const total = path.len;
@@ -903,7 +903,7 @@ fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: La
                     id_buf[i] = if (g.nodeAt(node_idx)) |node| node.id else node_idx;
                 }
 
-                errors.captureErrorFull(error.CycleDetected, @src(), fbs.getWritten(), id_buf[0..id_count]);
+                errors.captureErrorFull(error.CycleDetected, @src(), fbs_writer.buffered(), id_buf[0..id_count]);
                 return error.CycleDetected;
             }
         },

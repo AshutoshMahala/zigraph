@@ -220,7 +220,7 @@ pub const RenderPlan = struct {
 
         // ── Build subgraph plans ────────────────────────────────────────
         const sgs = layout_ir.subgraphs.items;
-        var sg_plans = std.ArrayListUnmanaged(SubgraphPlan){};
+        var sg_plans = std.ArrayListUnmanaged(SubgraphPlan).empty;
         if (config.show_subgraphs and sgs.len > 0) {
             const sg_depths = shared_helpers.computeSubgraphDepths(sgs, alloc);
             try sg_plans.ensureTotalCapacity(alloc, sgs.len);
@@ -256,7 +256,7 @@ pub const RenderPlan = struct {
         }
 
         // ── Build edge plans ────────────────────────────────────────────
-        var edge_plans_list = std.ArrayListUnmanaged(EdgePlan){};
+        var edge_plans_list = std.ArrayListUnmanaged(EdgePlan).empty;
         try edge_plans_list.ensureTotalCapacity(alloc, total_edges);
 
         for (layout_ir.getEdges()) |edge| {
@@ -308,7 +308,7 @@ pub const RenderPlan = struct {
         optimizeHorizontalRows(edge_plans_list.items, alloc);
 
         // ── Build dummy fix list ────────────────────────────────────────
-        var dummy_fixes_list = std.ArrayListUnmanaged(DummyFix){};
+        var dummy_fixes_list = std.ArrayListUnmanaged(DummyFix).empty;
         if (!config.show_dummy_nodes) {
             for (layout_ir.getNodes()) |node| {
                 if (node.kind == .dummy) {
@@ -322,7 +322,7 @@ pub const RenderPlan = struct {
         }
 
         // ── Build node plans ────────────────────────────────────────────
-        var node_plans_list = std.ArrayListUnmanaged(NodePlan){};
+        var node_plans_list = std.ArrayListUnmanaged(NodePlan).empty;
         try node_plans_list.ensureTotalCapacity(alloc, total_nodes);
 
         for (layout_ir.getNodes(), 0..) |node, ni| {
@@ -352,7 +352,7 @@ pub const RenderPlan = struct {
         }
 
         // ── Build self-loop plans ───────────────────────────────────────
-        var self_loops_list = std.ArrayListUnmanaged(SelfLoop){};
+        var self_loops_list = std.ArrayListUnmanaged(SelfLoop).empty;
         for (layout_ir.getEdges(), 0..) |edge, ei| {
             if (edge.reversed and edge.from_id == edge.to_id) {
                 const ep = edge_plans_list.items[ei];
@@ -379,8 +379,8 @@ pub const RenderPlan = struct {
         }
 
         // ── Resolve label placements (geometric occupancy) ──────────────
-        var label_plans_list = std.ArrayListUnmanaged(LabelPlan){};
-        var legend_list = std.ArrayListUnmanaged(LegendEntry){};
+        var label_plans_list = std.ArrayListUnmanaged(LabelPlan).empty;
+        var legend_list = std.ArrayListUnmanaged(LegendEntry).empty;
         {
             // Build occupancy model: per-row sorted interval list.
             // We pre-seed it with known element bounding areas that labels
@@ -429,7 +429,7 @@ pub const RenderPlan = struct {
                 from_id: usize,
                 to_id: usize,
             };
-            var candidates = std.ArrayListUnmanaged(LabelCandidate){};
+            var candidates = std.ArrayListUnmanaged(LabelCandidate).empty;
 
             for (layout_ir.getEdges(), 0..) |edge, ei| {
                 if (edge.label) |label| {
@@ -541,7 +541,7 @@ pub const RenderPlan = struct {
             dummy_fixes_list.items.len +
             node_plans_list.items.len +
             self_loops_list.items.len;
-        var elements = std.ArrayListUnmanaged(PlanElement){};
+        var elements = std.ArrayListUnmanaged(PlanElement).empty;
         try elements.ensureTotalCapacity(alloc, total_elements);
 
         for (sg_plans.items, 0..) |sp, i| {
@@ -815,7 +815,7 @@ fn optimizeHorizontalRows(edge_plans: []EdgePlan, alloc: Allocator) void {
     const HyGroup = struct {
         indices: std.ArrayListUnmanaged(usize),
     };
-    var groups = std.AutoHashMapUnmanaged(usize, HyGroup){};
+    var groups = std.AutoHashMapUnmanaged(usize, HyGroup).empty;
     defer {
         var git = groups.iterator();
         while (git.next()) |entry| {
@@ -829,7 +829,7 @@ fn optimizeHorizontalRows(edge_plans: []EdgePlan, alloc: Allocator) void {
             .corner => |c| {
                 const entry = groups.getOrPut(alloc, c.horizontal_y) catch continue;
                 if (!entry.found_existing) {
-                    entry.value_ptr.* = .{ .indices = .{} };
+                    entry.value_ptr.* = .{ .indices = .empty };
                 }
                 entry.value_ptr.indices.append(alloc, i) catch continue;
             },
@@ -901,7 +901,7 @@ const RowOccupancy = struct {
     fn init(allocator: Allocator, h: usize) RowOccupancy {
         const rows = allocator.alloc(std.ArrayListUnmanaged(Interval), h) catch
             return .{ .rows = &.{}, .alloc = allocator, .height = 0 };
-        @memset(rows, std.ArrayListUnmanaged(Interval){});
+        @memset(rows, std.ArrayListUnmanaged(Interval).empty);
         return .{ .rows = rows, .alloc = allocator, .height = h };
     }
 

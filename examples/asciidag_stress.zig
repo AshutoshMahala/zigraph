@@ -7,15 +7,15 @@
 
 const std = @import("std");
 const zigraph = @import("zigraph");
-const time = std.time;
 
 const Graph = zigraph.Graph;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    const stdout = std.fs.File.stdout().deprecatedWriter();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+    var buf: [4096]u8 = undefined;
+    var file_writer = std.Io.File.writer(std.Io.File.stdout(), io, &buf);
+    const stdout = &file_writer.interface;
 
     try stdout.writeAll(
         \\╔══════════════════════════════════════════════════════╗
@@ -29,27 +29,27 @@ pub fn main() !void {
     // ── Subgraph stress tiers (from ascii-dag/examples/subgraph_stress.rs) ──
     try stdout.writeAll("═══ SUBGRAPH STRESS TIERS ═══════════════════════════════════\n\n");
 
-    try runTest(stdout, allocator, "Tier 1 · Microservices (12 nodes, 4 subgraphs, depth 1)", buildTier1);
-    try runTest(stdout, allocator, "Tier 2 · Platform (20 nodes, 8 subgraphs, depth 2)", buildTier2);
-    try runTest(stdout, allocator, "Tier 3 · Cloud Infra (~30 nodes, 12 subgraphs, depth 3)", buildTier3);
-    try runTest(stdout, allocator, "Tier 4 · Enterprise (~50 nodes, 16 subgraphs, depth 3)", buildTier4);
-    try runTest(stdout, allocator, "Tier 5 · Megacorp (~80 nodes, 24 subgraphs, depth 4)", buildTier5);
+    try runTest(stdout, allocator, io, "Tier 1 · Microservices (12 nodes, 4 subgraphs, depth 1)", buildTier1);
+    try runTest(stdout, allocator, io, "Tier 2 · Platform (20 nodes, 8 subgraphs, depth 2)", buildTier2);
+    try runTest(stdout, allocator, io, "Tier 3 · Cloud Infra (~30 nodes, 12 subgraphs, depth 3)", buildTier3);
+    try runTest(stdout, allocator, io, "Tier 4 · Enterprise (~50 nodes, 16 subgraphs, depth 3)", buildTier4);
+    try runTest(stdout, allocator, io, "Tier 5 · Megacorp (~80 nodes, 24 subgraphs, depth 4)", buildTier5);
 
     // ── Representative scenarios from stress_test.rs ──
     try stdout.writeAll("═══ MISC STRESS SCENARIOS ════════════════════════════════════\n\n");
 
-    try runTest(stdout, allocator, "Double Helix (20 nodes, 2 chains)", buildDoubleHelix);
-    try runTest(stdout, allocator, "Skyscraper (50 nodes, deep chain)", buildSkyscraper);
-    try runTest(stdout, allocator, "Wide Fan (52 nodes, source+50 workers+sink)", buildWideFan);
-    try runTest(stdout, allocator, "Diamond Lattice (5×10 = 50 nodes)", buildDiamondLattice);
-    try runTest(stdout, allocator, "Disconnected Islands (15 nodes, 5 components)", buildDisconnectedIslands);
-    try runTest(stdout, allocator, "Skip-Level Nightmare (6 nodes, many skip edges)", buildSkipLevelNightmare);
-    try runTest(stdout, allocator, "Verbose Label (4 nodes, long label)", buildVerboseLogger);
-    try runTest(stdout, allocator, "Ouroboros (3 nodes, cycle)", buildOuroboros);
+    try runTest(stdout, allocator, io, "Double Helix (20 nodes, 2 chains)", buildDoubleHelix);
+    try runTest(stdout, allocator, io, "Skyscraper (50 nodes, deep chain)", buildSkyscraper);
+    try runTest(stdout, allocator, io, "Wide Fan (52 nodes, source+50 workers+sink)", buildWideFan);
+    try runTest(stdout, allocator, io, "Diamond Lattice (5×10 = 50 nodes)", buildDiamondLattice);
+    try runTest(stdout, allocator, io, "Disconnected Islands (15 nodes, 5 components)", buildDisconnectedIslands);
+    try runTest(stdout, allocator, io, "Skip-Level Nightmare (6 nodes, many skip edges)", buildSkipLevelNightmare);
+    try runTest(stdout, allocator, io, "Verbose Label (4 nodes, long label)", buildVerboseLogger);
+    try runTest(stdout, allocator, io, "Ouroboros (3 nodes, cycle)", buildOuroboros);
 
     try stdout.writeAll("═══ LARGE GRAPHS (output suppressed) ════════════════════════\n\n");
-    try runLargeTest(stdout, allocator, "Massive Diamond ~20k nodes (142×142)", buildMassiveDiamond20k);
-    try runLargeTest(stdout, allocator, "Massive Fan ~50k nodes", buildMassiveFan50k);
+    try runLargeTest(stdout, allocator, io, "Massive Diamond ~20k nodes (142×142)", buildMassiveDiamond20k);
+    try runLargeTest(stdout, allocator, io, "Massive Fan ~50k nodes", buildMassiveFan50k);
 
     try stdout.writeAll("\nDone.\n");
 }
@@ -57,6 +57,7 @@ pub fn main() !void {
 fn runTest(
     writer: anytype,
     allocator: std.mem.Allocator,
+    io: std.Io,
     name: []const u8,
     comptime buildFn: fn (std.mem.Allocator) anyerror!Graph,
 ) !void {
@@ -70,12 +71,12 @@ fn runTest(
     };
     defer graph.deinit();
 
-    const t0 = time.nanoTimestamp();
+    const t0 = std.Io.Clock.now(.awake, io);
     const output = zigraph.render(&graph, allocator, .{}) catch |err| {
         try writer.print("  [RENDER ERROR: {}]\n\n", .{err});
         return;
     };
-    const elapsed_ns = @as(u64, @intCast(time.nanoTimestamp() - t0));
+    const elapsed_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t0.nanoseconds);
     defer allocator.free(output);
 
     const lines = std.mem.count(u8, output, "\n");
@@ -95,6 +96,7 @@ fn runTest(
 fn runLargeTest(
     writer: anytype,
     allocator: std.mem.Allocator,
+    io: std.Io,
     name: []const u8,
     comptime buildFn: fn (std.mem.Allocator) anyerror!Graph,
 ) !void {
@@ -106,12 +108,12 @@ fn runLargeTest(
     };
     defer graph.deinit();
 
-    const t0 = time.nanoTimestamp();
+    const t0 = std.Io.Clock.now(.awake, io);
     const output = zigraph.render(&graph, allocator, .{}) catch |err| {
         try writer.print("  [RENDER ERROR: {}]\n\n", .{err});
         return;
     };
-    const elapsed_ns = @as(u64, @intCast(time.nanoTimestamp() - t0));
+    const elapsed_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t0.nanoseconds);
     defer allocator.free(output);
 
     try writer.print("  (output suppressed — {d} chars, {d}ms)\n\n", .{

@@ -105,8 +105,8 @@ pub fn renderGeneric(comptime Coord: type, layout: *const ir_mod.LayoutIR(Coord)
 
 /// Render LayoutIR to SVG string.
 pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) ![]u8 {
-    var buffer: std.ArrayListUnmanaged(u8) = .{};
-    errdefer buffer.deinit(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    errdefer buffer.deinit();
 
     // Arena for style function results — one bulk free when render is done.
     // Static strings (palette lookups) are zero-cost; dynamic strings
@@ -115,7 +115,7 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
     defer style_arena.deinit();
     const arena_alloc = style_arena.allocator();
 
-    const writer = buffer.writer(allocator);
+    const writer = &buffer.writer;
 
     // ── Pre-compute edge styles ─────────────────────────────────────────
 
@@ -398,5 +398,5 @@ pub fn render(layout: *const LayoutIR, allocator: Allocator, config: SvgConfig) 
         \\
     );
 
-    return buffer.toOwnedSlice(allocator);
+    return buffer.toOwnedSlice();
 }

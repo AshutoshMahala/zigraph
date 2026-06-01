@@ -7,10 +7,9 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print(
         \\
@@ -52,9 +51,11 @@ pub fn main() !void {
         const svg_output = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg_output);
 
-        const svg_file = try std.fs.cwd().createFile("edge_labels.svg", .{});
-        defer svg_file.close();
-        try svg_file.writeAll(svg_output);
+        var svg_file = try std.Io.Dir.cwd().createFile(io, "edge_labels.svg", .{});
+        defer svg_file.close(io);
+        var wbuf1: [4096]u8 = undefined;
+        var fw1 = std.Io.File.writer(svg_file, io, &wbuf1);
+        try fw1.interface.writeAll(svg_output);
         std.debug.print(">>> SVG exported to: edge_labels.svg\n", .{});
 
         // Export SVG with labels-on-path mode
@@ -63,9 +64,11 @@ pub fn main() !void {
         });
         defer allocator.free(svg_path_output);
 
-        const svg_path_file = try std.fs.cwd().createFile("edge_labels_on_path.svg", .{});
-        defer svg_path_file.close();
-        try svg_path_file.writeAll(svg_path_output);
+        var svg_path_file = try std.Io.Dir.cwd().createFile(io, "edge_labels_on_path.svg", .{});
+        defer svg_path_file.close(io);
+        var wbuf2: [4096]u8 = undefined;
+        var fw2 = std.Io.File.writer(svg_path_file, io, &wbuf2);
+        try fw2.interface.writeAll(svg_path_output);
         std.debug.print(">>> SVG exported to: edge_labels_on_path.svg\n\n", .{});
     }
 

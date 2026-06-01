@@ -265,14 +265,14 @@ test "LevelSnapshot validation detects level corruption" {
 
     // Create mock VirtualLevels structure manually
     var levels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer levels.deinit();
 
     // Add two levels with 2 and 3 nodes respectively
-    try levels.levels.append(allocator, .{});
-    try levels.levels.append(allocator, .{});
+    try levels.levels.append(allocator, .empty);
+    try levels.levels.append(allocator, .empty);
     try levels.levels.items[0].append(allocator, .{ .real = 0 });
     try levels.levels.items[0].append(allocator, .{ .real = 1 });
     try levels.levels.items[1].append(allocator, .{ .real = 2 });
@@ -290,7 +290,7 @@ test "LevelSnapshot validation detects level corruption" {
     try std.testing.expectEqual(@as(usize, 3), snapshot.level_sizes[1]);
 
     // Add an extra level - should detect corruption
-    try levels.levels.append(allocator, .{});
+    try levels.levels.append(allocator, .empty);
     try std.testing.expectError(error.ReducerCorruptedLevels, snapshot.validate(&levels));
 
     // Remove the extra level, but change node count in level 1

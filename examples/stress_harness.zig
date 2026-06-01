@@ -11,13 +11,15 @@ const zigraph = @import("zigraph");
 const Graph = zigraph.Graph;
 const LayoutIR = zigraph.LayoutIR(usize);
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    const args = try std.process.Args.toSlice(init.minimal.args, arena_allocator);
 
     // Parse duration argument (default: 1 minute per target)
     const minutes_per_target: u64 = if (args.len > 1)
@@ -33,27 +35,29 @@ pub fn main() !void {
     std.debug.print("╚════════════════════════════════════════════════════════════════╝\n\n", .{});
 
     // Run each target
-    try runTarget("Graph Construction", stressGraphConstruction, allocator, ns_per_target);
-    try runTarget("Layout Pipeline", stressLayoutPipeline, allocator, ns_per_target);
-    try runTarget("SVG Rendering", stressSvgRendering, allocator, ns_per_target);
-    try runTarget("Unicode Rendering", stressUnicodeRendering, allocator, ns_per_target);
+    try runTarget("Graph Construction", stressGraphConstruction, allocator, io, ns_per_target);
+    try runTarget("Layout Pipeline", stressLayoutPipeline, allocator, io, ns_per_target);
+    try runTarget("SVG Rendering", stressSvgRendering, allocator, io, ns_per_target);
+    try runTarget("Unicode Rendering", stressUnicodeRendering, allocator, io, ns_per_target);
 
     std.debug.print("\n✅ All stress tests completed successfully!\n\n", .{});
 }
 
 fn runTarget(
     name: []const u8,
-    comptime targetFn: fn (std.mem.Allocator, u64) anyerror!usize,
+    comptime targetFn: fn (std.mem.Allocator, std.Io, u64) anyerror!usize,
     allocator: std.mem.Allocator,
+    io: std.Io,
     duration_ns: u64,
 ) !void {
     std.debug.print("🔄 {s}...\n", .{name});
 
-    const start = std.time.nanoTimestamp();
-    const iterations = try targetFn(allocator, duration_ns);
-    const elapsed = @as(u64, @intCast(std.time.nanoTimestamp() - start));
+    const start = std.Io.Clock.now(.awake, io);
+    const iterations = try targetFn(allocator, io, duration_ns);
+    const end = std.Io.Clock.now(.awake, io);
+    const elapsed = @as(u64, @intCast(end.nanoseconds - start.nanoseconds));
 
-    const elapsed_s = @as(f64, @floatFromInt(elapsed)) / std.time.ns_per_s;
+    const elapsed_s = @as(f64, @floatFromInt(elapsed)) / 1_000_000_000.0;
     const rate = @as(f64, @floatFromInt(iterations)) / elapsed_s;
 
     std.debug.print("   ✓ {d} iterations in {d:.1}s ({d:.0} iter/s)\n", .{ iterations, elapsed_s, rate });
@@ -63,14 +67,14 @@ fn runTarget(
 // Stress Target: Graph Construction
 // ============================================================================
 
-fn stressGraphConstruction(allocator: std.mem.Allocator, duration_ns: u64) !usize {
+fn stressGraphConstruction(allocator: std.mem.Allocator, io: std.Io, duration_ns: u64) !usize {
     var prng = std.Random.DefaultPrng.init(0xDEADBEEF);
     const random = prng.random();
 
-    const start = std.time.nanoTimestamp();
+    const start = std.Io.Clock.now(.awake, io);
     var iterations: usize = 0;
 
-    while (@as(u64, @intCast(std.time.nanoTimestamp() - start)) < duration_ns) {
+    while (@as(u64, @intCast(std.Io.Clock.now(.awake, io).nanoseconds - start.nanoseconds)) < duration_ns) {
         var graph = Graph.init(allocator);
         defer graph.deinit();
 
@@ -108,11 +112,11 @@ fn stressGraphConstruction(allocator: std.mem.Allocator, duration_ns: u64) !usiz
 // Stress Target: Layout Pipeline
 // ============================================================================
 
-fn stressLayoutPipeline(allocator: std.mem.Allocator, duration_ns: u64) !usize {
+fn stressLayoutPipeline(allocator: std.mem.Allocator, io: std.Io, duration_ns: u64) !usize {
     var prng = std.Random.DefaultPrng.init(0xCAFEBABE);
     const random = prng.random();
 
-    const start = std.time.nanoTimestamp();
+    const start = std.Io.Clock.now(.awake, io);
     var iterations: usize = 0;
 
     const presets = [_][]const zigraph.crossing.Reducer{
@@ -122,7 +126,7 @@ fn stressLayoutPipeline(allocator: std.mem.Allocator, duration_ns: u64) !usize {
         &zigraph.crossing.none,
     };
 
-    while (@as(u64, @intCast(std.time.nanoTimestamp() - start)) < duration_ns) {
+    while (@as(u64, @intCast(std.Io.Clock.now(.awake, io).nanoseconds - start.nanoseconds)) < duration_ns) {
         var graph = Graph.init(allocator);
         defer graph.deinit();
 
@@ -175,14 +179,14 @@ fn stressLayoutPipeline(allocator: std.mem.Allocator, duration_ns: u64) !usize {
 // Stress Target: SVG Rendering
 // ============================================================================
 
-fn stressSvgRendering(allocator: std.mem.Allocator, duration_ns: u64) !usize {
+fn stressSvgRendering(allocator: std.mem.Allocator, io: std.Io, duration_ns: u64) !usize {
     var prng = std.Random.DefaultPrng.init(0xFEEDFACE);
     const random = prng.random();
 
-    const start = std.time.nanoTimestamp();
+    const start = std.Io.Clock.now(.awake, io);
     var iterations: usize = 0;
 
-    while (@as(u64, @intCast(std.time.nanoTimestamp() - start)) < duration_ns) {
+    while (@as(u64, @intCast(std.Io.Clock.now(.awake, io).nanoseconds - start.nanoseconds)) < duration_ns) {
         var graph = Graph.init(allocator);
         defer graph.deinit();
 
@@ -250,14 +254,14 @@ fn stressSvgRendering(allocator: std.mem.Allocator, duration_ns: u64) !usize {
 // Stress Target: Unicode Rendering
 // ============================================================================
 
-fn stressUnicodeRendering(allocator: std.mem.Allocator, duration_ns: u64) !usize {
+fn stressUnicodeRendering(allocator: std.mem.Allocator, io: std.Io, duration_ns: u64) !usize {
     var prng = std.Random.DefaultPrng.init(0xBAADF00D);
     const random = prng.random();
 
-    const start = std.time.nanoTimestamp();
+    const start = std.Io.Clock.now(.awake, io);
     var iterations: usize = 0;
 
-    while (@as(u64, @intCast(std.time.nanoTimestamp() - start)) < duration_ns) {
+    while (@as(u64, @intCast(std.Io.Clock.now(.awake, io).nanoseconds - start.nanoseconds)) < duration_ns) {
         var graph = Graph.init(allocator);
         defer graph.deinit();
 

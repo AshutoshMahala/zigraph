@@ -23,13 +23,17 @@ const AppState = struct {
 
 var app_state = AppState{};
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    const stdout = std.fs.File.stdout();
-    const writer = stdout.deprecatedWriter();
-    const stdin = std.fs.File.stdin();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+    const stdout = std.Io.File.stdout();
+    var wbuf: [4096]u8 = undefined;
+    var file_writer = std.Io.File.writer(stdout, io, &wbuf);
+    const writer = &file_writer.interface;
+    const stdin = std.Io.File.stdin();
+    var rbuf: [4096]u8 = undefined;
+    var file_reader = std.Io.File.reader(stdin, io, &rbuf);
+    const reader = &file_reader.interface;
 
     // Build a demo graph
     var graph = zigraph.Graph.init(allocator);
@@ -54,7 +58,7 @@ pub fn main() !void {
 
     // Enter raw terminal mode
     const orig_termios = try enableRawMode(stdin.handle);
-    defer restoreTerminal(stdout, stdin.handle, orig_termios);
+    defer restoreTerminal(stdout, io, stdin.handle, orig_termios);
 
     // Enable mouse click tracking (SGR mode)
     try writer.writeAll("\x1b[?1000h\x1b[?1006h");
@@ -67,7 +71,7 @@ pub fn main() !void {
     // Event loop
     var buf: [32]u8 = undefined;
     while (true) {
-        const n = stdin.read(&buf) catch break;
+        const n = reader.readSliceShort(&buf) catch break;
         if (n == 0) break;
 
         const input = buf[0..n];
@@ -181,8 +185,10 @@ fn enableRawMode(fd: posix.fd_t) !posix.termios {
     return orig;
 }
 
-fn restoreTerminal(stdout: std.fs.File, fd: posix.fd_t, orig: posix.termios) void {
-    const w = stdout.deprecatedWriter();
+fn restoreTerminal(stdout: std.Io.File, io: std.Io, fd: posix.fd_t, orig: posix.termios) void {
+    var wbuf: [4096]u8 = undefined;
+    var fw = std.Io.File.writer(stdout, io, &wbuf);
+    const w = &fw.interface;
     w.writeAll("\x1b[?1000l\x1b[?1006l") catch {}; // disable mouse
     w.writeAll("\x1b[?25h") catch {}; // show cursor
     w.writeAll("\x1b[0m") catch {}; // reset attributes
@@ -243,13 +249,11 @@ fn CrWriter(comptime Inner: type) type {
 
         const Self = @This();
 
-        pub const Writer = std.io.GenericWriter(*Self, Inner.Error, write);
-
-        pub fn writer(self: *Self) Writer {
-            return .{ .context = self };
+        pub fn writer(self: *Self) *Self {
+            return self;
         }
 
-        fn write(self: *Self, data: []const u8) Inner.Error!usize {
+        pub fn writeAll(self: *Self, data: []const u8) !void {
             var start: usize = 0;
             for (data, 0..) |c, i| {
                 if (c == '\n') {
@@ -263,7 +267,22 @@ fn CrWriter(comptime Inner: type) type {
             if (start < data.len) {
                 try self.inner.writeAll(data[start..]);
             }
-            return data.len;
+        }
+
+        pub fn writeByte(self: *Self, byte: u8) !void {
+            if (byte == '\n') {
+                try self.inner.writeAll("\r\n");
+            } else {
+                const bytes = [_]u8{byte};
+                try self.inner.writeAll(&bytes);
+            }
+        }
+
+        pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
+            // Use a fixed buffer approach for formatting
+            var buf: [4096]u8 = undefined;
+            const formatted = std.fmt.bufPrint(&buf, fmt, args) catch |err| return err;
+            try self.writeAll(formatted);
         }
     };
 }

@@ -28,7 +28,7 @@ pub fn route(
     node_id_to_ir_index: *const std.AutoHashMapUnmanaged(usize, usize),
     allocator: Allocator,
 ) !std.ArrayListUnmanaged(LayoutEdge) {
-    var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
+    var edges: std.ArrayListUnmanaged(LayoutEdge) = .empty;
 
     // Per-level slot counter: all edges originating from the same level share
     // a counter so they get unique horizontal rows (handles both fan-out and fan-in).
@@ -112,7 +112,7 @@ pub fn routeWithDummies(
     allocator: Allocator,
     reversed_edges: ?[]const bool,
 ) !std.ArrayListUnmanaged(LayoutEdge) {
-    var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
+    var edges: std.ArrayListUnmanaged(LayoutEdge) = .empty;
     errdefer {
         for (edges.items) |*e| e.path.deinit();
         edges.deinit(allocator);
@@ -153,7 +153,7 @@ pub fn routeWithDummies(
 
         const path: EdgePath = if (waypoints.len > 0) blk: {
             // Multi-segment path through dummy nodes
-            var ms_waypoints: std.ArrayListUnmanaged(EdgePath.Waypoint) = .{};
+            var ms_waypoints: std.ArrayListUnmanaged(EdgePath.Waypoint) = .empty;
             errdefer ms_waypoints.deinit(allocator);
 
             // Start point
@@ -309,7 +309,7 @@ test "direct routing: adjacent levels" {
         .{ .id = 2, .label = "B", .x = 0, .y = 3, .width = 3, .center_x = 1, .level = 1, .level_position = 0 },
     };
 
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .empty;
     defer id_map.deinit(allocator);
     try id_map.put(allocator, 1, 0);
     try id_map.put(allocator, 2, 1);
@@ -342,7 +342,7 @@ test "direct routing: skip level with offset" {
         .{ .id = 3, .label = "C", .x = 10, .y = 6, .width = 3, .center_x = 11, .level = 2, .level_position = 0 },
     };
 
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .empty;
     defer id_map.deinit(allocator);
     try id_map.put(allocator, 1, 0);
     try id_map.put(allocator, 2, 1);
@@ -384,7 +384,7 @@ test "direct routing: fan-out staggering" {
         .{ .id = 4, .label = "C", .x = 10, .y = 5, .width = 3, .center_x = 11, .level = 1, .level_position = 2 },
     };
 
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .empty;
     defer id_map.deinit(allocator);
     try id_map.put(allocator, 1, 0);
     try id_map.put(allocator, 2, 1);
@@ -425,7 +425,7 @@ test "direct routing: vertically aligned nodes get direct path" {
         .{ .id = 2, .label = "B", .x = 4, .y = 4, .width = 3, .center_x = 5, .level = 1, .level_position = 0 },
     };
 
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .empty;
     defer id_map.deinit(allocator);
     try id_map.put(allocator, 1, 0);
     try id_map.put(allocator, 2, 1);
@@ -452,7 +452,7 @@ test "direct routing: edge coordinates match node positions" {
         .{ .id = 20, .label = "Y", .x = 8, .y = 5, .width = 3, .center_x = 9, .level = 1, .level_position = 0 },
     };
 
-    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .{};
+    var id_map: std.AutoHashMapUnmanaged(usize, usize) = .empty;
     defer id_map.deinit(allocator);
     try id_map.put(allocator, 10, 0);
     try id_map.put(allocator, 20, 1);

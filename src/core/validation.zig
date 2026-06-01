@@ -73,7 +73,7 @@ pub fn validate(
         if (color[start] != 0) continue; // Already visited
 
         // Explicit DFS stack
-        var stack: std.ArrayListUnmanaged(usize) = .{};
+        var stack: std.ArrayListUnmanaged(usize) = .empty;
         defer stack.deinit(allocator);
         try stack.append(allocator, start);
 
@@ -134,7 +134,7 @@ fn reconstructCycle(
     parents: []const std.ArrayListUnmanaged(usize),
     allocator: Allocator,
 ) !ValidationResult {
-    var cycle_path: std.ArrayListUnmanaged(usize) = .{};
+    var cycle_path: std.ArrayListUnmanaged(usize) = .empty;
     errdefer cycle_path.deinit(allocator);
 
     try cycle_path.append(allocator, cycle_start);
@@ -191,7 +191,7 @@ pub fn hasCycle(
     for (0..node_count) |start| {
         if (color[start] != 0) continue;
 
-        var stack: std.ArrayListUnmanaged(usize) = .{};
+        var stack: std.ArrayListUnmanaged(usize) = .empty;
         defer stack.deinit(allocator);
         try stack.append(allocator, start);
 
@@ -358,8 +358,8 @@ test "validate: empty graph" {
 test "validate: single node" {
     const allocator = std.testing.allocator;
 
-    var children = [_]std.ArrayListUnmanaged(usize){.{}};
-    var parents = [_]std.ArrayListUnmanaged(usize){.{}};
+    var children = [_]std.ArrayListUnmanaged(usize){.empty};
+    var parents = [_]std.ArrayListUnmanaged(usize){.empty};
 
     var result = try validate(1, &children, &parents, allocator);
     defer result.deinit();
@@ -370,22 +370,22 @@ test "validate: simple chain" {
     const allocator = std.testing.allocator;
 
     // A -> B -> C
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 1);
 
-    var child1: std.ArrayListUnmanaged(usize) = .{};
+    var child1: std.ArrayListUnmanaged(usize) = .empty;
     defer child1.deinit(allocator);
     try child1.append(allocator, 2);
 
-    const child2: std.ArrayListUnmanaged(usize) = .{};
+    const child2: std.ArrayListUnmanaged(usize) = .empty;
 
-    const parent0: std.ArrayListUnmanaged(usize) = .{};
-    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    const parent0: std.ArrayListUnmanaged(usize) = .empty;
+    var parent1: std.ArrayListUnmanaged(usize) = .empty;
     defer parent1.deinit(allocator);
     try parent1.append(allocator, 0);
 
-    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    var parent2: std.ArrayListUnmanaged(usize) = .empty;
     defer parent2.deinit(allocator);
     try parent2.append(allocator, 1);
 
@@ -401,11 +401,11 @@ test "validate: self-loop" {
     const allocator = std.testing.allocator;
 
     // A -> A
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 0);
 
-    var parent0: std.ArrayListUnmanaged(usize) = .{};
+    var parent0: std.ArrayListUnmanaged(usize) = .empty;
     defer parent0.deinit(allocator);
     try parent0.append(allocator, 0);
 
@@ -421,27 +421,27 @@ test "validate: triangle cycle" {
     const allocator = std.testing.allocator;
 
     // A -> B -> C -> A
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 1);
 
-    var child1: std.ArrayListUnmanaged(usize) = .{};
+    var child1: std.ArrayListUnmanaged(usize) = .empty;
     defer child1.deinit(allocator);
     try child1.append(allocator, 2);
 
-    var child2: std.ArrayListUnmanaged(usize) = .{};
+    var child2: std.ArrayListUnmanaged(usize) = .empty;
     defer child2.deinit(allocator);
     try child2.append(allocator, 0);
 
-    var parent0: std.ArrayListUnmanaged(usize) = .{};
+    var parent0: std.ArrayListUnmanaged(usize) = .empty;
     defer parent0.deinit(allocator);
     try parent0.append(allocator, 2);
 
-    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    var parent1: std.ArrayListUnmanaged(usize) = .empty;
     defer parent1.deinit(allocator);
     try parent1.append(allocator, 0);
 
-    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    var parent2: std.ArrayListUnmanaged(usize) = .empty;
     defer parent2.deinit(allocator);
     try parent2.append(allocator, 1);
 
@@ -457,11 +457,11 @@ test "hasCycle: quick check" {
     const allocator = std.testing.allocator;
 
     // A -> B (no cycle)
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 1);
 
-    var child1: std.ArrayListUnmanaged(usize) = .{};
+    var child1: std.ArrayListUnmanaged(usize) = .empty;
 
     const children = [_]std.ArrayListUnmanaged(usize){ child0, child1 };
 
@@ -484,8 +484,8 @@ test "countComponents: empty graph" {
 
 test "countComponents: single node" {
     const allocator = std.testing.allocator;
-    const children = [_]std.ArrayListUnmanaged(usize){.{}};
-    const parents = [_]std.ArrayListUnmanaged(usize){.{}};
+    const children = [_]std.ArrayListUnmanaged(usize){.empty};
+    const parents = [_]std.ArrayListUnmanaged(usize){.empty};
     const count = try countComponents(1, &children, &parents, allocator);
     try std.testing.expectEqual(@as(usize, 1), count);
 }
@@ -494,22 +494,22 @@ test "countComponents: connected chain" {
     const allocator = std.testing.allocator;
 
     // A -> B -> C (all connected)
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 1);
 
-    var child1: std.ArrayListUnmanaged(usize) = .{};
+    var child1: std.ArrayListUnmanaged(usize) = .empty;
     defer child1.deinit(allocator);
     try child1.append(allocator, 2);
 
-    const child2: std.ArrayListUnmanaged(usize) = .{};
+    const child2: std.ArrayListUnmanaged(usize) = .empty;
 
-    const parent0: std.ArrayListUnmanaged(usize) = .{};
-    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    const parent0: std.ArrayListUnmanaged(usize) = .empty;
+    var parent1: std.ArrayListUnmanaged(usize) = .empty;
     defer parent1.deinit(allocator);
     try parent1.append(allocator, 0);
 
-    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    var parent2: std.ArrayListUnmanaged(usize) = .empty;
     defer parent2.deinit(allocator);
     try parent2.append(allocator, 1);
 
@@ -524,19 +524,19 @@ test "countComponents: disconnected" {
     const allocator = std.testing.allocator;
 
     // A -> B, C (isolated) - two components
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 1);
 
-    const child1: std.ArrayListUnmanaged(usize) = .{};
-    const child2: std.ArrayListUnmanaged(usize) = .{};
+    const child1: std.ArrayListUnmanaged(usize) = .empty;
+    const child2: std.ArrayListUnmanaged(usize) = .empty;
 
-    const parent0: std.ArrayListUnmanaged(usize) = .{};
-    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    const parent0: std.ArrayListUnmanaged(usize) = .empty;
+    var parent1: std.ArrayListUnmanaged(usize) = .empty;
     defer parent1.deinit(allocator);
     try parent1.append(allocator, 0);
 
-    const parent2: std.ArrayListUnmanaged(usize) = .{};
+    const parent2: std.ArrayListUnmanaged(usize) = .empty;
 
     const children = [_]std.ArrayListUnmanaged(usize){ child0, child1, child2 };
     const parents_arr = [_]std.ArrayListUnmanaged(usize){ parent0, parent1, parent2 };
@@ -549,22 +549,22 @@ test "computeProperties: basic dag" {
     const allocator = std.testing.allocator;
 
     // A -> B -> C
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 1);
 
-    var child1: std.ArrayListUnmanaged(usize) = .{};
+    var child1: std.ArrayListUnmanaged(usize) = .empty;
     defer child1.deinit(allocator);
     try child1.append(allocator, 2);
 
-    const child2: std.ArrayListUnmanaged(usize) = .{};
+    const child2: std.ArrayListUnmanaged(usize) = .empty;
 
-    const parent0: std.ArrayListUnmanaged(usize) = .{};
-    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    const parent0: std.ArrayListUnmanaged(usize) = .empty;
+    var parent1: std.ArrayListUnmanaged(usize) = .empty;
     defer parent1.deinit(allocator);
     try parent1.append(allocator, 0);
 
-    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    var parent2: std.ArrayListUnmanaged(usize) = .empty;
     defer parent2.deinit(allocator);
     try parent2.append(allocator, 1);
 
@@ -586,22 +586,22 @@ test "checkRequirements: sugiyama validation" {
     const allocator = std.testing.allocator;
 
     // Valid DAG: A -> B -> C
-    var child0: std.ArrayListUnmanaged(usize) = .{};
+    var child0: std.ArrayListUnmanaged(usize) = .empty;
     defer child0.deinit(allocator);
     try child0.append(allocator, 1);
 
-    var child1: std.ArrayListUnmanaged(usize) = .{};
+    var child1: std.ArrayListUnmanaged(usize) = .empty;
     defer child1.deinit(allocator);
     try child1.append(allocator, 2);
 
-    const child2: std.ArrayListUnmanaged(usize) = .{};
+    const child2: std.ArrayListUnmanaged(usize) = .empty;
 
-    const parent0: std.ArrayListUnmanaged(usize) = .{};
-    var parent1: std.ArrayListUnmanaged(usize) = .{};
+    const parent0: std.ArrayListUnmanaged(usize) = .empty;
+    var parent1: std.ArrayListUnmanaged(usize) = .empty;
     defer parent1.deinit(allocator);
     try parent1.append(allocator, 0);
 
-    var parent2: std.ArrayListUnmanaged(usize) = .{};
+    var parent2: std.ArrayListUnmanaged(usize) = .empty;
     defer parent2.deinit(allocator);
     try parent2.append(allocator, 1);
 

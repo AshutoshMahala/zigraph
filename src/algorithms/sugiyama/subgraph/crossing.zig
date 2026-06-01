@@ -383,12 +383,12 @@ test "enforceSubgraphAdjacency: groups nodes by subgraph" {
     // Single level with interleaved subgraph members:
     // [A(sg_a), B(sg_b), C(sg_a), D(sg_b)]
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A, sg_a
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B, sg_b
     try vlevels.levels.items[0].append(allocator, .{ .real = 2 }); // C, sg_a
@@ -417,12 +417,12 @@ test "enforceSubgraphAdjacency: preserves single-element levels" {
     try g.putNodes(&.{1}).inside(sg);
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
 
     try enforceSubgraphAdjacency(&g, &vlevels, allocator);
@@ -445,12 +445,12 @@ test "enforceSubgraphAdjacency: root-level nodes form a block" {
     try g.putNodes(&.{ 2, 4 }).inside(sg); // B(idx1), D(idx3)
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A root
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B sg
     try vlevels.levels.items[0].append(allocator, .{ .real = 2 }); // C root
@@ -479,12 +479,12 @@ test "enforceSubgraphAdjacency: no subgraphs is noop" {
     try g.addNode(3, "C");
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 });
     try vlevels.levels.items[0].append(allocator, .{ .real = 2 });
@@ -522,18 +522,18 @@ test "blockBasedCrossingReduction: groups subgraph nodes contiguously" {
     // Two levels: [A, B] on level 0, [C(sg_a), D(sg_b)] on level 1
     // But we want to test block ordering, so put interleaved nodes on one level
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
     // Level 0: sources [A, B]
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B
 
     // Level 1: targets interleaved [C(sg_a), D(sg_b)]
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[1].append(allocator, .{ .real = 2 }); // C
     try vlevels.levels.items[1].append(allocator, .{ .real = 3 }); // D
 
@@ -554,12 +554,12 @@ test "blockBasedCrossingReduction: preserves single-level graphs" {
     try g.addNode(2, "B");
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 });
 
@@ -579,14 +579,14 @@ test "blockBasedCrossingReduction: zero passes is noop" {
     try g.addNode(2, "B");
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[1].append(allocator, .{ .real = 1 });
 
     try blockBasedCrossingReduction(&g, &vlevels, 0, allocator);
@@ -609,7 +609,7 @@ test "blockOrderLevel: separates interleaved subgraph members" {
     try g.putNodes(&.{ 1, 3 }).inside(sg_a);
     try g.putNodes(&.{ 2, 4 }).inside(sg_b);
 
-    var level: std.ArrayListUnmanaged(VNode) = .{};
+    var level: std.ArrayListUnmanaged(VNode) = .empty;
     defer level.deinit(allocator);
     try level.append(allocator, .{ .real = 0 }); // A, sg_a
     try level.append(allocator, .{ .real = 1 }); // B, sg_b
@@ -672,7 +672,7 @@ test "blockOrderLevel: root nodes form their own block" {
     const sg = try g.addSubgraph("SG");
     try g.putNodes(&.{ 2, 4 }).inside(sg);
 
-    var level: std.ArrayListUnmanaged(VNode) = .{};
+    var level: std.ArrayListUnmanaged(VNode) = .empty;
     defer level.deinit(allocator);
     try level.append(allocator, .{ .real = 0 }); // A root
     try level.append(allocator, .{ .real = 1 }); // B sg
@@ -737,18 +737,18 @@ test "blockBasedCrossingReduction: integrates with graph edges" {
     try g.addEdge(2, 4); // Y → B
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
     // Level 0: [X, Y]
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // X
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // Y
 
     // Level 1: interleaved [A(sg_a), B(sg_b), C(sg_a)]
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[1].append(allocator, .{ .real = 2 }); // A
     try vlevels.levels.items[1].append(allocator, .{ .real = 3 }); // B
     try vlevels.levels.items[1].append(allocator, .{ .real = 4 }); // C

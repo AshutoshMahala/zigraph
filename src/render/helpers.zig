@@ -17,7 +17,7 @@ pub fn computeSubgraphDepths(subgraphs: []const ir_mod.SubgraphInfo(usize), aren
     @memset(depths, std.math.maxInt(usize)); // sentinel for "not computed"
 
     // Build id → index map
-    var id_map = std.AutoHashMapUnmanaged(usize, usize){};
+    var id_map = std.AutoHashMapUnmanaged(usize, usize).empty;
     defer id_map.deinit(arena);
     for (subgraphs, 0..) |sg, i| {
         id_map.put(arena, sg.id, i) catch {};

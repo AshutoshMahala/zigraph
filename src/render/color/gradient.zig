@@ -66,8 +66,9 @@ pub fn linearGradient(
     n_stops: usize,
     direction: Direction,
 ) ![]const u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    const writer = buf.writer(allocator);
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     const safe_id = sanitizeId(allocator, id);
     const coords = direction.coords();
@@ -87,7 +88,7 @@ pub fn linearGradient(
     }
 
     try writer.writeAll("</linearGradient>");
-    return buf.toOwnedSlice(allocator);
+    return buf.toOwnedSlice();
 }
 
 /// Configuration for radial gradient geometry.
@@ -136,8 +137,9 @@ pub fn radialGradientEx(
     cfg: RadialConfig,
 ) ![]const u8 {
     const safe_id = sanitizeId(allocator, id);
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    const writer = buf.writer(allocator);
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
 
     try writer.print(
         \\<radialGradient id="{s}" cx="{s}" cy="{s}" r="{s}"
@@ -162,7 +164,7 @@ pub fn radialGradientEx(
     }
 
     try writer.writeAll("</radialGradient>");
-    return buf.toOwnedSlice(allocator);
+    return buf.toOwnedSlice();
 }
 
 /// Generate a `<radialGradient>` that fades from `center_color` to transparent.
@@ -191,8 +193,9 @@ pub fn glowGradientEx(
     cfg: RadialConfig,
 ) ![]const u8 {
     const safe_id = sanitizeId(allocator, id);
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    const writer = buf.writer(allocator);
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    errdefer buf.deinit();
+    const writer = &buf.writer;
     const hex = center_color.toHex();
 
     try writer.print(
@@ -213,7 +216,7 @@ pub fn glowGradientEx(
     }
 
     try writer.writeAll("</radialGradient>");
-    return buf.toOwnedSlice(allocator);
+    return buf.toOwnedSlice();
 }
 
 /// Gradient direction.
