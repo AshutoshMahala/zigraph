@@ -255,7 +255,7 @@ test "applySubgraphPadding: adds horizontal space" {
 
     // Create initial positions: A at x=0, B at x=6
     var positions = VirtualPositions{
-        .x = .{},
+        .x = .empty,
         .total_width = 9,
         .total_height = 1,
         .allocator = allocator,
@@ -299,7 +299,7 @@ test "applySubgraphPadding: nested subgraph adds more padding" {
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B inner
 
     var positions = VirtualPositions{
-        .x = .{},
+        .x = .empty,
         .total_width = 9,
         .total_height = 1,
         .allocator = allocator,

@@ -345,7 +345,7 @@ test "brandes_kopf: empty graph" {
     var g = Graph.init(allocator);
     defer g.deinit();
 
-    const levels = [0]std.ArrayListUnmanaged(usize).empty;
+    const levels = [_]std.ArrayListUnmanaged(usize){};
     var result = try compute(&g, &levels, .{}, allocator);
     defer result.deinit();
 
