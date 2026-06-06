@@ -111,13 +111,14 @@ fn runLayout(allocator: std.mem.Allocator, algo: Algorithm, pins: ?[]const PinEn
     const ir_nodes = ir.getNodes();
     const ir_edges = ir.getEdges();
 
-    var jbuf: std.ArrayListUnmanaged(u8) = .{};
-    errdefer jbuf.deinit(allocator);
+    var jbuf = std.Io.Writer.Allocating.init(allocator);
+    errdefer jbuf.deinit();
+    const jw = &jbuf.writer;
 
-    var nlist: std.ArrayListUnmanaged(NodePos) = .{};
+    var nlist: std.ArrayListUnmanaged(NodePos) = .empty;
     errdefer nlist.deinit(allocator);
 
-    try jbuf.appendSlice(allocator, "{\"nodes\":[");
+    try jw.writeAll("{\"nodes\":[");
     var first = true;
     for (ir_nodes) |node| {
         if (node.kind != .explicit and node.kind != .implicit) continue;
@@ -125,9 +126,9 @@ fn runLayout(allocator: std.mem.Allocator, algo: Algorithm, pins: ?[]const PinEn
         const py = node.y * LH + PAD;
         const pw = node.width * CW;
         const ph = node.height * LH;
-        if (!first) try jbuf.append(allocator, ',');
+        if (!first) try jw.writeByte(',');
         first = false;
-        try std.fmt.format(jbuf.writer(allocator), "{{\"id\":{d},\"x\":{d},\"y\":{d},\"w\":{d},\"h\":{d},\"cx\":{d},\"cy\":{d}}}", .{
+        try jw.print("{{\"id\":{d},\"x\":{d},\"y\":{d},\"w\":{d},\"h\":{d},\"cx\":{d},\"cy\":{d}}}", .{
             node.id, px, py, pw, ph, px + pw / 2, py + ph / 2,
         });
         try nlist.append(allocator, .{
@@ -142,12 +143,12 @@ fn runLayout(allocator: std.mem.Allocator, algo: Algorithm, pins: ?[]const PinEn
         });
     }
 
-    try jbuf.appendSlice(allocator, "],\"edges\":[");
+    try jw.writeAll("],\"edges\":[");
     first = true;
     for (ir_edges) |edge| {
-        if (!first) try jbuf.append(allocator, ',');
+        if (!first) try jw.writeByte(',');
         first = false;
-        try std.fmt.format(jbuf.writer(allocator), "{{\"from\":{d},\"to\":{d},\"x1\":{d},\"y1\":{d},\"x2\":{d},\"y2\":{d}}}", .{
+        try jw.print("{{\"from\":{d},\"to\":{d},\"x1\":{d},\"y1\":{d},\"x2\":{d},\"y2\":{d}}}", .{
             edge.from_id,           edge.to_id,
             edge.from_x * CW + PAD, edge.from_y * LH + PAD,
             edge.to_x * CW + PAD,   edge.to_y * LH + PAD,
@@ -156,7 +157,7 @@ fn runLayout(allocator: std.mem.Allocator, algo: Algorithm, pins: ?[]const PinEn
 
     const w_px = ir.getWidth() * CW + PAD * 2 + 100;
     const h_px = ir.getHeight() * LH + PAD * 2 + 100;
-    try std.fmt.format(jbuf.writer(allocator), "],\"width\":{d},\"height\":{d}}}", .{ w_px, h_px });
+    try jw.print("],\"width\":{d},\"height\":{d}}}", .{ w_px, h_px });
 
     ir.deinit();
 
@@ -166,7 +167,7 @@ fn runLayout(allocator: std.mem.Allocator, algo: Algorithm, pins: ?[]const PinEn
 
     return .{
         .nodes = owned_nodes,
-        .json = try jbuf.toOwnedSlice(allocator),
+        .json = try jbuf.toOwnedSlice(),
         .width = w_px,
         .height = h_px,
         .allocator = allocator,
@@ -177,9 +178,9 @@ fn runLayout(allocator: std.mem.Allocator, algo: Algorithm, pins: ?[]const PinEn
 // ─── HTML page builder ──────────────────────────────────────────────────────
 
 fn buildHtmlPage(allocator: std.mem.Allocator, initial: *LayoutResult) ![]const u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
-    errdefer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    errdefer buf.deinit();
+    const w = &buf.writer;
 
     // ── Head + Styles ──
     try w.writeAll(
@@ -386,7 +387,7 @@ fn buildHtmlPage(allocator: std.mem.Allocator, initial: *LayoutResult) ![]const 
         \\
     );
 
-    return buf.toOwnedSlice(allocator);
+    return buf.toOwnedSlice();
 }
 
 // ─── HTTP Server ────────────────────────────────────────────────────────────
@@ -413,19 +414,20 @@ fn handleRequest(
 
     // POST /api/layout → run layout and return JSON
     if (request.head.method == .POST and std.mem.eql(u8, target, "/api/layout")) {
-        // Read body via 0.14 reader API
-        const body_reader = request.reader() catch {
+        // Read body via 0.16 reader API
+        var body_buf: [65536]u8 = undefined;
+        const body_reader = request.readerExpectContinue(&body_buf) catch {
             try request.respond("Bad Request", .{ .status = .bad_request });
             return;
         };
-        const body = body_reader.readAllAlloc(allocator, 65536) catch &[_]u8{};
+        const body = body_reader.allocRemaining(allocator, .limited(65536)) catch &[_]u8{};
         defer allocator.free(body);
 
         // Parse algorithm
         const algo: Algorithm = if (std.mem.indexOf(u8, body, "\"fdg\"") != null) .fdg else .sugiyama;
 
         // Parse pins
-        var pins: std.ArrayListUnmanaged(PinEntry) = .{};
+        var pins: std.ArrayListUnmanaged(PinEntry) = .empty;
         defer pins.deinit(allocator);
 
         if (std.mem.indexOf(u8, body, "\"pins\":[")) |ps| {
@@ -502,9 +504,10 @@ fn extractJsonInt(data: []const u8, key: []const u8) ?usize {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
     std.debug.print("\n── 09: Drag & Pin (HTTP Server) ──\n\n", .{});
@@ -519,21 +522,24 @@ pub fn main() !void {
 
     // Start listener
     const port: u16 = 8082;
-    const addr = std.net.Address.parseIp4("127.0.0.1", port) catch unreachable;
-    var listener = try addr.listen(.{ .reuse_address = true });
-    defer listener.deinit();
+    var addr = try std.Io.net.IpAddress.parseIp4("127.0.0.1", port);
+    var listener = try std.Io.net.IpAddress.listen(&addr, io, .{ .reuse_address = true });
+    defer listener.deinit(io);
 
-    std.debug.print("  🌐 Server running at http://localhost:{d}\n", .{port});
+    std.debug.print("  Server running at http://localhost:{d}\n", .{port});
     std.debug.print("  Open in your browser to drag, pin, and re-layout.\n", .{});
     std.debug.print("  Press Ctrl+C to stop.\n\n", .{});
 
     while (true) {
-        const conn = listener.accept() catch continue;
-        defer conn.stream.close();
+        var conn = try listener.accept(io);
+        defer conn.close(io);
         var read_buf: [8192]u8 = undefined;
-        var server = std.http.Server.init(conn, &read_buf);
+        var write_buf: [8192]u8 = undefined;
+        var stream_reader = std.Io.net.Stream.reader(conn, io, &read_buf);
+        var stream_writer = std.Io.net.Stream.writer(conn, io, &write_buf);
+        var http_server = std.http.Server.init(&stream_reader.interface, &stream_writer.interface);
         while (true) {
-            var req = server.receiveHead() catch break;
+            var req = try http_server.receiveHead();
             handleRequest(&req, allocator, html_page) catch break;
         }
     }

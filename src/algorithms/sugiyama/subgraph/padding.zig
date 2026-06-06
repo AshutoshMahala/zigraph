@@ -244,12 +244,12 @@ test "applySubgraphPadding: adds horizontal space" {
     try g.putNodes(&.{2}).inside(sg);
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A root
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B sg
 
@@ -261,7 +261,7 @@ test "applySubgraphPadding: adds horizontal space" {
         .allocator = allocator,
     };
     defer positions.deinit();
-    try positions.x.append(allocator, .{});
+    try positions.x.append(allocator, .empty);
     try positions.x.items[0].append(allocator, 0); // A
     try positions.x.items[0].append(allocator, 6); // B
 
@@ -289,12 +289,12 @@ test "applySubgraphPadding: nested subgraph adds more padding" {
     try g.putNodes(&.{2}).inside(inner);
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A root
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B inner
 
@@ -305,7 +305,7 @@ test "applySubgraphPadding: nested subgraph adds more padding" {
         .allocator = allocator,
     };
     defer positions.deinit();
-    try positions.x.append(allocator, .{});
+    try positions.x.append(allocator, .empty);
     try positions.x.items[0].append(allocator, 0); // A
     try positions.x.items[0].append(allocator, 6); // B
 
@@ -331,14 +331,14 @@ test "computeLevelYOffsets: subgraph spanning all levels" {
 
     // Two levels: A on level 0, B on level 1
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[1].append(allocator, .{ .real = 1 });
 
     const offsets = try computeLevelYOffsets(&g, &vlevels, allocator);
@@ -363,16 +363,16 @@ test "computeLevelYOffsets: subgraph starts mid-graph" {
     try g.putNodes(&.{ 2, 3 }).inside(sg);
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // X
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[1].append(allocator, .{ .real = 1 }); // A
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[2].append(allocator, .{ .real = 2 }); // B
 
     const offsets = try computeLevelYOffsets(&g, &vlevels, allocator);
@@ -395,12 +395,12 @@ test "computeLevelYOffsets: no subgraphs returns zeros" {
     try g.addNode(1, "A");
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
 
     const offsets = try computeLevelYOffsets(&g, &vlevels, allocator);

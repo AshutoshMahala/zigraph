@@ -12,12 +12,14 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-fn writeSvg(name: []const u8, svg: []const u8) !void {
+fn writeSvg(io: std.Io, name: []const u8, svg: []const u8) !void {
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "assets/gallery/{s}.svg", .{name}) catch return;
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(svg);
+    var file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var wbuf: [4096]u8 = undefined;
+    var fw = std.Io.File.writer(file, io, &wbuf);
+    try fw.interface.writeAll(svg);
     std.debug.print("  ✓ {s} ({d} bytes)\n", .{ path, svg.len });
 }
 
@@ -37,10 +39,9 @@ fn interactiveNode(ctx: zigraph.NodeStyleContext) zigraph.NodeStyle {
     return style;
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print("\n── 06: Interactive ──\n\n", .{});
 
@@ -90,7 +91,7 @@ pub fn main() !void {
     });
     defer allocator.free(svg);
 
-    try writeSvg("06_interactive", svg);
+    try writeSvg(io, "06_interactive", svg);
     std.debug.print("\n  Open 06_interactive.svg in a browser.\n", .{});
     std.debug.print("  Hover for highlight, click to toggle selection.\n\n", .{});
 }

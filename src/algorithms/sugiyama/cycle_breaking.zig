@@ -54,7 +54,7 @@ pub fn detectBackEdges(g: *const Graph, allocator: Allocator) ![]bool {
         node: usize,
         child_pos: usize,
     };
-    var stack: std.ArrayListUnmanaged(StackEntry) = .{};
+    var stack: std.ArrayListUnmanaged(StackEntry) = .empty;
     defer stack.deinit(allocator);
 
     // DFS from each unvisited node (handles disconnected graphs)

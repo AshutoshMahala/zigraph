@@ -475,12 +475,12 @@ test "median: simple crossing reduction" {
     try g.addEdge(2, 3); // B -> C
 
     // Initial level order (causes crossing)
-    var level0: std.ArrayListUnmanaged(usize) = .{};
+    var level0: std.ArrayListUnmanaged(usize) = .empty;
     try level0.append(allocator, 0); // A
     try level0.append(allocator, 1); // B
     defer level0.deinit(allocator);
 
-    var level1: std.ArrayListUnmanaged(usize) = .{};
+    var level1: std.ArrayListUnmanaged(usize) = .empty;
     try level1.append(allocator, 2); // C
     try level1.append(allocator, 3); // D
     defer level1.deinit(allocator);
@@ -542,13 +542,13 @@ test "median: reduceVirtual basic crossing" {
 
     // Build VirtualLevels with real nodes only
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 }); // B
     try vlevels.levels.items[1].append(allocator, .{ .real = 2 }); // C
@@ -579,14 +579,14 @@ test "median: reduceVirtual with dummy nodes" {
 
     // VirtualLevels: level0=[A], level1=[B, dummy_for_edge0], level2=[C]
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
-    try vlevels.levels.append(allocator, .{});
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
+    try vlevels.levels.append(allocator, .empty);
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 }); // A
     try vlevels.levels.items[1].append(allocator, .{ .real = 1 }); // B
     try vlevels.levels.items[1].append(allocator, .{ .dummy = 0 }); // dummy for edge 0
@@ -610,12 +610,12 @@ test "median: reduceVirtual single level is noop" {
     try g.addNode(0, "A");
 
     var vlevels = VirtualLevels{
-        .levels = .{},
+        .levels = .empty,
         .allocator = allocator,
     };
     defer vlevels.deinit();
 
-    try vlevels.levels.append(allocator, .{});
+    try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
 
     // Should not crash on single level

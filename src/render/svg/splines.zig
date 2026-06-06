@@ -22,7 +22,7 @@ const helpers = @import("helpers.zig");
 /// This stitches multi-segment edges through dummy nodes into single curved paths.
 pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: Allocator, config: SvgConfig, resolved_styles: []const ResolvedEdgeStyle, label_styles: []const EdgeLabelStyle) !void {
     // Group edges by edge_index in a single O(E) pass
-    var groups = std.AutoHashMapUnmanaged(usize, std.ArrayListUnmanaged(LayoutEdge)){};
+    var groups = std.AutoHashMapUnmanaged(usize, std.ArrayListUnmanaged(LayoutEdge)).empty;
     defer {
         var it = groups.valueIterator();
         while (it.next()) |list| list.deinit(allocator);
@@ -30,7 +30,7 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
     }
     for (layout.edges.items) |edge| {
         const gop = try groups.getOrPut(allocator, edge.edge_index);
-        if (!gop.found_existing) gop.value_ptr.* = .{};
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
         try gop.value_ptr.append(allocator, edge);
     }
 
@@ -65,7 +65,7 @@ pub fn renderStitchedEdges(writer: anytype, layout: *const LayoutIR, allocator: 
         }.lessThan);
 
         // Build waypoint list for spline
-        var points: std.ArrayListUnmanaged(Point) = .{};
+        var points: std.ArrayListUnmanaged(Point) = .empty;
         defer points.deinit(allocator);
 
         // Start point
@@ -224,7 +224,7 @@ pub fn renderSplinePath(writer: anytype, points: []const Point, edge_idx: usize,
 
     // Store control points for debug rendering
     const CtrlPt = struct { x: f64, y: f64, from_x: f64, from_y: f64 };
-    var control_list: std.ArrayListUnmanaged(CtrlPt) = .{};
+    var control_list: std.ArrayListUnmanaged(CtrlPt) = .empty;
     defer control_list.deinit(allocator);
 
     // Start the visible path (text path is separate for correct L→R orientation)

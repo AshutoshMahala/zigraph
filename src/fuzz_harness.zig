@@ -20,8 +20,8 @@ const crossing = root.crossing;
 /// Fuzz graph construction with arbitrary byte sequences.
 /// Interprets bytes as commands: add node, add edge, etc.
 pub fn fuzzGraphConstruction(data: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
     var graph = Graph.init(allocator);
@@ -68,8 +68,8 @@ pub fn fuzzGraphConstruction(data: []const u8) !void {
 
 /// Fuzz the full layout pipeline with random graphs.
 pub fn fuzzLayoutPipeline(data: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
     var graph = Graph.init(allocator);
@@ -141,8 +141,8 @@ pub fn fuzzLayoutPipeline(data: []const u8) !void {
 pub fn fuzzSvgRendering(data: []const u8) !void {
     const svg = @import("render/svg/mod.zig");
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
     var graph = Graph.init(allocator);
@@ -188,8 +188,8 @@ pub fn fuzzSvgRendering(data: []const u8) !void {
 pub fn fuzzUnicodeRendering(data: []const u8) !void {
     const term = @import("render/terminal/mod.zig");
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
     var graph = Graph.init(allocator);

@@ -52,7 +52,7 @@ pub fn route(
     allocator: Allocator,
     config: SplineConfig,
 ) !std.ArrayListUnmanaged(LayoutEdge) {
-    var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
+    var edges: std.ArrayListUnmanaged(LayoutEdge) = .empty;
     errdefer edges.deinit(allocator);
 
     for (g.edges.items, 0..) |edge, edge_idx| {
@@ -120,7 +120,7 @@ pub fn routeWithDummies(
     config: SplineConfig,
     reversed_edges: ?[]const bool,
 ) !std.ArrayListUnmanaged(LayoutEdge) {
-    var edges: std.ArrayListUnmanaged(LayoutEdge) = .{};
+    var edges: std.ArrayListUnmanaged(LayoutEdge) = .empty;
     errdefer edges.deinit(allocator);
 
     for (g.edges.items, 0..) |edge, edge_idx| {

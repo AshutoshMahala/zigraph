@@ -8,10 +8,9 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     var dag = zigraph.Graph.init(allocator);
     defer dag.deinit();
@@ -56,9 +55,11 @@ pub fn main() !void {
         });
         defer allocator.free(output);
 
-        const file = try std.fs.cwd().createFile("assets/hero_unicode.txt", .{});
-        defer file.close();
-        try file.writeAll(output);
+        var file = try std.Io.Dir.cwd().createFile(io, "assets/hero_unicode.txt", .{});
+        defer file.close(io);
+        var wbuf1: [4096]u8 = undefined;
+        var fw1 = std.Io.File.writer(file, io, &wbuf1);
+        try fw1.interface.writeAll(output);
         std.debug.print("✓ Generated assets/hero_unicode.txt (plain)\n", .{});
     }
 
@@ -93,9 +94,11 @@ pub fn main() !void {
         });
         defer allocator.free(svg);
 
-        const file = try std.fs.cwd().createFile("assets/hero_direct.svg", .{});
-        defer file.close();
-        try file.writeAll(svg);
+        var file = try std.Io.Dir.cwd().createFile(io, "assets/hero_direct.svg", .{});
+        defer file.close(io);
+        var wbuf2: [4096]u8 = undefined;
+        var fw2 = std.Io.File.writer(file, io, &wbuf2);
+        try fw2.interface.writeAll(svg);
         std.debug.print("✓ Generated assets/hero_direct.svg\n", .{});
     }
 
@@ -112,9 +115,11 @@ pub fn main() !void {
         const svg = try zigraph.svg.render(&ir, allocator, .{});
         defer allocator.free(svg);
 
-        const file = try std.fs.cwd().createFile("assets/hero_spline.svg", .{});
-        defer file.close();
-        try file.writeAll(svg);
+        var file = try std.Io.Dir.cwd().createFile(io, "assets/hero_spline.svg", .{});
+        defer file.close(io);
+        var wbuf3: [4096]u8 = undefined;
+        var fw3 = std.Io.File.writer(file, io, &wbuf3);
+        try fw3.interface.writeAll(svg);
         std.debug.print("✓ Generated assets/hero_spline.svg\n", .{});
     }
 
@@ -125,9 +130,11 @@ pub fn main() !void {
         });
         defer allocator.free(json);
 
-        const file = try std.fs.cwd().createFile("assets/hero.json", .{});
-        defer file.close();
-        try file.writeAll(json);
+        var file = try std.Io.Dir.cwd().createFile(io, "assets/hero.json", .{});
+        defer file.close(io);
+        var wbuf4: [4096]u8 = undefined;
+        var fw4 = std.Io.File.writer(file, io, &wbuf4);
+        try fw4.interface.writeAll(json);
         std.debug.print("✓ Generated assets/hero.json\n", .{});
     }
 

@@ -12,8 +12,8 @@ const zigraph = @import("zigraph");
 const print = std.debug.print;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
     print(
@@ -70,7 +70,7 @@ pub fn main() !void {
         for (level_arrays) |*arr| arr.deinit(allocator);
         allocator.free(level_arrays);
     }
-    for (level_arrays) |*arr| arr.* = .{};
+    for (level_arrays) |*arr| arr.* = .empty;
 
     for (0..graph.nodeCount()) |node_idx| {
         const level = layers.getLevel(node_idx);

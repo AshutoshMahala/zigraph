@@ -236,14 +236,14 @@ pub fn LayoutIR(comptime Coord: type) type {
         pub fn init(allocator: Allocator) Self {
             return .{
                 .allocator = allocator,
-                .nodes = .{},
-                .edges = .{},
+                .nodes = .empty,
+                .edges = .empty,
                 .width = 0,
                 .height = 0,
                 .level_count = 0,
-                .levels = .{},
-                .id_to_index = .{},
-                .subgraphs = .{},
+                .levels = .empty,
+                .id_to_index = .empty,
+                .subgraphs = .empty,
             };
         }
 
@@ -328,7 +328,7 @@ pub fn LayoutIR(comptime Coord: type) type {
         /// Ensure we have at least `count` levels.
         pub fn ensureLevels(self: *Self, count: usize) !void {
             while (self.levels.items.len < count) {
-                try self.levels.append(self.allocator, .{});
+                try self.levels.append(self.allocator, .empty);
             }
             self.level_count = @max(self.level_count, count);
         }
@@ -395,7 +395,7 @@ pub fn LayoutIR(comptime Coord: type) type {
                         .end_y = coordCast(Target, Coord, sc.end_y),
                     } },
                     .multi_segment => |ms| blk: {
-                        var waypoints: std.ArrayListUnmanaged(TargetPath.Waypoint) = .{};
+                        var waypoints: std.ArrayListUnmanaged(TargetPath.Waypoint) = .empty;
                         errdefer waypoints.deinit(target_allocator);
                         try waypoints.ensureTotalCapacity(target_allocator, ms.waypoints.items.len);
                         for (ms.waypoints.items) |wp| {
@@ -442,7 +442,7 @@ pub fn LayoutIR(comptime Coord: type) type {
             // Deep-copy levels (indices are always usize, no conversion needed)
             try result.levels.ensureTotalCapacity(target_allocator, self.levels.items.len);
             for (self.levels.items) |level| {
-                var new_level: std.ArrayListUnmanaged(usize) = .{};
+                var new_level: std.ArrayListUnmanaged(usize) = .empty;
                 try new_level.appendSlice(target_allocator, level.items);
                 result.levels.appendAssumeCapacity(new_level);
             }
@@ -539,7 +539,7 @@ test "LayoutIR: node lookup by ID" {
 test "EdgePath: deinit frees multi_segment waypoints" {
     const allocator = std.testing.allocator;
 
-    var waypoints: std.ArrayListUnmanaged(TestEdgePath.Waypoint) = .{};
+    var waypoints: std.ArrayListUnmanaged(TestEdgePath.Waypoint) = .empty;
     try waypoints.append(allocator, .{ .x = 1, .y = 2 });
     try waypoints.append(allocator, .{ .x = 3, .y = 4 });
 

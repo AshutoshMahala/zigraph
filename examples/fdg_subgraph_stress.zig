@@ -24,15 +24,15 @@
 
 const std = @import("std");
 const zigraph = @import("zigraph");
-const time = std.time;
 
 const Graph = zigraph.Graph;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    const stdout = std.fs.File.stdout().deprecatedWriter();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+    var buf: [4096]u8 = undefined;
+    var file_writer = std.Io.File.writer(std.Io.File.stdout(), io, &buf);
+    const stdout = &file_writer.interface;
 
     try stdout.writeAll(
         \\╔══════════════════════════════════════════════════════════╗
@@ -46,29 +46,29 @@ pub fn main() !void {
     // ── Subgraph tiers (Sugiyama tiers re-used under FDG) ─────────────────
     try stdout.writeAll("═══ SUBGRAPH TIERS (FR standard) ════════════════════════════\n\n");
 
-    try runFdg(stdout, allocator, "Tier 1 · Microservices (12 nodes, 4 subgraphs, depth 1)", buildTier1, .{});
-    try runFdg(stdout, allocator, "Tier 2 · Platform (20 nodes, 8 subgraphs, depth 2)", buildTier2, .{});
-    try runFdg(stdout, allocator, "Tier 3 · Cloud Infra (~30 nodes, 12 subgraphs, depth 3)", buildTier3, .{});
-    try runFdg(stdout, allocator, "Tier 4 · Enterprise (~50 nodes, 16 subgraphs, depth 3)", buildTier4, .{});
-    try runFdgSuppressed(stdout, allocator, "Tier 5 · Megacorp (~80 nodes, 24 subgraphs, depth 4)", buildTier5, .{});
+    try runFdg(stdout, allocator, io, "Tier 1 · Microservices (12 nodes, 4 subgraphs, depth 1)", buildTier1, .{});
+    try runFdg(stdout, allocator, io, "Tier 2 · Platform (20 nodes, 8 subgraphs, depth 2)", buildTier2, .{});
+    try runFdg(stdout, allocator, io, "Tier 3 · Cloud Infra (~30 nodes, 12 subgraphs, depth 3)", buildTier3, .{});
+    try runFdg(stdout, allocator, io, "Tier 4 · Enterprise (~50 nodes, 16 subgraphs, depth 3)", buildTier4, .{});
+    try runFdgSuppressed(stdout, allocator, io, "Tier 5 · Megacorp (~80 nodes, 24 subgraphs, depth 4)", buildTier5, .{});
 
     // ── Same tiers with Barnes-Hut ────────────────────────────────────────
     try stdout.writeAll("═══ SUBGRAPH TIERS (FR-Fast / Barnes-Hut) ═══════════════════\n\n");
 
-    try runFdgFast(stdout, allocator, "Tier 3 · Cloud Infra (Barnes-Hut)", buildTier3, .{});
-    try runFdgFast(stdout, allocator, "Tier 4 · Enterprise (Barnes-Hut)", buildTier4, .{});
-    try runFdgFastSuppressed(stdout, allocator, "Tier 5 · Megacorp (Barnes-Hut)", buildTier5, .{});
+    try runFdgFast(stdout, allocator, io, "Tier 3 · Cloud Infra (Barnes-Hut)", buildTier3, .{});
+    try runFdgFast(stdout, allocator, io, "Tier 4 · Enterprise (Barnes-Hut)", buildTier4, .{});
+    try runFdgFastSuppressed(stdout, allocator, io, "Tier 5 · Megacorp (Barnes-Hut)", buildTier5, .{});
 
     // ── FDG-specific scenarios ────────────────────────────────────────────
     try stdout.writeAll("═══ FDG-SPECIFIC SCENARIOS ══════════════════════════════════\n\n");
 
-    try runFdg(stdout, allocator, "Cyclic Clusters (3 clusters, back-edges)", buildCyclicClusters, .{});
-    try runFdg(stdout, allocator, "Dense Cross-Cluster (3 clusters, many inter-edges)", buildDenseCrossCluster, .{});
-    try runFdg(stdout, allocator, "Singleton Subgraphs (5 lone nodes in own subgraphs)", buildSingletonSubgraphs, .{});
-    try runFdg(stdout, allocator, "Deep Nesting (depth 6, linear chain)", buildDeepNesting, .{});
-    try runFdg(stdout, allocator, "Many Small Subgraphs (30 pairs, 60 nodes)", buildManySmallSubgraphs, .{});
-    try runFdg(stdout, allocator, "Mixed: Subgraph + Free Nodes", buildMixedFreeNodes, .{});
-    try runFdg(stdout, allocator, "Overlapping Clusters (stress inter-cluster separation)", buildOverlappingClusters, .{});
+    try runFdg(stdout, allocator, io, "Cyclic Clusters (3 clusters, back-edges)", buildCyclicClusters, .{});
+    try runFdg(stdout, allocator, io, "Dense Cross-Cluster (3 clusters, many inter-edges)", buildDenseCrossCluster, .{});
+    try runFdg(stdout, allocator, io, "Singleton Subgraphs (5 lone nodes in own subgraphs)", buildSingletonSubgraphs, .{});
+    try runFdg(stdout, allocator, io, "Deep Nesting (depth 6, linear chain)", buildDeepNesting, .{});
+    try runFdg(stdout, allocator, io, "Many Small Subgraphs (30 pairs, 60 nodes)", buildManySmallSubgraphs, .{});
+    try runFdg(stdout, allocator, io, "Mixed: Subgraph + Free Nodes", buildMixedFreeNodes, .{});
+    try runFdg(stdout, allocator, io, "Overlapping Clusters (stress inter-cluster separation)", buildOverlappingClusters, .{});
 
     // ── Cohesion strength sweep ──────────────────────────────────────────
     try stdout.writeAll("═══ COHESION STRENGTH SWEEP ═════════════════════════════════\n\n");
@@ -87,7 +87,7 @@ pub fn main() !void {
     for (cohesion_values) |cv| {
         var name_buf: [80]u8 = undefined;
         const name = std.fmt.bufPrint(&name_buf, "Tier 2 · cohesion = {s}", .{cv.label}) catch "cohesion sweep";
-        try runFdg(stdout, allocator, name, buildTier2, .{
+        try runFdg(stdout, allocator, io, name, buildTier2, .{
             .subgraph_cohesion = cv.value,
         });
     }
@@ -95,9 +95,9 @@ pub fn main() !void {
     // ── Large scale (output suppressed) ──────────────────────────────────
     try stdout.writeAll("═══ LARGE SCALE (output suppressed) ═════════════════════════\n\n");
 
-    try runFdgSuppressed(stdout, allocator, "200 nodes · 10 clusters · FR standard", buildLargeClustered, .{});
-    try runFdgFastSuppressed(stdout, allocator, "200 nodes · 10 clusters · FR-Fast", buildLargeClustered, .{});
-    try runFdgFastSuppressed(stdout, allocator, "500 nodes · 25 clusters · FR-Fast", buildVeryLargeClustered, .{});
+    try runFdgSuppressed(stdout, allocator, io, "200 nodes · 10 clusters · FR standard", buildLargeClustered, .{});
+    try runFdgFastSuppressed(stdout, allocator, io, "200 nodes · 10 clusters · FR-Fast", buildLargeClustered, .{});
+    try runFdgFastSuppressed(stdout, allocator, io, "500 nodes · 25 clusters · FR-Fast", buildVeryLargeClustered, .{});
 
     try stdout.writeAll("\nDone.\n");
 }
@@ -109,6 +109,7 @@ const FrConfig = zigraph.fdg.fruchterman_reingold.Config;
 fn runFdg(
     writer: anytype,
     allocator: std.mem.Allocator,
+    io: std.Io,
     name: []const u8,
     comptime buildFn: fn (std.mem.Allocator) anyerror!Graph,
     fr_overrides: FrConfig,
@@ -125,7 +126,7 @@ fn runFdg(
     };
     defer graph.deinit();
 
-    const t0 = time.nanoTimestamp();
+    const t0 = std.Io.Clock.now(.awake, io);
     var ir = zigraph.layout(&graph, allocator, .{
         .algorithm = .{ .fruchterman_reingold = fr_overrides },
     }) catch |err| {
@@ -133,7 +134,7 @@ fn runFdg(
         return;
     };
     defer ir.deinit();
-    const layout_ns = @as(u64, @intCast(time.nanoTimestamp() - t0));
+    const layout_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t0.nanoseconds);
 
     // Print subgraph bounding boxes
     const subgraphs = ir.getSubgraphs();
@@ -148,13 +149,13 @@ fn runFdg(
     }
 
     // Render terminal output
-    const t1 = time.nanoTimestamp();
+    const t1 = std.Io.Clock.now(.awake, io);
     const output = zigraph.terminal.render(&ir, allocator) catch |err| {
         try writer.print("  [RENDER ERROR: {}]\n\n", .{err});
         return;
     };
     defer allocator.free(output);
-    const render_ns = @as(u64, @intCast(time.nanoTimestamp() - t1));
+    const render_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t1.nanoseconds);
 
     const lines = std.mem.count(u8, output, "\n");
     var max_w: usize = 0;
@@ -176,6 +177,7 @@ fn runFdg(
 fn runFdgFast(
     writer: anytype,
     allocator: std.mem.Allocator,
+    io: std.Io,
     name: []const u8,
     comptime buildFn: fn (std.mem.Allocator) anyerror!Graph,
     fr_overrides: FrConfig,
@@ -192,7 +194,7 @@ fn runFdgFast(
     };
     defer graph.deinit();
 
-    const t0 = time.nanoTimestamp();
+    const t0 = std.Io.Clock.now(.awake, io);
     var ir = zigraph.layout(&graph, allocator, .{
         .algorithm = .{ .fruchterman_reingold_fast = fr_overrides },
     }) catch |err| {
@@ -200,15 +202,15 @@ fn runFdgFast(
         return;
     };
     defer ir.deinit();
-    const layout_ns = @as(u64, @intCast(time.nanoTimestamp() - t0));
+    const layout_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t0.nanoseconds);
 
-    const t1 = time.nanoTimestamp();
+    const t1 = std.Io.Clock.now(.awake, io);
     const output = zigraph.terminal.render(&ir, allocator) catch |err| {
         try writer.print("  [RENDER ERROR: {}]\n\n", .{err});
         return;
     };
     defer allocator.free(output);
-    const render_ns = @as(u64, @intCast(time.nanoTimestamp() - t1));
+    const render_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t1.nanoseconds);
 
     const lines = std.mem.count(u8, output, "\n");
     var max_w: usize = 0;
@@ -230,6 +232,7 @@ fn runFdgFast(
 fn runFdgSuppressed(
     writer: anytype,
     allocator: std.mem.Allocator,
+    io: std.Io,
     name: []const u8,
     comptime buildFn: fn (std.mem.Allocator) anyerror!Graph,
     fr_overrides: FrConfig,
@@ -246,7 +249,7 @@ fn runFdgSuppressed(
     };
     defer graph.deinit();
 
-    const t0 = time.nanoTimestamp();
+    const t0 = std.Io.Clock.now(.awake, io);
     var ir = zigraph.layout(&graph, allocator, .{
         .algorithm = .{ .fruchterman_reingold = fr_overrides },
     }) catch |err| {
@@ -254,15 +257,15 @@ fn runFdgSuppressed(
         return;
     };
     defer ir.deinit();
-    const layout_ns = @as(u64, @intCast(time.nanoTimestamp() - t0));
+    const layout_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t0.nanoseconds);
 
-    const t1 = time.nanoTimestamp();
+    const t1 = std.Io.Clock.now(.awake, io);
     const output = zigraph.terminal.render(&ir, allocator) catch |err| {
         try writer.print("  [RENDER ERROR: {}]\n\n", .{err});
         return;
     };
     defer allocator.free(output);
-    const render_ns = @as(u64, @intCast(time.nanoTimestamp() - t1));
+    const render_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t1.nanoseconds);
 
     const subgraphs = ir.getSubgraphs();
     try writer.print("  (suppressed — {d} chars, {d} subgraphs, layout {d}µs, render {d}µs)\n\n", .{
@@ -276,6 +279,7 @@ fn runFdgSuppressed(
 fn runFdgFastSuppressed(
     writer: anytype,
     allocator: std.mem.Allocator,
+    io: std.Io,
     name: []const u8,
     comptime buildFn: fn (std.mem.Allocator) anyerror!Graph,
     fr_overrides: FrConfig,
@@ -292,7 +296,7 @@ fn runFdgFastSuppressed(
     };
     defer graph.deinit();
 
-    const t0 = time.nanoTimestamp();
+    const t0 = std.Io.Clock.now(.awake, io);
     var ir = zigraph.layout(&graph, allocator, .{
         .algorithm = .{ .fruchterman_reingold_fast = fr_overrides },
     }) catch |err| {
@@ -300,15 +304,15 @@ fn runFdgFastSuppressed(
         return;
     };
     defer ir.deinit();
-    const layout_ns = @as(u64, @intCast(time.nanoTimestamp() - t0));
+    const layout_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t0.nanoseconds);
 
-    const t1 = time.nanoTimestamp();
+    const t1 = std.Io.Clock.now(.awake, io);
     const output = zigraph.terminal.render(&ir, allocator) catch |err| {
         try writer.print("  [RENDER ERROR: {}]\n\n", .{err});
         return;
     };
     defer allocator.free(output);
-    const render_ns = @as(u64, @intCast(time.nanoTimestamp() - t1));
+    const render_ns: u64 = @intCast(std.Io.Clock.now(.awake, io).nanoseconds - t1.nanoseconds);
 
     const subgraphs = ir.getSubgraphs();
     try writer.print("  (suppressed — {d} chars, {d} subgraphs, layout {d}µs, render {d}µs)\n\n", .{

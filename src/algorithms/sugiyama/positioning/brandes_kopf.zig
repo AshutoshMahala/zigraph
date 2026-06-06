@@ -345,7 +345,7 @@ test "brandes_kopf: empty graph" {
     var g = Graph.init(allocator);
     defer g.deinit();
 
-    const levels = [_]std.ArrayListUnmanaged(usize){};
+    const levels = [0]std.ArrayListUnmanaged(usize).empty;
     var result = try compute(&g, &levels, .{}, allocator);
     defer result.deinit();
 
@@ -359,7 +359,7 @@ test "brandes_kopf: single node" {
 
     try g.addNode(1, "Test");
 
-    var level0: std.ArrayListUnmanaged(usize) = .{};
+    var level0: std.ArrayListUnmanaged(usize) = .empty;
     defer level0.deinit(allocator);
     try level0.append(allocator, 0);
 
@@ -381,11 +381,11 @@ test "brandes_kopf: binary tree centering" {
     try g.addEdge(0, 1);
     try g.addEdge(0, 2);
 
-    var level0: std.ArrayListUnmanaged(usize) = .{};
+    var level0: std.ArrayListUnmanaged(usize) = .empty;
     defer level0.deinit(allocator);
     try level0.append(allocator, 0);
 
-    var level1: std.ArrayListUnmanaged(usize) = .{};
+    var level1: std.ArrayListUnmanaged(usize) = .empty;
     defer level1.deinit(allocator);
     try level1.append(allocator, 1);
     try level1.append(allocator, 2);

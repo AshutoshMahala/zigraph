@@ -111,13 +111,13 @@ pub fn organizeLevels(
     layer_assignment: *const LayerAssignment,
     allocator: Allocator,
 ) !std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) {
-    var levels: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) = .{};
+    var levels: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)) = .empty;
 
     // Create level buckets
     const level_count = layer_assignment.max_level + 1;
     try levels.ensureTotalCapacity(allocator, level_count);
     for (0..level_count) |_| {
-        try levels.append(allocator, .{});
+        try levels.append(allocator, .empty);
     }
 
     // Assign nodes to levels

@@ -7,10 +7,9 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     var dag = zigraph.Graph.init(allocator);
     defer dag.deinit();
@@ -81,9 +80,11 @@ pub fn main() !void {
     });
     defer allocator.free(svg_direct);
     {
-        const f = try std.fs.cwd().createFile("assets/hero_direct.svg", .{});
-        defer f.close();
-        try f.writeAll(svg_direct);
+        var f = try std.Io.Dir.cwd().createFile(io, "assets/hero_direct.svg", .{});
+        defer f.close(io);
+        var wbuf1: [4096]u8 = undefined;
+        var fw1 = std.Io.File.writer(f, io, &wbuf1);
+        try fw1.interface.writeAll(svg_direct);
     }
 
     const svg_spline = try zigraph.svg.render(&ir, allocator, .{
@@ -91,9 +92,11 @@ pub fn main() !void {
     });
     defer allocator.free(svg_spline);
     {
-        const f = try std.fs.cwd().createFile("assets/hero_spline.svg", .{});
-        defer f.close();
-        try f.writeAll(svg_spline);
+        var f = try std.Io.Dir.cwd().createFile(io, "assets/hero_spline.svg", .{});
+        defer f.close(io);
+        var wbuf2: [4096]u8 = undefined;
+        var fw2 = std.Io.File.writer(f, io, &wbuf2);
+        try fw2.interface.writeAll(svg_spline);
     }
 
     const svg_labels = try zigraph.svg.render(&ir, allocator, .{
@@ -102,9 +105,11 @@ pub fn main() !void {
     });
     defer allocator.free(svg_labels);
     {
-        const f = try std.fs.cwd().createFile("assets/hero_labels.svg", .{});
-        defer f.close();
-        try f.writeAll(svg_labels);
+        var f = try std.Io.Dir.cwd().createFile(io, "assets/hero_labels.svg", .{});
+        defer f.close(io);
+        var wbuf3: [4096]u8 = undefined;
+        var fw3 = std.Io.File.writer(f, io, &wbuf3);
+        try fw3.interface.writeAll(svg_labels);
     }
 
     std.debug.print(">>> SVG assets exported to assets/\n", .{});

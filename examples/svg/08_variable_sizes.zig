@@ -17,12 +17,14 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-fn writeSvg(name: []const u8, svg_data: []const u8) !void {
+fn writeSvg(io: std.Io, name: []const u8, svg_data: []const u8) !void {
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "assets/gallery/{s}.svg", .{name}) catch return;
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(svg_data);
+    var file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var wbuf: [4096]u8 = undefined;
+    var fw = std.Io.File.writer(file, io, &wbuf);
+    try fw.interface.writeAll(svg_data);
     std.debug.print("  ✓ {s} ({d} bytes)\n", .{ path, svg_data.len });
 }
 
@@ -52,10 +54,9 @@ fn sizedNodeStyle(ctx: zigraph.NodeStyleContext) zigraph.NodeStyle {
     return .{ .shape_svg = svg, .fill = fill, .stroke = stroke };
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print("\n── 08: Variable Node Sizes ──\n\n", .{});
 
@@ -92,7 +93,7 @@ pub fn main() !void {
         });
         defer allocator.free(svg);
 
-        try writeSvg("08a_variable_sizes_sugiyama", svg);
+        try writeSvg(io, "08a_variable_sizes_sugiyama", svg);
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -126,7 +127,7 @@ pub fn main() !void {
         });
         defer allocator.free(svg);
 
-        try writeSvg("08b_variable_sizes_fdg", svg);
+        try writeSvg(io, "08b_variable_sizes_fdg", svg);
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -174,9 +175,11 @@ pub fn main() !void {
         const svg_w = ir.getWidth() * cw + pad * 2 + 60;
         const svg_h = ir.getHeight() * lh + pad * 2 + 60;
 
-        const file = try std.fs.cwd().createFile("assets/gallery/08c_collapsible.html", .{});
-        defer file.close();
-        const w = file.writer();
+        var file = try std.Io.Dir.cwd().createFile(io, "assets/gallery/08c_collapsible.html", .{});
+        defer file.close(io);
+        var html_wbuf: [4096]u8 = undefined;
+        var fw = std.Io.File.writer(file, io, &html_wbuf);
+        const w = &fw.interface;
 
         // ── HTML + CSS ──
         try w.writeAll(

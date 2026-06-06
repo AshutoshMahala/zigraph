@@ -194,16 +194,16 @@ pub const Graph = struct {
     pub fn initWithOptions(allocator: Allocator, options: Options) Self {
         return .{
             .allocator = allocator,
-            .nodes = .{},
-            .edges = .{},
-            .id_to_index = .{},
-            .children = .{},
-            .parents = .{},
+            .nodes = .empty,
+            .edges = .empty,
+            .id_to_index = .empty,
+            .children = .empty,
+            .parents = .empty,
             .max_nodes = options.max_nodes,
             .max_edges = options.max_edges,
-            .subgraphs = .{},
-            .subgraph_id_to_index = .{},
-            .node_subgraph = .{},
+            .subgraphs = .empty,
+            .subgraph_id_to_index = .empty,
+            .node_subgraph = .empty,
             .next_subgraph_id = 0,
         };
     }
@@ -291,8 +291,8 @@ pub const Graph = struct {
         try self.id_to_index.put(self.allocator, id, idx);
 
         // Initialize empty adjacency lists for this node
-        try self.children.append(self.allocator, .{});
-        try self.parents.append(self.allocator, .{});
+        try self.children.append(self.allocator, .empty);
+        try self.parents.append(self.allocator, .empty);
     }
 
     // ── Subgraph API ────────────────────────────────────────────────
@@ -563,8 +563,8 @@ pub const Graph = struct {
         node.kind = .implicit; // Auto-created from edge
         try self.nodes.append(self.allocator, node);
         try self.id_to_index.put(self.allocator, id, idx);
-        try self.children.append(self.allocator, .{});
-        try self.parents.append(self.allocator, .{});
+        try self.children.append(self.allocator, .empty);
+        try self.parents.append(self.allocator, .empty);
     }
 
     /// Get the index of a node by its ID.
@@ -613,7 +613,7 @@ pub const Graph = struct {
 
     /// Find all root nodes (nodes with no parents).
     pub fn findRoots(self: *const Self, allocator: Allocator) !std.ArrayListUnmanaged(usize) {
-        var roots: std.ArrayListUnmanaged(usize) = .{};
+        var roots: std.ArrayListUnmanaged(usize) = .empty;
         for (self.parents.items, 0..) |parent_list, idx| {
             if (parent_list.items.len == 0) {
                 try roots.append(allocator, idx);
@@ -624,7 +624,7 @@ pub const Graph = struct {
 
     /// Find all leaf nodes (nodes with no children).
     pub fn findLeaves(self: *const Self, allocator: Allocator) !std.ArrayListUnmanaged(usize) {
-        var leaves: std.ArrayListUnmanaged(usize) = .{};
+        var leaves: std.ArrayListUnmanaged(usize) = .empty;
         for (self.children.items, 0..) |child_list, idx| {
             if (child_list.items.len == 0) {
                 try leaves.append(allocator, idx);

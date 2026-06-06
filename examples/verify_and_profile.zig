@@ -15,7 +15,8 @@ const MemStats = struct {
     output_bytes: usize = 0,
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
     const page_alloc = std.heap.page_allocator;
 
     std.debug.print("\n", .{});
@@ -46,7 +47,7 @@ pub fn main() !void {
 
     // Test 6: Arena vs Heap comparison
     std.debug.print("\n=== Test 6: Arena vs Heap Allocator Comparison ===\n\n", .{});
-    try arenaVsHeapBenchmark(page_alloc);
+    try arenaVsHeapBenchmark(page_alloc, io);
 
     std.debug.print("\n=== All Tests Complete ===\n\n", .{});
 }
@@ -283,7 +284,7 @@ fn buildBinaryTree(graph: *zigraph.Graph) !void {
 }
 
 /// Benchmark arena allocator vs general purpose heap allocator
-fn arenaVsHeapBenchmark(page_alloc: std.mem.Allocator) !void {
+fn arenaVsHeapBenchmark(page_alloc: std.mem.Allocator, io: std.Io) !void {
     const sizes = [_]usize{ 100, 500, 1000, 5000 };
 
     std.debug.print("┌─────────┬────────────────────┬────────────────────┬─────────────┐\n", .{});
@@ -292,10 +293,10 @@ fn arenaVsHeapBenchmark(page_alloc: std.mem.Allocator) !void {
 
     for (sizes) |node_count| {
         // Benchmark GPA (General Purpose Allocator)
-        const gpa_time = try benchmarkWithAllocator(page_alloc, node_count, false);
+        const gpa_time = try benchmarkWithAllocator(page_alloc, io, node_count, false);
 
         // Benchmark Arena
-        const arena_time = try benchmarkWithAllocator(page_alloc, node_count, true);
+        const arena_time = try benchmarkWithAllocator(page_alloc, io, node_count, true);
 
         const speedup: f32 = if (arena_time > 0)
             @as(f32, @floatFromInt(gpa_time)) / @as(f32, @floatFromInt(arena_time))
@@ -316,7 +317,7 @@ fn arenaVsHeapBenchmark(page_alloc: std.mem.Allocator) !void {
     std.debug.print("For batch graph operations (layout once, render, discard), use arena.\n", .{});
 }
 
-fn benchmarkWithAllocator(page_alloc: std.mem.Allocator, node_count: usize, use_arena: bool) !u64 {
+fn benchmarkWithAllocator(page_alloc: std.mem.Allocator, io: std.Io, node_count: usize, use_arena: bool) !u64 {
     const iterations = 5;
     var total_time: u64 = 0;
 
@@ -327,7 +328,7 @@ fn benchmarkWithAllocator(page_alloc: std.mem.Allocator, node_count: usize, use_
             defer arena.deinit();
             const allocator = arena.allocator();
 
-            const start = std.time.nanoTimestamp();
+            const start = std.Io.Clock.now(.awake, io);
 
             var graph = zigraph.Graph.init(allocator);
             const layer_size: usize = 10;
@@ -344,15 +345,15 @@ fn benchmarkWithAllocator(page_alloc: std.mem.Allocator, node_count: usize, use_
             _ = try zigraph.terminal.render(&ir, allocator);
             // Arena frees everything at once when it goes out of scope
 
-            const end = std.time.nanoTimestamp();
-            total_time += @as(u64, @intCast(@divFloor(end - start, 1000)));
+            const end = std.Io.Clock.now(.awake, io);
+            total_time += @as(u64, @intCast(@divFloor(end.nanoseconds - start.nanoseconds, 1000)));
         } else {
             // GPA path
-            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-            defer _ = gpa.deinit();
+            var gpa: std.heap.DebugAllocator(.{}) = .init;
+            defer std.debug.assert(gpa.deinit() == .ok);
             const allocator = gpa.allocator();
 
-            const start = std.time.nanoTimestamp();
+            const start = std.Io.Clock.now(.awake, io);
 
             var graph = zigraph.Graph.init(allocator);
             defer graph.deinit();
@@ -372,8 +373,8 @@ fn benchmarkWithAllocator(page_alloc: std.mem.Allocator, node_count: usize, use_
             const output = try zigraph.terminal.render(&ir, allocator);
             defer allocator.free(output);
 
-            const end = std.time.nanoTimestamp();
-            total_time += @as(u64, @intCast(@divFloor(end - start, 1000)));
+            const end = std.Io.Clock.now(.awake, io);
+            total_time += @as(u64, @intCast(@divFloor(end.nanoseconds - start.nanoseconds, 1000)));
         }
     }
 

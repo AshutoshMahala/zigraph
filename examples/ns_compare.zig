@@ -148,6 +148,7 @@ const LayeringResult = struct {
 /// If show_render is true, prints the full rendering; otherwise just metrics.
 fn compareLayerings(
     allocator: std.mem.Allocator,
+    io: std.Io,
     dag: *zigraph.Graph,
     title: []const u8,
     show_render: bool,
@@ -165,16 +166,16 @@ fn compareLayerings(
     for (0..3) |idx| {
         var counting = CountingAllocator{ .parent = allocator };
         const tracked = counting.allocator();
-        const t_start = std.time.nanoTimestamp();
+        const t_start = std.Io.Clock.now(.awake, io);
         var ir = try zigraph.layout(dag, tracked, .{
             .layering = layering_vals[idx],
             .crossing_reducers = &zigraph.crossing.quality,
             .node_spacing = 4,
         });
-        const t_end = std.time.nanoTimestamp();
+        const t_end = std.Io.Clock.now(.awake, io);
         defer ir.deinit();
 
-        const layout_us = @as(u64, @intCast(t_end - t_start)) / 1000;
+        const layout_us = @as(u64, @intCast(t_end.nanoseconds - t_start.nanoseconds)) / 1000;
         const span = totalEdgeSpan(&ir);
         const dummies = dummyNodeCount(&ir);
         results[idx] = .{
@@ -239,10 +240,9 @@ fn compareLayerings(
     }
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     // ── Graph 1: Chain + skip edge (small, show render) ──
     {
@@ -256,7 +256,7 @@ pub fn main() !void {
         try dag.addEdge(2, 3);
         try dag.addEdge(3, 4);
         try dag.addEdge(1, 4);
-        try compareLayerings(allocator, &dag, "Graph 1: Chain + skip edge", true);
+        try compareLayerings(allocator, io, &dag, "Graph 1: Chain + skip edge", true);
     }
 
     // ── Graph 2: Cross-level nightmare (skip edges galore) ──
@@ -292,7 +292,7 @@ pub fn main() !void {
         try dag.addEdge(3, 7); // C1 → A3 (skip 1)
         try dag.addEdge(2, 9); // B1 → Sink (skip 2)
         try dag.addEdge(4, 9); // A2 → Sink (skip 1)
-        try compareLayerings(allocator, &dag, "Graph 2: Cross-level nightmare (17 edges, many skips)", true);
+        try compareLayerings(allocator, io, &dag, "Graph 2: Cross-level nightmare (17 edges, many skips)", true);
     }
 
     // ── Graph 3: Random hairball (30 nodes) — metrics only ──
@@ -315,7 +315,7 @@ pub fn main() !void {
                 }
             }
         }
-        try compareLayerings(allocator, &dag, "Graph 3: Random Hairball (30 nodes, seed=42)", true);
+        try compareLayerings(allocator, io, &dag, "Graph 3: Random Hairball (30 nodes, seed=42)", true);
     }
 
     // ── Graph 4: Bigger hairball (50 nodes) — metrics only ──
@@ -338,7 +338,7 @@ pub fn main() !void {
                 }
             }
         }
-        try compareLayerings(allocator, &dag, "Graph 4: Bigger Hairball (50 nodes, seed=137)", false);
+        try compareLayerings(allocator, io, &dag, "Graph 4: Bigger Hairball (50 nodes, seed=137)", false);
     }
 
     // ── Graph 5: Sparse hairball (100 nodes, 1-2 edges each) ──
@@ -361,7 +361,7 @@ pub fn main() !void {
                 }
             }
         }
-        try compareLayerings(allocator, &dag, "Graph 5: Sparse Hairball (100 nodes, seed=256)", false);
+        try compareLayerings(allocator, io, &dag, "Graph 5: Sparse Hairball (100 nodes, seed=256)", false);
     }
 
     // =====================================================================
@@ -413,15 +413,15 @@ pub fn main() !void {
             for (0..bench_iterations) |it| {
                 var counting = CountingAllocator{ .parent = allocator };
                 const tracked = counting.allocator();
-                const t0 = std.time.nanoTimestamp();
+                const t0 = std.Io.Clock.now(.awake, io);
                 var ir = try zigraph.layout(&dag, tracked, .{
                     .layering = lay,
                     .crossing_reducers = &zigraph.crossing.quality,
                     .node_spacing = 4,
                 });
-                const t1 = std.time.nanoTimestamp();
+                const t1 = std.Io.Clock.now(.awake, io);
                 ir.deinit();
-                timings[it] = @as(u64, @intCast(t1 - t0)) / 1000;
+                timings[it] = @as(u64, @intCast(t1.nanoseconds - t0.nanoseconds)) / 1000;
                 max_peak = @max(max_peak, counting.peak_bytes);
             }
             // Sort and take median

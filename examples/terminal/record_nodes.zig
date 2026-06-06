@@ -170,8 +170,8 @@ fn nodeStyle(ctx: T.NodeStyleContext) T.TerminalNodeStyle {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(gpa.deinit() == .ok);
     const alloc = gpa.allocator();
 
     std.debug.print(

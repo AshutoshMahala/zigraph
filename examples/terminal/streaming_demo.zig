@@ -6,11 +6,12 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    const stdout = std.fs.File.stdout().deprecatedWriter();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+    var buf: [4096]u8 = undefined;
+    var file_writer = std.Io.File.writer(std.Io.File.stdout(), io, &buf);
+    const stdout = &file_writer.interface;
 
     try stdout.writeAll(
         \\zigraph — Streaming Render Demo

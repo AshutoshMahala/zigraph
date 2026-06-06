@@ -52,7 +52,7 @@ const QuadNode = struct {
 
 /// Barnes-Hut Quadtree for spatial force approximation.
 pub const Quadtree = struct {
-    nodes: std.ArrayListUnmanaged(QuadNode) = .{},
+    nodes: std.ArrayListUnmanaged(QuadNode) = .empty,
     allocator: Allocator,
 
     /// Build a quadtree from a set of positions.

@@ -18,7 +18,8 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
     // Backing allocator for the arena (page allocator is fine here)
     const backing = std.heap.page_allocator;
 
@@ -119,11 +120,12 @@ pub fn main() !void {
         std.debug.print("Graph: {d} nodes, {d} edges\n", .{ g.nodeCount(), g.edges.items.len });
 
         // Time the layout
-        const start = std.time.nanoTimestamp();
+        const start = std.Io.Clock.now(.awake, io);
         var ir = try zigraph.layout(&g, allocator, .{});
-        const layout_time = std.time.nanoTimestamp() - start;
+        const end = std.Io.Clock.now(.awake, io);
+        const layout_time: u64 = @intCast(@divFloor(end.nanoseconds - start.nanoseconds, 1000));
 
-        std.debug.print("Layout time: {d}µs\n", .{@divFloor(layout_time, 1000)});
+        std.debug.print("Layout time: {d}µs\n", .{layout_time});
         std.debug.print("Levels: {d}\n", .{ir.level_count});
 
         // Skip rendering the huge graph, just show stats

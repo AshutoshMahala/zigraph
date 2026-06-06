@@ -78,10 +78,10 @@ pub const renderGeneric = serializeGeneric;
 pub const render = serialize;
 
 fn serializeImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord), allocator: Allocator) ![]u8 {
-    var buffer: std.ArrayListUnmanaged(u8) = .{};
-    errdefer buffer.deinit(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    errdefer buffer.deinit();
 
-    const writer = buffer.writer(allocator);
+    const writer = &buffer.writer;
 
     // Start object
     try writer.writeAll("{\n");
@@ -192,7 +192,7 @@ fn serializeImpl(comptime Coord: type, layout_ir: *const ir_mod.LayoutIR(Coord),
 
     try writer.writeAll("}\n");
 
-    return buffer.toOwnedSlice(allocator);
+    return buffer.toOwnedSlice();
 }
 
 /// Deserialize JSON string into a new LayoutIR(usize).
@@ -533,7 +533,7 @@ fn parsePath(comptime Coord: type, allocator: Allocator, val: std.json.Value) !i
             .array => |a| a,
             else => return error.JsonWaypointsInvalid,
         };
-        var waypoints: std.ArrayListUnmanaged(ir_mod.EdgePath(Coord).Waypoint) = .{};
+        var waypoints: std.ArrayListUnmanaged(ir_mod.EdgePath(Coord).Waypoint) = .empty;
         errdefer waypoints.deinit(allocator);
         try waypoints.ensureTotalCapacity(allocator, arr.items.len);
         for (arr.items) |wv| {
@@ -646,7 +646,7 @@ test "json: roundtrip serialize/deserialize" {
         .edge_index = 5,
     });
 
-    var waypoints: std.ArrayListUnmanaged(EdgePath.Waypoint) = .{};
+    var waypoints: std.ArrayListUnmanaged(EdgePath.Waypoint) = .empty;
     try waypoints.append(allocator, .{ .x = 2, .y = 1 });
     try waypoints.append(allocator, .{ .x = 4, .y = 2 });
 

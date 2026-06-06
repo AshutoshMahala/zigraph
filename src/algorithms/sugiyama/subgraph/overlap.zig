@@ -203,7 +203,7 @@ pub fn fixSubgraphOverlaps(
         // Collect all parent→children groups
         // Use a temporary array of (parent_id_or_sentinel, sg_idx) pairs
         const Parent = struct { parent: usize, sg_idx: usize };
-        var parents_list = std.ArrayListUnmanaged(Parent){};
+        var parents_list = std.ArrayListUnmanaged(Parent).empty;
         defer parents_list.deinit(allocator);
 
         const SENTINEL: usize = std.math.maxInt(usize);
@@ -243,7 +243,7 @@ pub fn fixSubgraphOverlaps(
 
                 // Level-aware frontier sweep
                 const Frontier = struct { sg_idx: usize, right: usize, min_l: usize, max_l: usize };
-                var processed = std.ArrayListUnmanaged(Frontier){};
+                var processed = std.ArrayListUnmanaged(Frontier).empty;
                 defer processed.deinit(allocator);
 
                 for (group) |entry| {
@@ -303,7 +303,7 @@ pub fn fixSubgraphOverlaps(
 
             for (0..max_level + 1) |level| {
                 // Collect node indices at this level, sorted by x
-                var level_nodes = std.ArrayListUnmanaged(usize){};
+                var level_nodes = std.ArrayListUnmanaged(usize).empty;
                 defer level_nodes.deinit(allocator);
 
                 for (0..node_count) |ni| {

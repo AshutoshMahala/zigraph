@@ -10,10 +10,9 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print(
         \\
@@ -155,9 +154,11 @@ pub fn main() !void {
         defer allocator.free(svg_output);
 
         {
-            const file = try std.fs.cwd().createFile("subgraph_demo.svg", .{});
-            defer file.close();
-            try file.writeAll(svg_output);
+            var file = try std.Io.Dir.cwd().createFile(io, "subgraph_demo.svg", .{});
+            defer file.close(io);
+            var wbuf1: [4096]u8 = undefined;
+            var fw1 = std.Io.File.writer(file, io, &wbuf1);
+            try fw1.interface.writeAll(svg_output);
         }
         std.debug.print("  → Wrote subgraph_demo.svg ({d} bytes)\n", .{svg_output.len});
 
@@ -166,9 +167,11 @@ pub fn main() !void {
         defer allocator.free(json_output);
 
         {
-            const file = try std.fs.cwd().createFile("subgraph_demo.json", .{});
-            defer file.close();
-            try file.writeAll(json_output);
+            var file = try std.Io.Dir.cwd().createFile(io, "subgraph_demo.json", .{});
+            defer file.close(io);
+            var wbuf2: [4096]u8 = undefined;
+            var fw2 = std.Io.File.writer(file, io, &wbuf2);
+            try fw2.interface.writeAll(json_output);
         }
         std.debug.print("  → Wrote subgraph_demo.json ({d} bytes)\n", .{json_output.len});
 
@@ -254,9 +257,11 @@ pub fn main() !void {
         defer allocator.free(svg_output);
 
         {
-            const file = try std.fs.cwd().createFile("subgraph_complex.svg", .{});
-            defer file.close();
-            try file.writeAll(svg_output);
+            var file = try std.Io.Dir.cwd().createFile(io, "subgraph_complex.svg", .{});
+            defer file.close(io);
+            var wbuf3: [4096]u8 = undefined;
+            var fw3 = std.Io.File.writer(file, io, &wbuf3);
+            try fw3.interface.writeAll(svg_output);
         }
         std.debug.print("  → Wrote subgraph_complex.svg ({d} bytes)\n", .{svg_output.len});
 
@@ -353,9 +358,11 @@ pub fn main() !void {
         defer allocator.free(svg_output);
 
         {
-            const file = try std.fs.cwd().createFile("subgraph_horizontal.svg", .{});
-            defer file.close();
-            try file.writeAll(svg_output);
+            var file = try std.Io.Dir.cwd().createFile(io, "subgraph_horizontal.svg", .{});
+            defer file.close(io);
+            var wbuf4: [4096]u8 = undefined;
+            var fw4 = std.Io.File.writer(file, io, &wbuf4);
+            try fw4.interface.writeAll(svg_output);
         }
         std.debug.print("  → Wrote subgraph_horizontal.svg ({d} bytes)\n", .{svg_output.len});
 

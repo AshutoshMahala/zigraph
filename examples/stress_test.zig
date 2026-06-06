@@ -28,10 +28,9 @@ const SimpleRng = struct {
     }
 };
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print(
         \\
@@ -71,13 +70,13 @@ pub fn main() !void {
         std.debug.print("Graph: {d} nodes, {d} edges\n", .{ node_count, edge_count });
 
         // Time the layout and render
-        const start = std.time.nanoTimestamp();
+        const start = std.Io.Clock.now(.awake, io);
 
         const output = try zigraph.render(&graph, allocator, .{});
         defer allocator.free(output);
 
-        const end = std.time.nanoTimestamp();
-        const duration_us = @as(u64, @intCast(end - start)) / 1000;
+        const end = std.Io.Clock.now(.awake, io);
+        const duration_us = @as(u64, @intCast(end.nanoseconds - start.nanoseconds)) / 1000;
         total_time += duration_us;
 
         if (t.show_output) {
@@ -117,12 +116,14 @@ pub fn main() !void {
             @memcpy(filename_buf[filename_len..][0..suffix.len], suffix);
             const filename = filename_buf[0 .. filename_len + suffix.len];
 
-            const file = std.fs.cwd().createFile(filename, .{}) catch |err| {
+            var file = std.Io.Dir.cwd().createFile(io, filename, .{}) catch |err| {
                 std.debug.print("Failed to create SVG file: {}\n", .{err});
                 continue;
             };
-            defer file.close();
-            file.writeAll(svg_output) catch |err| {
+            defer file.close(io);
+            var svg_wbuf: [4096]u8 = undefined;
+            var fw = std.Io.File.writer(file, io, &svg_wbuf);
+            fw.interface.writeAll(svg_output) catch |err| {
                 std.debug.print("Failed to write SVG: {}\n", .{err});
                 continue;
             };

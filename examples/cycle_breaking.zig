@@ -9,10 +9,9 @@
 const std = @import("std");
 const zigraph = @import("zigraph");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     std.debug.print(
         \\
@@ -87,9 +86,11 @@ pub fn main() !void {
         });
         defer allocator.free(svg);
 
-        const f = try std.fs.cwd().createFile("cycle_breaking.svg", .{});
-        defer f.close();
-        try f.writeAll(svg);
+        var f = try std.Io.Dir.cwd().createFile(io, "cycle_breaking.svg", .{});
+        defer f.close(io);
+        var wbuf1: [4096]u8 = undefined;
+        var fw1 = std.Io.File.writer(f, io, &wbuf1);
+        try fw1.interface.writeAll(svg);
         std.debug.print(">>> SVG exported to: cycle_breaking.svg\n", .{});
         std.debug.print("    (reversed edges rendered as dashed lines)\n\n", .{});
     }
@@ -151,9 +152,11 @@ pub fn main() !void {
         });
         defer allocator.free(svg);
 
-        const f = try std.fs.cwd().createFile("cycle_two_node.svg", .{});
-        defer f.close();
-        try f.writeAll(svg);
+        var f = try std.Io.Dir.cwd().createFile(io, "cycle_two_node.svg", .{});
+        defer f.close(io);
+        var wbuf2: [4096]u8 = undefined;
+        var fw2 = std.Io.File.writer(f, io, &wbuf2);
+        try fw2.interface.writeAll(svg);
         std.debug.print(">>> SVG exported to: cycle_two_node.svg\n\n", .{});
     }
 
@@ -186,9 +189,11 @@ pub fn main() !void {
         });
         defer allocator.free(svg);
 
-        const f = try std.fs.cwd().createFile("cycle_self_loop.svg", .{});
-        defer f.close();
-        try f.writeAll(svg);
+        var f = try std.Io.Dir.cwd().createFile(io, "cycle_self_loop.svg", .{});
+        defer f.close(io);
+        var wbuf3: [4096]u8 = undefined;
+        var fw3 = std.Io.File.writer(f, io, &wbuf3);
+        try fw3.interface.writeAll(svg);
         std.debug.print(">>> SVG exported to: cycle_self_loop.svg\n\n", .{});
     }
 
