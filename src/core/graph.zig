@@ -183,6 +183,17 @@ pub const Graph = struct {
     /// Next auto-generated subgraph ID
     next_subgraph_id: usize,
 
+    /// Per-graph diagnostic capture for the most recent error.
+    ///
+    /// Contract: mutating operations (addNode, add*Edge*, addSubgraph,
+    /// putNodes/putSubgraphs placers) and layout entry points clear this on
+    /// entry, so a stale error is never mistaken for their result.
+    /// Read-only queries (validate, hasCycle, findRoots, findLeaves, getters)
+    /// never modify it — neither clearing nor capturing. Allocation failures
+    /// (error.OutOfMemory) propagate without capturing a diagnostic.
+    /// Use `clearDiagnostics()` to reset explicitly.
+    diagnostics: errors.Diagnostics = .{},
+
     const Self = @This();
 
     /// Initialize a new empty graph with default options.
@@ -273,6 +284,8 @@ pub const Graph = struct {
             else => @compileError("addNode: desc must be a string ([]const u8) or NodeOptions struct"),
         };
 
+        self.diagnostics.clear();
+
         // Check if node already exists
         if (self.id_to_index.contains(id)) {
             return; // Already exists
@@ -282,7 +295,7 @@ pub const Graph = struct {
         if (self.max_nodes > 0 and self.nodes.items.len >= self.max_nodes) {
             var detail_buf: [96]u8 = undefined;
             const detail = std.fmt.bufPrint(&detail_buf, "{d} nodes at limit of {d}", .{ self.nodes.items.len, self.max_nodes }) catch "node limit exceeded";
-            errors.captureErrorWithDetail(error.NodeLimitExceeded, @src(), detail);
+            self.diagnostics.captureWithDetail(error.NodeLimitExceeded, @src(), detail);
             return error.NodeLimitExceeded;
         }
 
@@ -302,6 +315,7 @@ pub const Graph = struct {
     /// Returns the auto-generated subgraph ID. Subgraphs are root-level
     /// by default; use `putSubgraphs().inside()` to nest them.
     pub fn addSubgraph(self: *Self, label: []const u8) !usize {
+        self.diagnostics.clear();
         const id = self.next_subgraph_id;
         self.next_subgraph_id += 1;
 
@@ -339,9 +353,10 @@ pub const Graph = struct {
         /// Each node must exist. If a node is already in a subgraph,
         /// it is moved to the new one (replaces previous membership).
         pub inline fn inside(self: NodePlacer, subgraph_id: usize) !void {
+            self.graph.diagnostics.clear();
             // Validate subgraph exists
             if (!self.graph.subgraph_id_to_index.contains(subgraph_id)) {
-                errors.captureError(error.SubgraphNotFound, @src());
+                self.graph.diagnostics.capture(error.SubgraphNotFound, @src());
                 return error.SubgraphNotFound;
             }
             for (self.items) |node_id| {
@@ -349,7 +364,7 @@ pub const Graph = struct {
                 if (!self.graph.id_to_index.contains(node_id)) {
                     var detail_buf: [64]u8 = undefined;
                     const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{node_id}) catch "node does not exist";
-                    errors.captureErrorFull(error.NodeNotFound, @src(), detail, &.{node_id});
+                    self.graph.diagnostics.captureFull(error.NodeNotFound, @src(), detail, &.{node_id});
                     return error.NodeNotFound;
                 }
                 // Put or replace membership
@@ -368,26 +383,27 @@ pub const Graph = struct {
         /// Each child subgraph must exist. The parent must exist.
         /// A subgraph cannot be nested inside itself.
         pub inline fn inside(self: SubgraphPlacer, parent_id: usize) !void {
+            self.graph.diagnostics.clear();
             // Validate parent exists
             const parent_idx = self.graph.subgraph_id_to_index.get(parent_id) orelse {
-                errors.captureError(error.SubgraphNotFound, @src());
+                self.graph.diagnostics.capture(error.SubgraphNotFound, @src());
                 return error.SubgraphNotFound;
             };
             _ = parent_idx;
             for (self.items) |sg_id| {
                 if (sg_id == parent_id) {
-                    errors.captureError(error.SubgraphCycleDetected, @src());
+                    self.graph.diagnostics.capture(error.SubgraphCycleDetected, @src());
                     return error.SubgraphCycleDetected;
                 }
                 const idx = self.graph.subgraph_id_to_index.get(sg_id) orelse {
-                    errors.captureError(error.SubgraphNotFound, @src());
+                    self.graph.diagnostics.capture(error.SubgraphNotFound, @src());
                     return error.SubgraphNotFound;
                 };
                 // Check for ancestor cycle: parent_id must not be a descendant of sg_id
                 var current: ?usize = parent_id;
                 while (current) |cur_id| {
                     if (cur_id == sg_id) {
-                        errors.captureError(error.SubgraphCycleDetected, @src());
+                        self.graph.diagnostics.capture(error.SubgraphCycleDetected, @src());
                         return error.SubgraphCycleDetected;
                     }
                     const cur_idx = self.graph.subgraph_id_to_index.get(cur_id).?;
@@ -470,6 +486,7 @@ pub const Graph = struct {
     ///
     /// For graphs where you control node labels, prefer addNode() + addEdge().
     pub fn addEdgeAutoCreate(self: *Self, from: usize, to: usize) !void {
+        self.diagnostics.clear();
         // Auto-create 'from' node if missing
         if (!self.id_to_index.contains(from)) {
             const label = try self.allocIdLabel(from);
@@ -494,16 +511,18 @@ pub const Graph = struct {
         directed: bool,
         label: ?[]const u8,
     ) !void {
+        self.diagnostics.clear();
+
         const from_idx = self.id_to_index.get(from) orelse {
             var detail_buf: [64]u8 = undefined;
             const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{from}) catch "node does not exist";
-            errors.captureErrorFull(error.NodeNotFound, @src(), detail, &.{from});
+            self.diagnostics.captureFull(error.NodeNotFound, @src(), detail, &.{from});
             return error.NodeNotFound;
         };
         const to_idx = self.id_to_index.get(to) orelse {
             var detail_buf: [64]u8 = undefined;
             const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{to}) catch "node does not exist";
-            errors.captureErrorFull(error.NodeNotFound, @src(), detail, &.{to});
+            self.diagnostics.captureFull(error.NodeNotFound, @src(), detail, &.{to});
             return error.NodeNotFound;
         };
 
@@ -511,7 +530,7 @@ pub const Graph = struct {
         if (self.max_edges > 0 and self.edges.items.len >= self.max_edges) {
             var detail_buf: [96]u8 = undefined;
             const detail = std.fmt.bufPrint(&detail_buf, "{d} edges at limit of {d}", .{ self.edges.items.len, self.max_edges }) catch "edge limit exceeded";
-            errors.captureErrorWithDetail(error.EdgeLimitExceeded, @src(), detail);
+            self.diagnostics.captureWithDetail(error.EdgeLimitExceeded, @src(), detail);
             return error.EdgeLimitExceeded;
         }
 
@@ -594,6 +613,24 @@ pub const Graph = struct {
     pub fn getParents(self: *const Self, idx: usize) []const usize {
         if (idx >= self.parents.items.len) return &.{};
         return self.parents.items[idx].items;
+    }
+
+    /// Retrieve the diagnostic for the most recent captured error on this graph.
+    ///
+    /// Returns null if the most recent mutating operation or layout call
+    /// succeeded (or none has run). Read-only queries (validate, hasCycle,
+    /// findRoots, findLeaves, getters) never affect the result, and
+    /// allocation failures (error.OutOfMemory) propagate without capture —
+    /// a null result after an OutOfMemory error is expected.
+    /// Returned slices point into this graph's diagnostic buffers and are
+    /// valid until the next mutating operation or layout call on this graph.
+    pub fn lastDiagnostic(self: *const Self) ?errors.Diagnostic {
+        return self.diagnostics.last();
+    }
+
+    /// Explicitly clear the captured diagnostic state.
+    pub fn clearDiagnostics(self: *Self) void {
+        self.diagnostics.clear();
     }
 
     /// Get the number of nodes.

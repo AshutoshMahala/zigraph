@@ -123,7 +123,7 @@ pub fn main() !void {
     std.debug.print("\n=== Done ===\n", .{});
 }
 
-fn renderAllPositionings(g: *const zigraph.Graph, allocator: std.mem.Allocator) !void {
+fn renderAllPositionings(g: *zigraph.Graph, allocator: std.mem.Allocator) !void {
     const configs = [_]struct { name: []const u8, pos: zigraph.Positioning }{
         .{ .name = "positioning = .compact (default)", .pos = .compact },
         .{ .name = "positioning = .barycentric", .pos = .barycentric },

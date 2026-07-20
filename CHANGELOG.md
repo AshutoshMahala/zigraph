@@ -4,6 +4,39 @@ All notable changes to zigraph will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed (breaking)
+
+- **Per-graph diagnostics** — the module-level error-capture state in
+  `zigraph.errors` is removed; each `Graph` now owns its diagnostics, making
+  independent graphs safe to use from independent threads.
+  - Removed: `zigraph.errors.captureSrc()`, `captureError()`,
+    `captureErrorWithDetail()`, `captureErrorFull()`, `lastDiagnostic()`,
+    `clearDiagnostic()`. Migrate `zigraph.errors.lastDiagnostic()` →
+    `graph.lastDiagnostic()`; explicit reset is `graph.clearDiagnostics()`.
+  - `layout`, `layoutTyped`, `render`, `renderTyped`, `exportJson`,
+    `exportJsonTyped`, `exportSvg`, `exportSvgTyped` now take `*Graph`
+    instead of `*const Graph` (they clear, and on error write, the graph's
+    diagnostics). Callers with a mutable graph (`var g = ...;
+    zigraph.layout(&g, ...)`) compile unchanged.
+  - `crossing.runPipeline` takes an additional `*Diagnostics` parameter so
+    reducer-corruption errors are captured on the right graph.
+- Diagnostics semantics: mutating builder operations and layout entry points
+  clear the previous diagnostic on entry; read-only queries (`validate`,
+  `hasCycle`, `findRoots`, `findLeaves`, getters) never modify it;
+  allocation failures propagate without capture.
+
+### Added
+
+- `Graph.lastDiagnostic()`, `Graph.clearDiagnostics()`, and a
+  `zigraph.Diagnostics` re-export.
+- Passive-parallelism contract tests (`src/parallel_contract_tests.zig`):
+  diagnostics isolation across graphs, clear-on-entry semantics, accessor
+  ordering, and byte-identical concurrent batch layouts.
+- No-globals build gate (`tools/check_no_globals.zig`), a dependency of
+  `zig build test` — module-level mutable state now fails the build.
+
 ## [0.3.0] — 2026-04-26
 
 ### Added

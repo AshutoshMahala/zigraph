@@ -176,12 +176,12 @@ const LevelSnapshot = struct {
     }
 
     /// Validate that levels match the snapshot (same structure, possibly reordered).
-    fn validate(self: *const LevelSnapshot, levels: *const VirtualLevels) ReducerError!void {
+    fn validate(self: *const LevelSnapshot, levels: *const VirtualLevels, diag: *errors.Diagnostics) ReducerError!void {
         // Check level count unchanged
         if (levels.levels.items.len != self.level_count) {
             var buf: [96]u8 = undefined;
             const detail = std.fmt.bufPrint(&buf, "expected {d} levels, got {d}", .{ self.level_count, levels.levels.items.len }) catch "level count changed";
-            errors.captureErrorWithDetail(error.ReducerCorruptedLevels, @src(), detail);
+            diag.captureWithDetail(error.ReducerCorruptedLevels, @src(), detail);
             return error.ReducerCorruptedLevels;
         }
 
@@ -192,7 +192,7 @@ const LevelSnapshot = struct {
                 if (level.items.len != self.level_sizes[i]) {
                     var buf: [96]u8 = undefined;
                     const detail = std.fmt.bufPrint(&buf, "level {d}: expected {d} nodes, got {d}", .{ i, self.level_sizes[i], level.items.len }) catch "node count changed";
-                    errors.captureErrorWithDetail(error.ReducerCorruptedNodeCount, @src(), detail);
+                    diag.captureWithDetail(error.ReducerCorruptedNodeCount, @src(), detail);
                     return error.ReducerCorruptedNodeCount;
                 }
                 current_total += level.items.len;
@@ -203,7 +203,7 @@ const LevelSnapshot = struct {
         if (current_total != self.total_nodes) {
             var buf: [96]u8 = undefined;
             const detail = std.fmt.bufPrint(&buf, "expected {d} total nodes, got {d}", .{ self.total_nodes, current_total }) catch "total node count changed";
-            errors.captureErrorWithDetail(error.ReducerMissingNode, @src(), detail);
+            diag.captureWithDetail(error.ReducerMissingNode, @src(), detail);
             return error.ReducerMissingNode;
         }
     }
@@ -224,6 +224,7 @@ pub fn runPipeline(
     levels: *VirtualLevels,
     g: *const Graph,
     allocator: Allocator,
+    diag: *errors.Diagnostics,
 ) !void {
     for (reducers) |*reducer| {
         // Capture state before reducer runs
@@ -234,7 +235,7 @@ pub fn runPipeline(
 
         // Validate state after reducer (debug builds only for performance)
         if (std.debug.runtime_safety) {
-            try snapshot.validate(levels);
+            try snapshot.validate(levels, diag);
         }
     }
 }
@@ -281,9 +282,10 @@ test "LevelSnapshot validation detects level corruption" {
 
     // Capture snapshot
     const snapshot = LevelSnapshot.capture(&levels);
+    var diag = errors.Diagnostics{};
 
     // Unchanged levels should validate
-    try snapshot.validate(&levels);
+    try snapshot.validate(&levels, &diag);
     try std.testing.expectEqual(@as(usize, 2), snapshot.level_count);
     try std.testing.expectEqual(@as(usize, 5), snapshot.total_nodes);
     try std.testing.expectEqual(@as(usize, 2), snapshot.level_sizes[0]);
@@ -291,10 +293,10 @@ test "LevelSnapshot validation detects level corruption" {
 
     // Add an extra level - should detect corruption
     try levels.levels.append(allocator, .empty);
-    try std.testing.expectError(error.ReducerCorruptedLevels, snapshot.validate(&levels));
+    try std.testing.expectError(error.ReducerCorruptedLevels, snapshot.validate(&levels, &diag));
 
     // Remove the extra level, but change node count in level 1
     _ = levels.levels.pop();
     _ = levels.levels.items[1].pop();
-    try std.testing.expectError(error.ReducerCorruptedNodeCount, snapshot.validate(&levels));
+    try std.testing.expectError(error.ReducerCorruptedNodeCount, snapshot.validate(&levels, &diag));
 }

@@ -27,6 +27,19 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
 
+    // No-globals gate: module-level mutable state breaks the
+    // passive-parallelism contract. Fails the test step on any violation.
+    const no_globals_tool = b.addExecutable(.{
+        .name = "check_no_globals",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/check_no_globals.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    const run_no_globals = b.addRunArtifact(no_globals_tool);
+    run_no_globals.setCwd(b.path("."));
+    test_step.dependOn(&run_no_globals.step);
+
     // Long-running stress/fuzz harness
     const fuzz_harness = b.addExecutable(.{
         .name = "fuzz_harness",

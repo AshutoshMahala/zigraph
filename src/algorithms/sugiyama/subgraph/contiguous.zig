@@ -162,15 +162,15 @@ pub fn promoteSubgraphRoots(
         const node_sg = g.nodeSubgraph(node_id) orelse continue;
         _ = node_sg;
 
-        const has_parents = g.parents.items[node_idx].items.len > 0;
-        const has_children = g.children.items[node_idx].items.len > 0;
+        const has_parents = g.getParents(node_idx).len > 0;
+        const has_children = g.getChildren(node_idx).len > 0;
 
         if (has_parents) continue; // Not a root — skip
 
         if (has_children) {
             // Root with outgoing edges: move to min(child_levels) - 1
             var min_child_level: usize = std.math.maxInt(usize);
-            for (g.children.items[node_idx].items) |child_idx| {
+            for (g.getChildren(node_idx)) |child_idx| {
                 min_child_level = @min(min_child_level, assignment.levels[child_idx]);
             }
             if (min_child_level > 0 and min_child_level != std.math.maxInt(usize)) {

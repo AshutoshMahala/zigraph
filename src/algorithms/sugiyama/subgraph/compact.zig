@@ -50,9 +50,7 @@ pub fn refineAndCompact(
     // Scratch buffer for median computation — pre-allocate for max degree
     var max_degree: usize = 0;
     for (0..node_count) |ni| {
-        var deg: usize = 0;
-        if (ni < g.children.items.len) deg += g.children.items[ni].items.len;
-        if (ni < g.parents.items.len) deg += g.parents.items[ni].items.len;
+        const deg = g.getChildren(ni).len + g.getParents(ni).len;
         max_degree = @max(max_degree, deg);
     }
     var median_buf = std.ArrayListUnmanaged(usize).empty;
@@ -236,33 +234,29 @@ fn groupSiblingSubgraphs(
     for (0..node_count) |ni| {
         const grp = node_group[ni];
         // Children in different groups
-        if (ni < g.children.items.len) {
-            for (g.children.items[ni].items) |child| {
-                if (child >= node_count) continue;
-                if (node_group[child] != grp) {
-                    const cx: u64 = @intCast(node_x[child] + node_widths[child] / 2);
-                    const s = try nbr_sum.getOrPut(allocator, grp);
-                    if (!s.found_existing) s.value_ptr.* = 0;
-                    s.value_ptr.* += cx;
-                    const c = try nbr_cnt.getOrPut(allocator, grp);
-                    if (!c.found_existing) c.value_ptr.* = 0;
-                    c.value_ptr.* += 1;
-                }
+        for (g.getChildren(ni)) |child| {
+            if (child >= node_count) continue;
+            if (node_group[child] != grp) {
+                const cx: u64 = @intCast(node_x[child] + node_widths[child] / 2);
+                const s = try nbr_sum.getOrPut(allocator, grp);
+                if (!s.found_existing) s.value_ptr.* = 0;
+                s.value_ptr.* += cx;
+                const c = try nbr_cnt.getOrPut(allocator, grp);
+                if (!c.found_existing) c.value_ptr.* = 0;
+                c.value_ptr.* += 1;
             }
         }
         // Parents in different groups
-        if (ni < g.parents.items.len) {
-            for (g.parents.items[ni].items) |parent| {
-                if (parent >= node_count) continue;
-                if (node_group[parent] != grp) {
-                    const cx: u64 = @intCast(node_x[parent] + node_widths[parent] / 2);
-                    const s = try nbr_sum.getOrPut(allocator, grp);
-                    if (!s.found_existing) s.value_ptr.* = 0;
-                    s.value_ptr.* += cx;
-                    const c = try nbr_cnt.getOrPut(allocator, grp);
-                    if (!c.found_existing) c.value_ptr.* = 0;
-                    c.value_ptr.* += 1;
-                }
+        for (g.getParents(ni)) |parent| {
+            if (parent >= node_count) continue;
+            if (node_group[parent] != grp) {
+                const cx: u64 = @intCast(node_x[parent] + node_widths[parent] / 2);
+                const s = try nbr_sum.getOrPut(allocator, grp);
+                if (!s.found_existing) s.value_ptr.* = 0;
+                s.value_ptr.* += cx;
+                const c = try nbr_cnt.getOrPut(allocator, grp);
+                if (!c.found_existing) c.value_ptr.* = 0;
+                c.value_ptr.* += 1;
             }
         }
     }
@@ -460,19 +454,15 @@ fn connectedMedianX(
     buf.clearRetainingCapacity();
 
     // Children
-    if (node_idx < g.children.items.len) {
-        for (g.children.items[node_idx].items) |child_idx| {
-            if (child_idx < node_level.len and node_level[child_idx] == adj_level) {
-                buf.appendAssumeCapacity(node_x[child_idx] + node_widths[child_idx] / 2);
-            }
+    for (g.getChildren(node_idx)) |child_idx| {
+        if (child_idx < node_level.len and node_level[child_idx] == adj_level) {
+            buf.appendAssumeCapacity(node_x[child_idx] + node_widths[child_idx] / 2);
         }
     }
     // Parents
-    if (node_idx < g.parents.items.len) {
-        for (g.parents.items[node_idx].items) |parent_idx| {
-            if (parent_idx < node_level.len and node_level[parent_idx] == adj_level) {
-                buf.appendAssumeCapacity(node_x[parent_idx] + node_widths[parent_idx] / 2);
-            }
+    for (g.getParents(node_idx)) |parent_idx| {
+        if (parent_idx < node_level.len and node_level[parent_idx] == adj_level) {
+            buf.appendAssumeCapacity(node_x[parent_idx] + node_widths[parent_idx] / 2);
         }
     }
 

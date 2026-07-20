@@ -44,6 +44,7 @@ pub const CycleInfo = graph.CycleInfo;
 pub const errors = @import("core/errors.zig");
 pub const Code = errors.Code;
 pub const Diagnostic = errors.Diagnostic;
+pub const Diagnostics = errors.Diagnostics;
 pub const DiagnosticInfo = errors.DiagnosticInfo;
 pub const ZigraphError = errors.ZigraphError;
 pub const ValidationFailures = errors.ValidationFailures;
@@ -337,11 +338,15 @@ pub const LayoutError = error{
 /// `.depth_first` to automatically handle cyclic graphs.
 /// Custom crossing reducers may return additional errors.
 /// Use `graph.validate()` before calling for detailed cycle info.
-pub fn layout(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
+/// On semantic errors (empty graph, cycles, reducer corruption),
+/// `g.lastDiagnostic()` carries full context (code, detail, nodes);
+/// allocation failures propagate without capturing a diagnostic.
+pub fn layout(g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
+    g.diagnostics.clear();
     return switch (config.algorithm) {
-        .sugiyama => layoutSugiyama(g, allocator, config),
-        .fruchterman_reingold => |fr_config| layoutFdg(g, allocator, config, fr_config, false),
-        .fruchterman_reingold_fast => |fr_config| layoutFdg(g, allocator, config, fr_config, true),
+        .sugiyama => layoutSugiyama(g, allocator, config, &g.diagnostics),
+        .fruchterman_reingold => |fr_config| layoutFdg(g, allocator, config, fr_config, false, &g.diagnostics),
+        .fruchterman_reingold_fast => |fr_config| layoutFdg(g, allocator, config, fr_config, true, &g.diagnostics),
     };
 }
 
@@ -352,10 +357,11 @@ fn layoutFdg(
     _: LayoutConfig,
     fr_config: fdg.fruchterman_reingold.Config,
     fast: bool,
+    diag: *errors.Diagnostics,
 ) anyerror!LayoutIR(usize) {
     const n = g.nodeCount();
     if (n == 0) {
-        errors.captureError(error.EmptyGraph, @src());
+        diag.capture(error.EmptyGraph, @src());
         return error.EmptyGraph;
     }
 
@@ -863,7 +869,7 @@ const dummy_key_stride: usize = 10000;
 ///
 /// Checks for empty graph and cycles. When cycle_breaking is disabled,
 /// cycles are rejected with diagnostics (human-readable detail + node IDs).
-fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) !void {
+fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig, diag: *errors.Diagnostics) !void {
     if (config.skip_validation) return;
 
     var validation_result = try g.validate(allocator);
@@ -871,7 +877,7 @@ fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: La
 
     switch (validation_result) {
         .empty => {
-            errors.captureError(error.EmptyGraph, @src());
+            diag.capture(error.EmptyGraph, @src());
             return error.EmptyGraph;
         },
         .cycle => |cycle_info| {
@@ -903,7 +909,7 @@ fn validateForSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: La
                     id_buf[i] = if (g.nodeAt(node_idx)) |node| node.id else node_idx;
                 }
 
-                errors.captureErrorFull(error.CycleDetected, @src(), fbs_writer.buffered(), id_buf[0..id_count]);
+                diag.captureFull(error.CycleDetected, @src(), fbs_writer.buffered(), id_buf[0..id_count]);
                 return error.CycleDetected;
             }
         },
@@ -1206,9 +1212,9 @@ fn widenForLabels(result: *LayoutIR(usize), total_width: usize, total_height: us
 }
 
 /// Compute layout using the Sugiyama hierarchical algorithm.
-fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
+fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig, diag: *errors.Diagnostics) anyerror!LayoutIR(usize) {
     // Step 0: Validate graph (unless skipped)
-    try validateForSugiyama(g, allocator, config);
+    try validateForSugiyama(g, allocator, config, diag);
 
     // Step 0b: Cycle breaking — detect and virtually reverse back edges
     const reversed_edges: ?[]bool = switch (config.cycle_breaking) {
@@ -1370,7 +1376,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
         }
     } else {
         // Standard flat crossing reduction pipeline
-        try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator);
+        try crossing.runPipeline(config.crossing_reducers, &virtual_levels, g, allocator, diag);
     }
 
     // Step 3b: Compute adaptive level spacing
@@ -1798,7 +1804,7 @@ fn layoutSugiyama(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 /// var ir_u16 = try zigraph.layoutTyped(u16, &graph, allocator, .{});
 /// defer ir_u16.deinit();
 /// ```
-pub fn layoutTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(Coord) {
+pub fn layoutTyped(comptime Coord: type, g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(Coord) {
     var usize_result = try layout(g, allocator, config);
 
     // Fast path: no conversion needed when Coord is already usize
@@ -1816,7 +1822,7 @@ pub fn layoutTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.All
 /// Returns the terminal (box-drawing) string representation of the graph.
 /// Returns error.EmptyGraph or error.CycleDetected if graph is invalid.
 /// Custom crossing reducers may return additional errors.
-pub fn render(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+pub fn render(g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layout(g, allocator, config);
     defer layout_ir.deinit();
 
@@ -1835,7 +1841,7 @@ pub fn render(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfi
 ///
 /// Use this to integrate with external tools (SVG renderers, web UIs, etc.)
 /// Custom crossing reducers may return additional errors.
-pub fn exportJson(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+pub fn exportJson(g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layout(g, allocator, config);
     defer layout_ir.deinit();
 
@@ -1851,7 +1857,7 @@ pub fn exportJson(g: *const Graph, allocator: std.mem.Allocator, config: LayoutC
 /// For Terminal and SVG, the renderers convert back to usize internally,
 /// so prefer `render()` for those formats unless you need the typed IR
 /// for other purposes.
-pub fn renderTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+pub fn renderTyped(comptime Coord: type, g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layoutTyped(Coord, g, allocator, config);
     defer layout_ir.deinit();
 
@@ -1871,7 +1877,7 @@ pub fn renderTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.All
 /// const json_f32 = try zigraph.exportJsonTyped(f32, &graph, allocator, .{});
 /// // Output: {"nodes":[{"x":3.0,"y":0.0,...}], ...}
 /// ```
-pub fn exportJsonTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+pub fn exportJsonTyped(comptime Coord: type, g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layoutTyped(Coord, g, allocator, config);
     defer layout_ir.deinit();
 
@@ -1890,7 +1896,7 @@ pub fn exportJsonTyped(comptime Coord: type, g: *const Graph, allocator: std.mem
 /// defer allocator.free(output);
 /// try std.fs.cwd().writeFile(.{ .sub_path = "graph.svg", .data = output });
 /// ```
-pub fn exportSvg(g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+pub fn exportSvg(g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layout(g, allocator, config);
     defer layout_ir.deinit();
 
@@ -1898,7 +1904,7 @@ pub fn exportSvg(g: *const Graph, allocator: std.mem.Allocator, config: LayoutCo
 }
 
 /// Export graph layout as SVG with a custom coordinate type.
-pub fn exportSvgTyped(comptime Coord: type, g: *const Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
+pub fn exportSvgTyped(comptime Coord: type, g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror![]u8 {
     var layout_ir = try layoutTyped(Coord, g, allocator, config);
     defer layout_ir.deinit();
 
@@ -2889,6 +2895,7 @@ test {
     _ = json;
     _ = subgraph_layout;
     _ = @import("fuzz_tests.zig");
+    _ = @import("parallel_contract_tests.zig");
 
     // Force-directed graph modules
     _ = fdg.fixed_point;

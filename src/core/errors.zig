@@ -232,7 +232,7 @@ pub const DiagnosticInfo = struct {
 /// Rich runtime diagnostic — carries full context for a single error.
 ///
 /// Produced by `diagnosticInfo()` for comptime metadata, or by
-/// `lastDiagnostic()` for full context including source location.
+/// `graph.lastDiagnostic()` for full context including source location.
 ///
 /// ## Usage
 /// ```zig
@@ -462,110 +462,93 @@ pub fn diagnosticInfo(err: ZigraphError) DiagnosticInfo {
 }
 
 // ============================================================================
-// Source Location Capture
+// Diagnostics (per-graph error capture)
 // ============================================================================
 
-/// Most recent error source location (single-threaded; set by captureSrc).
-/// This is module-level state — safe because zigraph is single-threaded.
-var last_src: ?std.builtin.SourceLocation = null;
-
-/// Most recent error code (set alongside last_src).
-var last_err: ?ZigraphError = null;
-
-/// Buffer for the most recent error detail string (no allocation needed).
-var last_detail_buf: [512]u8 = undefined;
-var last_detail_len: usize = 0;
-
-/// Buffer for the most recent error node IDs (no allocation needed).
-const max_captured_nodes = 64;
-var last_nodes_buf: [max_captured_nodes]usize = undefined;
-var last_nodes_len: usize = 0;
-
-/// Record source location for the most recent error.
+/// Per-graph diagnostic capture state.
 ///
-/// Call this immediately before returning an error to capture where it happened:
-/// ```zig
-/// captureSrc(@src());
-/// return error.NodeNotFound;
-/// ```
-pub fn captureSrc(src: std.builtin.SourceLocation) void {
-    last_src = src;
-}
-
-/// Record both the error and source location.
+/// Each `Graph` embeds one of these, so independent graphs — including graphs
+/// used concurrently from different threads — never share or contaminate each
+/// other's diagnostics. Zero allocation: detail strings and node IDs are
+/// copied into fixed internal buffers (detail truncates at 512 bytes, nodes
+/// at 64 entries).
 ///
-/// Convenience for capturing context in a single call:
-/// ```zig
-/// captureError(error.CycleDetected, @src());
-/// return error.CycleDetected;
-/// ```
-pub fn captureError(err: ZigraphError, src: std.builtin.SourceLocation) void {
-    last_err = err;
-    last_src = src;
-    last_detail_len = 0;
-    last_nodes_len = 0;
-}
+/// Query via `graph.lastDiagnostic()`.
+pub const Diagnostics = struct {
+    /// Most recent error, if any.
+    err: ?ZigraphError = null,
+    /// Source location of the most recent error.
+    src: ?std.builtin.SourceLocation = null,
+    /// Fixed buffer for the most recent error's detail string.
+    detail_buf: [max_detail_len]u8 = undefined,
+    detail_len: usize = 0,
+    /// Fixed buffer for the most recent error's involved node IDs.
+    nodes_buf: [max_captured_nodes]usize = undefined,
+    nodes_len: usize = 0,
 
-/// Record error, source location, and a runtime detail string.
-///
-/// The detail is copied into an internal fixed buffer (truncated at 512 bytes).
-pub fn captureErrorWithDetail(err: ZigraphError, src: std.builtin.SourceLocation, detail: []const u8) void {
-    last_err = err;
-    last_src = src;
-    const len = @min(detail.len, last_detail_buf.len);
-    @memcpy(last_detail_buf[0..len], detail[0..len]);
-    last_detail_len = len;
-    last_nodes_len = 0;
-}
+    pub const max_detail_len = 512;
+    pub const max_captured_nodes = 64;
 
-/// Record error, source location, detail string, and involved node IDs.
-///
-/// Both detail and nodes are copied into internal fixed buffers — zero allocation.
-/// Detail truncates at 512 bytes, nodes at 64 entries.
-///
-/// ```zig
-/// errors.captureErrorFull(error.CycleDetected, @src(), "A -> B -> C -> A", &.{1, 2, 3, 1});
-/// ```
-pub fn captureErrorFull(
-    err: ZigraphError,
-    src: std.builtin.SourceLocation,
-    detail: []const u8,
-    node_ids: []const usize,
-) void {
-    last_err = err;
-    last_src = src;
-    const dlen = @min(detail.len, last_detail_buf.len);
-    @memcpy(last_detail_buf[0..dlen], detail[0..dlen]);
-    last_detail_len = dlen;
-    const nlen = @min(node_ids.len, max_captured_nodes);
-    @memcpy(last_nodes_buf[0..nlen], node_ids[0..nlen]);
-    last_nodes_len = nlen;
-}
+    /// Record an error and its source location:
+    /// ```zig
+    /// diag.capture(error.CycleDetected, @src());
+    /// return error.CycleDetected;
+    /// ```
+    pub fn capture(self: *Diagnostics, err: ZigraphError, src: std.builtin.SourceLocation) void {
+        self.err = err;
+        self.src = src;
+        self.detail_len = 0;
+        self.nodes_len = 0;
+    }
 
-/// Retrieve a full Diagnostic for the most recently captured error.
-///
-/// Returns null if no error has been captured via captureSrc/captureError.
-/// Combines the comptime DiagnosticInfo with the runtime source location.
-pub fn lastDiagnostic() ?Diagnostic {
-    const err = last_err orelse return null;
-    const info = diagnosticInfo(err);
-    return Diagnostic{
-        .code = info.code,
-        .message = info.message,
-        .hint = info.hint,
-        .detail = if (last_detail_len > 0) last_detail_buf[0..last_detail_len] else null,
-        .nodes = if (last_nodes_len > 0) last_nodes_buf[0..last_nodes_len] else null,
-        .src = last_src,
-    };
-}
+    /// Record an error with a runtime detail string (truncated at 512 bytes).
+    pub fn captureWithDetail(self: *Diagnostics, err: ZigraphError, src: std.builtin.SourceLocation, detail: []const u8) void {
+        self.capture(err, src);
+        const len = @min(detail.len, self.detail_buf.len);
+        @memcpy(self.detail_buf[0..len], detail[0..len]);
+        self.detail_len = len;
+    }
 
-/// Clear the captured error state.
-pub fn clearDiagnostic() void {
-    last_src = null;
-    last_err = null;
-    last_detail_len = 0;
-    last_nodes_len = 0;
-}
+    /// Record an error with a detail string and involved node IDs.
+    pub fn captureFull(
+        self: *Diagnostics,
+        err: ZigraphError,
+        src: std.builtin.SourceLocation,
+        detail: []const u8,
+        node_ids: []const usize,
+    ) void {
+        self.captureWithDetail(err, src, detail);
+        const nlen = @min(node_ids.len, self.nodes_buf.len);
+        @memcpy(self.nodes_buf[0..nlen], node_ids[0..nlen]);
+        self.nodes_len = nlen;
+    }
+
+    /// Retrieve a full Diagnostic for the most recently captured error.
+    ///
+    /// Returns null if no error has been captured since the last clear.
+    /// Returned slices point into this Diagnostics' buffers and are valid
+    /// until the next capture or clear.
+    pub fn last(self: *const Diagnostics) ?Diagnostic {
+        const err = self.err orelse return null;
+        const info = diagnosticInfo(err);
+        return Diagnostic{
+            .code = info.code,
+            .message = info.message,
+            .hint = info.hint,
+            .detail = if (self.detail_len > 0) self.detail_buf[0..self.detail_len] else null,
+            .nodes = if (self.nodes_len > 0) self.nodes_buf[0..self.nodes_len] else null,
+            .src = self.src,
+        };
+    }
+
+    /// Clear the captured error state.
+    pub fn clear(self: *Diagnostics) void {
+        self.err = null;
+        self.src = null;
+        self.detail_len = 0;
+        self.nodes_len = 0;
+    }
+};
 
 /// Cycle information returned when a cycle is detected
 pub const CycleInfo = struct {
@@ -1016,30 +999,31 @@ test "diagnosticInfo code matches errorCode" {
     }
 }
 
-test "captureSrc and lastDiagnostic" {
+test "Diagnostics capture and last" {
+    var d = Diagnostics{};
+
     // Initially no diagnostic
-    clearDiagnostic();
-    try std.testing.expect(lastDiagnostic() == null);
+    try std.testing.expect(d.last() == null);
 
     // Capture an error
-    captureError(error.EmptyGraph, @src());
-    const diag = lastDiagnostic().?;
+    d.capture(error.EmptyGraph, @src());
+    const diag = d.last().?;
     try std.testing.expectEqualStrings(Code.EMPTY_GRAPH, diag.code);
     try std.testing.expect(diag.src != null);
     try std.testing.expect(diag.hint.len > 0);
     try std.testing.expect(diag.detail == null);
 
     // Clear
-    clearDiagnostic();
-    try std.testing.expect(lastDiagnostic() == null);
+    d.clear();
+    try std.testing.expect(d.last() == null);
 }
 
-test "captureErrorWithDetail" {
-    clearDiagnostic();
+test "Diagnostics captureWithDetail" {
+    var d = Diagnostics{};
 
     // NodeNotFound with detail only — nodes should be null
-    captureErrorWithDetail(error.NodeNotFound, @src(), "node 42 does not exist");
-    const diag = lastDiagnostic().?;
+    d.captureWithDetail(error.NodeNotFound, @src(), "node 42 does not exist");
+    const diag = d.last().?;
     try std.testing.expectEqualStrings(Code.NODE_NOT_FOUND, diag.code);
     try std.testing.expect(diag.detail != null);
     try std.testing.expectEqualStrings("node 42 does not exist", diag.detail.?);
@@ -1048,19 +1032,17 @@ test "captureErrorWithDetail" {
     // Overlong detail is truncated, not a crash
     var long: [600]u8 = undefined;
     @memset(&long, 'x');
-    captureErrorWithDetail(error.OutOfMemory, @src(), &long);
-    const diag2 = lastDiagnostic().?;
+    d.captureWithDetail(error.OutOfMemory, @src(), &long);
+    const diag2 = d.last().?;
     try std.testing.expectEqual(@as(usize, 512), diag2.detail.?.len);
-
-    clearDiagnostic();
 }
 
-test "captureErrorFull with nodes" {
-    clearDiagnostic();
+test "Diagnostics captureFull with nodes" {
+    var d = Diagnostics{};
 
     // CycleDetected with detail + node IDs
-    captureErrorFull(error.CycleDetected, @src(), "A -> B -> C -> A", &.{ 1, 2, 3, 1 });
-    const diag = lastDiagnostic().?;
+    d.captureFull(error.CycleDetected, @src(), "A -> B -> C -> A", &.{ 1, 2, 3, 1 });
+    const diag = d.last().?;
     try std.testing.expectEqualStrings(Code.CYCLE_DETECTED, diag.code);
     try std.testing.expectEqualStrings("A -> B -> C -> A", diag.detail.?);
     try std.testing.expect(diag.nodes != null);
@@ -1070,19 +1052,45 @@ test "captureErrorFull with nodes" {
     try std.testing.expectEqual(@as(usize, 3), diag.nodes.?[2]);
     try std.testing.expectEqual(@as(usize, 1), diag.nodes.?[3]);
 
+    // Overlong node list is truncated, not a crash
+    var many_nodes: [80]usize = undefined;
+    for (&many_nodes, 0..) |*n, i| n.* = i;
+    d.captureFull(error.CycleDetected, @src(), "big cycle", &many_nodes);
+    const diag_trunc = d.last().?;
+    try std.testing.expectEqual(@as(usize, 64), diag_trunc.nodes.?.len);
+
     // NodeNotFound with single node ID
-    captureErrorFull(error.NodeNotFound, @src(), "node 42 does not exist", &.{42});
-    const diag2 = lastDiagnostic().?;
+    d.captureFull(error.NodeNotFound, @src(), "node 42 does not exist", &.{42});
+    const diag2 = d.last().?;
     try std.testing.expectEqual(@as(usize, 1), diag2.nodes.?.len);
     try std.testing.expectEqual(@as(usize, 42), diag2.nodes.?[0]);
 
-    // captureError clears nodes
-    captureError(error.EmptyGraph, @src());
-    const diag3 = lastDiagnostic().?;
+    // capture clears nodes and detail
+    d.capture(error.EmptyGraph, @src());
+    const diag3 = d.last().?;
     try std.testing.expect(diag3.nodes == null);
     try std.testing.expect(diag3.detail == null);
+}
 
-    clearDiagnostic();
+test "Diagnostics instances are independent" {
+    var a = Diagnostics{};
+    var b = Diagnostics{};
+
+    a.captureWithDetail(error.NodeNotFound, @src(), "graph A error");
+    b.captureWithDetail(error.EdgeLimitExceeded, @src(), "graph B error");
+
+    // A's capture is untouched by B's
+    const da = a.last().?;
+    try std.testing.expectEqualStrings(Code.NODE_NOT_FOUND, da.code);
+    try std.testing.expectEqualStrings("graph A error", da.detail.?);
+
+    const db = b.last().?;
+    try std.testing.expectEqualStrings("graph B error", db.detail.?);
+
+    // Clearing one does not clear the other
+    a.clear();
+    try std.testing.expect(a.last() == null);
+    try std.testing.expect(b.last() != null);
 }
 
 test "error to WDP code mapping" {
