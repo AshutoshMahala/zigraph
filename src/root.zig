@@ -31,6 +31,8 @@ const fp_mod = @import("algorithms/shared/fixed_point.zig");
 /// Core graph data structures
 pub const graph = @import("core/graph.zig");
 pub const Graph = graph.Graph;
+pub const NodeIndex = graph.NodeIndex;
+pub const nil_index = graph.nil_index;
 pub const Node = graph.Node;
 pub const Edge = graph.Edge;
 pub const NodeKind = graph.NodeKind;

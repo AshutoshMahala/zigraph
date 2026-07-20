@@ -26,11 +26,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   clear the previous diagnostic on entry; read-only queries (`validate`,
   `hasCycle`, `findRoots`, `findLeaves`, getters) never modify it;
   allocation failures propagate without capture.
+- **u32 internal indices** — internal dense node indices are now
+  `NodeIndex` (`u32`); node IDs and the `LayoutIR` contract remain `usize`.
+  - `getChildren`/`getParents` return `[]const NodeIndex` instead of
+    `[]const usize`. u32 widens implicitly wherever a `usize` is expected
+    (slice indexing, comparisons, appends), so most call sites compile
+    unchanged; only explicit `[]const usize` element-type annotations need
+    updating.
+  - `validation.zig` adjacency parameters are `NodeIndex`-typed.
+  - "Unlimited" caps (`max_nodes`/`max_edges` = 0, or configured above
+    4,294,967,295) now clamp to the 32-bit index capacity.
+  - Bug fix: nodes auto-created by `addEdgeAutoCreate` now respect
+    `max_nodes` (previously they bypassed the DoS cap entirely).
 
 ### Added
 
 - `Graph.lastDiagnostic()`, `Graph.clearDiagnostics()`, and a
   `zigraph.Diagnostics` re-export.
+- `zigraph.NodeIndex` (u32), `zigraph.nil_index` sentinel,
+  `Graph.index_capacity`, and `Graph.effectiveMaxNodes()`/
+  `effectiveMaxEdges()`.
 - Passive-parallelism contract tests (`src/parallel_contract_tests.zig`):
   diagnostics isolation across graphs, clear-on-entry semantics, accessor
   ordering, and byte-identical concurrent batch layouts.

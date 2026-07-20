@@ -21,6 +21,7 @@
 //! ```
 
 const std = @import("std");
+const core_index = @import("index.zig");
 const Allocator = std.mem.Allocator;
 const errors = @import("errors.zig");
 const validation = @import("validation.zig");
@@ -131,6 +132,10 @@ pub const Edge = struct {
     label: ?[]const u8 = null,
 };
 
+/// Re-exports of the internal index type (see `core/index.zig`).
+pub const NodeIndex = core_index.NodeIndex;
+pub const nil_index = core_index.nil_index;
+
 /// A graph with layout capabilities.
 ///
 /// Supports directed, undirected, and mixed edges. The graph stores
@@ -142,6 +147,11 @@ pub const Graph = struct {
 
     /// Default maximum number of edges (security limit to prevent DoS)
     pub const default_max_edges: usize = 500_000;
+
+    /// Hard ceiling imposed by the 32-bit index width. The effective cap is
+    /// `@min(configured_cap, index_capacity)`; "unlimited" (0) means this.
+    /// See `core/index.zig` for the capacity/sentinel relationship.
+    pub const index_capacity: usize = core_index.index_capacity;
 
     /// Configuration options for Graph initialization
     pub const Options = struct {
@@ -160,13 +170,13 @@ pub const Graph = struct {
     edges: std.ArrayListUnmanaged(Edge),
 
     /// Map from node ID to index in nodes array (O(1) lookup)
-    id_to_index: std.AutoHashMapUnmanaged(usize, usize),
+    id_to_index: std.AutoHashMapUnmanaged(usize, NodeIndex),
 
     /// Adjacency list: children[idx] = indices of child nodes
-    children: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)),
+    children: std.ArrayListUnmanaged(std.ArrayListUnmanaged(NodeIndex)),
 
     /// Adjacency list: parents[idx] = indices of parent nodes
-    parents: std.ArrayListUnmanaged(std.ArrayListUnmanaged(usize)),
+    parents: std.ArrayListUnmanaged(std.ArrayListUnmanaged(NodeIndex)),
 
     /// Resource limits
     max_nodes: usize,
@@ -291,17 +301,18 @@ pub const Graph = struct {
             return; // Already exists
         }
 
-        // Security: enforce max node limit to prevent DoS (0 = unlimited)
-        if (self.max_nodes > 0 and self.nodes.items.len >= self.max_nodes) {
+        // Enforce the effective node cap: configured DoS limit (0 = unlimited)
+        // clamped to the 32-bit index capacity.
+        if (self.nodes.items.len >= self.effectiveMaxNodes()) {
             var detail_buf: [96]u8 = undefined;
-            const detail = std.fmt.bufPrint(&detail_buf, "{d} nodes at limit of {d}", .{ self.nodes.items.len, self.max_nodes }) catch "node limit exceeded";
+            const detail = std.fmt.bufPrint(&detail_buf, "{d} nodes at limit of {d}", .{ self.nodes.items.len, self.effectiveMaxNodes() }) catch "node limit exceeded";
             self.diagnostics.captureWithDetail(error.NodeLimitExceeded, @src(), detail);
             return error.NodeLimitExceeded;
         }
 
         const idx = self.nodes.items.len;
         try self.nodes.append(self.allocator, node);
-        try self.id_to_index.put(self.allocator, id, idx);
+        try self.id_to_index.put(self.allocator, id, @intCast(idx));
 
         // Initialize empty adjacency lists for this node
         try self.children.append(self.allocator, .empty);
@@ -487,13 +498,32 @@ pub const Graph = struct {
     /// For graphs where you control node labels, prefer addNode() + addEdge().
     pub fn addEdgeAutoCreate(self: *Self, from: usize, to: usize) !void {
         self.diagnostics.clear();
+
+        // Preflight both caps before mutating anything, so an over-cap call
+        // cannot leave partially auto-created nodes behind.
+        const from_missing = !self.id_to_index.contains(from);
+        const to_missing = to != from and !self.id_to_index.contains(to);
+        const missing: usize = @as(usize, @intFromBool(from_missing)) + @intFromBool(to_missing);
+        if (self.nodes.items.len + missing > self.effectiveMaxNodes()) {
+            var detail_buf: [96]u8 = undefined;
+            const detail = std.fmt.bufPrint(&detail_buf, "{d} nodes + {d} auto-created at limit of {d}", .{ self.nodes.items.len, missing, self.effectiveMaxNodes() }) catch "node limit exceeded";
+            self.diagnostics.captureWithDetail(error.NodeLimitExceeded, @src(), detail);
+            return error.NodeLimitExceeded;
+        }
+        if (self.edges.items.len >= self.effectiveMaxEdges()) {
+            var detail_buf: [96]u8 = undefined;
+            const detail = std.fmt.bufPrint(&detail_buf, "{d} edges at limit of {d}", .{ self.edges.items.len, self.effectiveMaxEdges() }) catch "edge limit exceeded";
+            self.diagnostics.captureWithDetail(error.EdgeLimitExceeded, @src(), detail);
+            return error.EdgeLimitExceeded;
+        }
+
         // Auto-create 'from' node if missing
-        if (!self.id_to_index.contains(from)) {
+        if (from_missing) {
             const label = try self.allocIdLabel(from);
             try self.addNodeOwned(from, label);
         }
         // Auto-create 'to' node if missing
-        if (!self.id_to_index.contains(to)) {
+        if (to_missing) {
             const label = try self.allocIdLabel(to);
             try self.addNodeOwned(to, label);
         }
@@ -526,10 +556,11 @@ pub const Graph = struct {
             return error.NodeNotFound;
         };
 
-        // Security: enforce max edge limit to prevent DoS (0 = unlimited)
-        if (self.max_edges > 0 and self.edges.items.len >= self.max_edges) {
+        // Enforce the effective edge cap: configured DoS limit (0 = unlimited)
+        // clamped to the 32-bit index capacity.
+        if (self.edges.items.len >= self.effectiveMaxEdges()) {
             var detail_buf: [96]u8 = undefined;
-            const detail = std.fmt.bufPrint(&detail_buf, "{d} edges at limit of {d}", .{ self.edges.items.len, self.max_edges }) catch "edge limit exceeded";
+            const detail = std.fmt.bufPrint(&detail_buf, "{d} edges at limit of {d}", .{ self.edges.items.len, self.effectiveMaxEdges() }) catch "edge limit exceeded";
             self.diagnostics.captureWithDetail(error.EdgeLimitExceeded, @src(), detail);
             return error.EdgeLimitExceeded;
         }
@@ -576,19 +607,42 @@ pub const Graph = struct {
             return;
         }
 
+        // Auto-created nodes respect the same effective cap as addNode
+        // (previously uncapped — an auto-create path around the DoS limit).
+        if (self.nodes.items.len >= self.effectiveMaxNodes()) {
+            self.allocator.free(label);
+            var detail_buf: [96]u8 = undefined;
+            const detail = std.fmt.bufPrint(&detail_buf, "{d} nodes at limit of {d}", .{ self.nodes.items.len, self.effectiveMaxNodes() }) catch "node limit exceeded";
+            self.diagnostics.captureWithDetail(error.NodeLimitExceeded, @src(), detail);
+            return error.NodeLimitExceeded;
+        }
+
         const idx = self.nodes.items.len;
         var node = Node.init(id, label);
         node.owned_label = true; // Mark for cleanup
         node.kind = .implicit; // Auto-created from edge
         try self.nodes.append(self.allocator, node);
-        try self.id_to_index.put(self.allocator, id, idx);
+        try self.id_to_index.put(self.allocator, id, @intCast(idx));
         try self.children.append(self.allocator, .empty);
         try self.parents.append(self.allocator, .empty);
     }
 
     /// Get the index of a node by its ID.
+    /// Returned as usize for ergonomic slice indexing; internal storage is
+    /// `NodeIndex` (u32).
     pub fn nodeIndex(self: *const Self, id: usize) ?usize {
-        return self.id_to_index.get(id);
+        return if (self.id_to_index.get(id)) |idx| idx else null;
+    }
+
+    /// Effective node cap: the configured DoS limit (0 = unlimited) clamped
+    /// to the 32-bit index capacity.
+    pub fn effectiveMaxNodes(self: *const Self) usize {
+        return if (self.max_nodes == 0) index_capacity else @min(self.max_nodes, index_capacity);
+    }
+
+    /// Effective edge cap (same clamping as effectiveMaxNodes).
+    pub fn effectiveMaxEdges(self: *const Self) usize {
+        return if (self.max_edges == 0) index_capacity else @min(self.max_edges, index_capacity);
     }
 
     /// Get a node by its index.
@@ -604,13 +658,15 @@ pub const Graph = struct {
     }
 
     /// Get indices of all children of a node (by index).
-    pub fn getChildren(self: *const Self, idx: usize) []const usize {
+    /// Slice points into internal NodeIndex (u32) storage; u32 coerces to
+    /// usize wherever a slice index is expected.
+    pub fn getChildren(self: *const Self, idx: usize) []const NodeIndex {
         if (idx >= self.children.items.len) return &.{};
         return self.children.items[idx].items;
     }
 
     /// Get indices of all parents of a node (by index).
-    pub fn getParents(self: *const Self, idx: usize) []const usize {
+    pub fn getParents(self: *const Self, idx: usize) []const NodeIndex {
         if (idx >= self.parents.items.len) return &.{};
         return self.parents.items[idx].items;
     }
@@ -1054,4 +1110,91 @@ test "Graph: no subgraphs by default" {
 
     try std.testing.expectEqual(@as(usize, 0), g.subgraphCount());
     try std.testing.expect(!g.hasSubgraphs());
+}
+
+test "NodeIndex: adjacency storage and accessors are u32" {
+    // The index domain is 32-bit by contract; a silent revert to usize would
+    // double adjacency memory and break the CSR (Stage C) assumptions.
+    comptime {
+        std.debug.assert(NodeIndex == u32);
+        std.debug.assert(@TypeOf(nil_index) == NodeIndex);
+    }
+    const allocator = std.testing.allocator;
+    var g = Graph.init(allocator);
+    defer g.deinit();
+    try g.addNode(1, "a");
+    try g.addNode(2, "b");
+    try g.addDiEdge(1, 2);
+    comptime std.debug.assert(@TypeOf(g.getChildren(0)) == []const NodeIndex);
+    try std.testing.expectEqual(@as(NodeIndex, 1), g.getChildren(0)[0]);
+}
+
+test "effective caps: configured limits clamp to index capacity" {
+    const allocator = std.testing.allocator;
+
+    // 0 = unlimited now means "limited by index width".
+    var unlimited = Graph.initWithOptions(allocator, .{ .max_nodes = 0, .max_edges = 0 });
+    defer unlimited.deinit();
+    try std.testing.expectEqual(Graph.index_capacity, unlimited.effectiveMaxNodes());
+    try std.testing.expectEqual(Graph.index_capacity, unlimited.effectiveMaxEdges());
+
+    // Caps above u32 clamp down; caps below pass through. Above-capacity
+    // values are only expressible when usize is wider than NodeIndex; on
+    // 32-bit targets the index capacity IS the address-space limit.
+    if (comptime @bitSizeOf(usize) > @bitSizeOf(NodeIndex)) {
+        var huge = Graph.initWithOptions(allocator, .{
+            .max_nodes = std.math.maxInt(usize),
+            .max_edges = Graph.index_capacity + 1,
+        });
+        defer huge.deinit();
+        try std.testing.expectEqual(Graph.index_capacity, huge.effectiveMaxNodes());
+        try std.testing.expectEqual(Graph.index_capacity, huge.effectiveMaxEdges());
+    } else {
+        try std.testing.expectEqual(std.math.maxInt(usize), Graph.index_capacity);
+    }
+
+    var small = Graph.initWithOptions(allocator, .{ .max_nodes = 5, .max_edges = 7 });
+    defer small.deinit();
+    try std.testing.expectEqual(@as(usize, 5), small.effectiveMaxNodes());
+    try std.testing.expectEqual(@as(usize, 7), small.effectiveMaxEdges());
+}
+
+test "effective caps: auto-created nodes respect the node limit" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.initWithOptions(allocator, .{ .max_nodes = 2 });
+    defer g.deinit();
+
+    // Auto-creates nodes 1 and 2 — exactly at the cap.
+    try g.addEdgeAutoCreate(1, 2);
+    try std.testing.expectEqual(@as(usize, 2), g.nodeCount());
+
+    // Auto-creating node 3 must hit the cap (previously bypassed it).
+    try std.testing.expectError(error.NodeLimitExceeded, g.addEdgeAutoCreate(1, 3));
+    const d = g.lastDiagnostic().?;
+    try std.testing.expectEqualStrings(errors.Code.NODE_LIMIT_EXCEEDED, d.code);
+    try std.testing.expectEqual(@as(usize, 2), g.nodeCount()); // nothing leaked in
+}
+
+test "effective caps: over-cap auto-create leaves no partial mutation" {
+    const allocator = std.testing.allocator;
+
+    // Both endpoints missing, only one slot: preflight must reject before
+    // creating either node (previously node 1 leaked in, then node 2 failed).
+    var g = Graph.initWithOptions(allocator, .{ .max_nodes = 1 });
+    defer g.deinit();
+    try std.testing.expectError(error.NodeLimitExceeded, g.addEdgeAutoCreate(1, 2));
+    try std.testing.expectEqual(@as(usize, 0), g.nodeCount());
+
+    // A self-loop counts its endpoint once and fits in the single slot.
+    try g.addEdgeAutoCreate(7, 7);
+    try std.testing.expectEqual(@as(usize, 1), g.nodeCount());
+
+    // Edge cap is preflighted before nodes are auto-created.
+    var ge = Graph.initWithOptions(allocator, .{ .max_edges = 1 });
+    defer ge.deinit();
+    try ge.addEdgeAutoCreate(1, 2);
+    try std.testing.expectError(error.EdgeLimitExceeded, ge.addEdgeAutoCreate(3, 4));
+    try std.testing.expectEqualStrings(errors.Code.EDGE_LIMIT_EXCEEDED, ge.lastDiagnostic().?.code);
+    try std.testing.expectEqual(@as(usize, 2), ge.nodeCount()); // 3 and 4 not created
 }
