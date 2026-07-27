@@ -101,9 +101,9 @@ fn orderByMedianWithBuffers(
 
     for (level_nodes.items, 0..) |node_idx, pos| {
         const neighbor_indices = if (use_parents)
-            g.getParents(node_idx)
+            g.frozenParents(node_idx)
         else
-            g.getChildren(node_idx);
+            g.frozenChildren(node_idx);
 
         if (neighbor_indices.len == 0) {
             // No neighbors: keep original position
@@ -156,9 +156,9 @@ fn orderByMedian(
 
     for (level_nodes.items, 0..) |node_idx, pos| {
         const neighbor_indices = if (use_parents)
-            g.getParents(node_idx)
+            g.frozenParents(node_idx)
         else
-            g.getChildren(node_idx);
+            g.frozenChildren(node_idx);
 
         if (neighbor_indices.len == 0) {
             // No neighbors: keep original position
@@ -368,9 +368,9 @@ pub fn vnodeMedian(
     switch (vnode) {
         .real => |node_idx| {
             const neighbors = if (use_parents)
-                g.getParents(node_idx)
+                g.frozenParents(node_idx)
             else
-                g.getChildren(node_idx);
+                g.frozenChildren(node_idx);
 
             for (neighbors) |n_idx| {
                 if (n_idx < real_pos_map.len) {
@@ -488,6 +488,7 @@ test "median: simple crossing reduction" {
     var levels = [_]std.ArrayListUnmanaged(usize){ level0, level1 };
 
     // Run crossing reduction
+    _ = try g.ensureFrozen();
     try reduce(&g, &levels, 2, allocator);
 
     // After reduction, should reorder to eliminate crossing
@@ -554,6 +555,7 @@ test "median: reduceVirtual basic crossing" {
     try vlevels.levels.items[1].append(allocator, .{ .real = 2 }); // C
     try vlevels.levels.items[1].append(allocator, .{ .real = 3 }); // D
 
+    _ = try g.ensureFrozen();
     try reduceVirtual(&g, &vlevels, 4, allocator);
 
     // After reduction: crossing should be eliminated
@@ -592,6 +594,7 @@ test "median: reduceVirtual with dummy nodes" {
     try vlevels.levels.items[1].append(allocator, .{ .dummy = 0 }); // dummy for edge 0
     try vlevels.levels.items[2].append(allocator, .{ .real = 2 }); // C
 
+    _ = try g.ensureFrozen();
     try reduceVirtual(&g, &vlevels, 4, allocator);
 
     // Structure should be preserved: 3 levels, correct node counts
@@ -619,6 +622,7 @@ test "median: reduceVirtual single level is noop" {
     try vlevels.levels.items[0].append(allocator, .{ .real = 0 });
 
     // Should not crash on single level
+    _ = try g.ensureFrozen();
     try reduceVirtual(&g, &vlevels, 4, allocator);
     try std.testing.expectEqual(@as(usize, 1), vlevels.levels.items[0].items.len);
 }

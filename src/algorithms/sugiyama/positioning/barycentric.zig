@@ -130,7 +130,7 @@ pub fn compute(
             const parent_level = levels[li - 1];
 
             for (level.items) |node_idx| {
-                const parents = g.getParents(node_idx);
+                const parents = g.frozenParents(node_idx);
                 if (parents.len == 0) continue;
 
                 var sum: f64 = 0;
@@ -164,7 +164,7 @@ pub fn compute(
             const level = levels[li];
 
             for (level.items) |node_idx| {
-                const children = g.getChildren(node_idx);
+                const children = g.frozenChildren(node_idx);
                 if (children.len == 0) continue;
 
                 var min_child_left: f64 = std.math.floatMax(f64);
@@ -269,6 +269,7 @@ test "simple positioning: single level" {
 
     const levels = [_]std.ArrayListUnmanaged(usize){level0};
 
+    _ = try g.ensureFrozen();
     var pos = try compute(&g, &levels, .{}, allocator);
     defer pos.deinit();
 
@@ -302,6 +303,7 @@ test "simple positioning: two levels" {
 
     const levels = [_]std.ArrayListUnmanaged(usize){ level0, level1 };
 
+    _ = try g.ensureFrozen();
     var pos = try compute(&g, &levels, .{ .level_spacing = 2 }, allocator);
     defer pos.deinit();
 
@@ -334,6 +336,7 @@ test "simple positioning: parent centres over children" {
 
     const levels = [_]std.ArrayListUnmanaged(usize){ level0, level1 };
 
+    _ = try g.ensureFrozen();
     var pos = try compute(&g, &levels, .{}, allocator);
     defer pos.deinit();
 
@@ -379,6 +382,7 @@ test "simple positioning: asymmetric tree differs from left-packing" {
 
     const levels = [_]std.ArrayListUnmanaged(usize){ level0, level1, level2 };
 
+    _ = try g.ensureFrozen();
     var pos = try compute(&g, &levels, .{}, allocator);
     defer pos.deinit();
 

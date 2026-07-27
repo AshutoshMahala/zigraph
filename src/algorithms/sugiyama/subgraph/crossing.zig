@@ -537,6 +537,7 @@ test "blockBasedCrossingReduction: groups subgraph nodes contiguously" {
     try vlevels.levels.items[1].append(allocator, .{ .real = 2 }); // C
     try vlevels.levels.items[1].append(allocator, .{ .real = 3 }); // D
 
+    _ = try g.ensureFrozen();
     try blockBasedCrossingReduction(&g, &vlevels, 2, allocator);
 
     // Verify level structure preserved: 2 levels, same node counts
@@ -564,6 +565,7 @@ test "blockBasedCrossingReduction: preserves single-level graphs" {
     try vlevels.levels.items[0].append(allocator, .{ .real = 1 });
 
     // Single level: no adjacent pairs to sweep → should be noop
+    _ = try g.ensureFrozen();
     try blockBasedCrossingReduction(&g, &vlevels, 4, allocator);
 
     try std.testing.expectEqual(@as(usize, 1), vlevels.levels.items.len);
@@ -589,6 +591,7 @@ test "blockBasedCrossingReduction: zero passes is noop" {
     try vlevels.levels.append(allocator, .empty);
     try vlevels.levels.items[1].append(allocator, .{ .real = 1 });
 
+    _ = try g.ensureFrozen();
     try blockBasedCrossingReduction(&g, &vlevels, 0, allocator);
 
     try std.testing.expectEqual(@as(usize, 2), vlevels.levels.items.len);
@@ -637,6 +640,7 @@ test "blockOrderLevel: separates interleaved subgraph members" {
     @memset(real_pm, std.math.maxInt(usize));
     @memset(dummy_pm, std.math.maxInt(usize));
 
+    _ = try g.ensureFrozen();
     blockOrderLevel(&g, &level, real_pm, dummy_pm, true, medians, pos_buf, bkeys, scratch);
 
     // After block ordering: sg_a nodes should be contiguous, sg_b nodes contiguous.
@@ -696,6 +700,7 @@ test "blockOrderLevel: root nodes form their own block" {
     @memset(real_pm, std.math.maxInt(usize));
     @memset(dummy_pm, std.math.maxInt(usize));
 
+    _ = try g.ensureFrozen();
     blockOrderLevel(&g, &level, real_pm, dummy_pm, true, meds, pbuf, bk, scr);
 
     const items = level.items;
@@ -753,6 +758,7 @@ test "blockBasedCrossingReduction: integrates with graph edges" {
     try vlevels.levels.items[1].append(allocator, .{ .real = 3 }); // B
     try vlevels.levels.items[1].append(allocator, .{ .real = 4 }); // C
 
+    _ = try g.ensureFrozen();
     try blockBasedCrossingReduction(&g, &vlevels, 4, allocator);
 
     // After block-based reduction:

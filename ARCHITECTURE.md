@@ -85,9 +85,11 @@ zigraph/
 │   │
 │   ├── core/
 │   │   ├── graph.zig         # Graph, Node, Edge, Subgraph, Options (with resource limits)
+│   │   ├── index.zig         # NodeIndex (u32), nil_index, index_capacity
+│   │   ├── csr.zig           # Csr, FrozenGraph — frozen CSR adjacency (the freeze point)
 │   │   ├── ir.zig            # LayoutIR, LayoutNode, LayoutEdge, EdgePath, SubgraphInfo
 │   │   ├── validation.zig    # Cycle detection, graph validation, Requirements
-│   │   └── errors.zig        # WDP Level 0 error codes, ValidationFailures
+│   │   └── errors.zig        # WDP Level 0 error codes, Diagnostics, ValidationFailures
 │   │
 │   ├── algorithms/
 │   │   ├── interface.zig              # LayoutAlgorithm contract for BYOA
@@ -345,12 +347,14 @@ Bitset-based validation for reporting multiple failures:
 
 ```zig
 // ValidationFailures is a packed struct(u8)
+// Validation reads the frozen CSR adjacency view.
+const frozen = try graph.ensureFrozen();
 const failures = try zigraph.validation.checkRequirements(
-    graph.nodeCount(), 
-    graph.children, 
-    graph.parents, 
-    zigraph.Requirements.sugiyama, 
-    allocator
+    graph.nodeCount(),
+    &frozen.out,
+    &frozen.in,
+    zigraph.Requirements.sugiyama,
+    allocator,
 );
 
 if (!failures.isOk()) {

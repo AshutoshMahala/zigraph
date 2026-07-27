@@ -31,6 +31,9 @@ const fp_mod = @import("algorithms/shared/fixed_point.zig");
 /// Core graph data structures
 pub const graph = @import("core/graph.zig");
 pub const Graph = graph.Graph;
+pub const csr = @import("core/csr.zig");
+pub const Csr = csr.Csr;
+pub const FrozenGraph = csr.FrozenGraph;
 pub const NodeIndex = graph.NodeIndex;
 pub const nil_index = graph.nil_index;
 pub const Node = graph.Node;
@@ -345,6 +348,10 @@ pub const LayoutError = error{
 /// allocation failures propagate without capturing a diagnostic.
 pub fn layout(g: *Graph, allocator: std.mem.Allocator, config: LayoutConfig) anyerror!LayoutIR(usize) {
     g.diagnostics.clear();
+    // The freeze point: build the immutable CSR adjacency view the pipeline
+    // reads (see docs on Graph.ensureFrozen and core/csr.zig). Reused across
+    // layouts until the graph is mutated.
+    _ = try g.ensureFrozen();
     return switch (config.algorithm) {
         .sugiyama => layoutSugiyama(g, allocator, config, &g.diagnostics),
         .fruchterman_reingold => |fr_config| layoutFdg(g, allocator, config, fr_config, false, &g.diagnostics),
@@ -934,9 +941,9 @@ fn computeEffectiveLevelSpacing(g: *const Graph, config: LayoutConfig) usize {
 
     var max_fan: usize = 0;
     for (0..g.nodeCount()) |node_idx| {
-        const children = g.getChildren(node_idx);
+        const children = g.frozenChildren(node_idx);
         if (children.len > max_fan) max_fan = children.len;
-        const parents = g.getParents(node_idx);
+        const parents = g.frozenParents(node_idx);
         if (parents.len > max_fan) max_fan = parents.len;
     }
     // Scale level spacing with fan-out, but cap it to avoid excessive

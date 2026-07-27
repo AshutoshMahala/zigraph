@@ -66,7 +66,7 @@ pub fn detectBackEdges(g: *const Graph, allocator: Allocator) ![]bool {
 
         while (stack.items.len > 0) {
             const top = &stack.items[stack.items.len - 1];
-            const children = g.getChildren(top.node);
+            const children = g.frozenChildren(top.node);
 
             if (top.child_pos < children.len) {
                 const child = children[top.child_pos];
@@ -132,6 +132,7 @@ test "cycle_breaking: acyclic graph has no back edges" {
     try g.addEdge(2, 3);
     try g.addEdge(3, 4);
 
+    _ = try g.ensureFrozen();
     const reversed = try detectBackEdges(&g, allocator);
     defer allocator.free(reversed);
 
@@ -150,6 +151,7 @@ test "cycle_breaking: simple cycle A→B→C→A" {
     try g.addEdge(2, 3);
     try g.addEdge(3, 1); // Back edge
 
+    _ = try g.ensureFrozen();
     const reversed = try detectBackEdges(&g, allocator);
     defer allocator.free(reversed);
 
@@ -170,6 +172,7 @@ test "cycle_breaking: self-loop" {
     try g.addEdge(1, 2);
     try g.addEdge(1, 1); // Self-loop
 
+    _ = try g.ensureFrozen();
     const reversed = try detectBackEdges(&g, allocator);
     defer allocator.free(reversed);
 
@@ -194,6 +197,7 @@ test "cycle_breaking: two separate cycles" {
     try g.addEdge(3, 4);
     try g.addEdge(4, 3); // Back edge
 
+    _ = try g.ensureFrozen();
     const reversed = try detectBackEdges(&g, allocator);
     defer allocator.free(reversed);
 
@@ -219,6 +223,7 @@ test "cycle_breaking: diamond (no cycle)" {
     try g.addEdge(2, 4);
     try g.addEdge(3, 4);
 
+    _ = try g.ensureFrozen();
     const reversed = try detectBackEdges(&g, allocator);
     defer allocator.free(reversed);
 
@@ -241,6 +246,7 @@ test "cycle_breaking: complex graph with one cycle" {
     try g.addEdge(2, 4); // 3
     try g.addEdge(4, 2); // 4 - back edge
 
+    _ = try g.ensureFrozen();
     const reversed = try detectBackEdges(&g, allocator);
     defer allocator.free(reversed);
 
@@ -253,6 +259,7 @@ test "cycle_breaking: empty graph" {
     var g = Graph.init(allocator);
     defer g.deinit();
 
+    _ = try g.ensureFrozen();
     const reversed = try detectBackEdges(&g, allocator);
     defer allocator.free(reversed);
 

@@ -22,6 +22,7 @@
 
 const std = @import("std");
 const core_index = @import("index.zig");
+const csr = @import("csr.zig");
 const Allocator = std.mem.Allocator;
 const errors = @import("errors.zig");
 const validation = @import("validation.zig");
@@ -172,11 +173,11 @@ pub const Graph = struct {
     /// Map from node ID to index in nodes array (O(1) lookup)
     id_to_index: std.AutoHashMapUnmanaged(usize, NodeIndex),
 
-    /// Adjacency list: children[idx] = indices of child nodes
-    children: std.ArrayListUnmanaged(std.ArrayListUnmanaged(NodeIndex)),
-
-    /// Adjacency list: parents[idx] = indices of parent nodes
-    parents: std.ArrayListUnmanaged(std.ArrayListUnmanaged(NodeIndex)),
+    /// Cached frozen adjacency (CSR, both directions). Built lazily by
+    /// `ensureFrozen()` — the freeze point of the passive-parallelism
+    /// contract — and invalidated by any node/edge mutation. Adjacency
+    /// queries read this; the builder maintains no incremental adjacency.
+    frozen: ?csr.FrozenGraph = null,
 
     /// Resource limits
     max_nodes: usize,
@@ -218,8 +219,6 @@ pub const Graph = struct {
             .nodes = .empty,
             .edges = .empty,
             .id_to_index = .empty,
-            .children = .empty,
-            .parents = .empty,
             .max_nodes = options.max_nodes,
             .max_edges = options.max_edges,
             .subgraphs = .empty,
@@ -238,16 +237,8 @@ pub const Graph = struct {
             }
         }
 
-        // Free adjacency lists
-        for (self.children.items) |*child_list| {
-            child_list.deinit(self.allocator);
-        }
-        self.children.deinit(self.allocator);
-
-        for (self.parents.items) |*parent_list| {
-            parent_list.deinit(self.allocator);
-        }
-        self.parents.deinit(self.allocator);
+        // Free the cached frozen adjacency, if any
+        if (self.frozen) |*f| f.deinit();
 
         self.id_to_index.deinit(self.allocator);
         self.edges.deinit(self.allocator);
@@ -310,13 +301,14 @@ pub const Graph = struct {
             return error.NodeLimitExceeded;
         }
 
+        // Transactional commit: reserve everything fallible first, so the
+        // mutation either fully happens or leaves the graph (and any live
+        // frozen view) untouched. Invalidate the cache only on success.
+        try self.id_to_index.ensureUnusedCapacity(self.allocator, 1);
         const idx = self.nodes.items.len;
         try self.nodes.append(self.allocator, node);
-        try self.id_to_index.put(self.allocator, id, @intCast(idx));
-
-        // Initialize empty adjacency lists for this node
-        try self.children.append(self.allocator, .empty);
-        try self.parents.append(self.allocator, .empty);
+        self.id_to_index.putAssumeCapacity(id, @intCast(idx));
+        self.invalidateFrozen();
     }
 
     // ── Subgraph API ────────────────────────────────────────────────
@@ -543,13 +535,14 @@ pub const Graph = struct {
     ) !void {
         self.diagnostics.clear();
 
-        const from_idx = self.id_to_index.get(from) orelse {
+        // Both endpoints must exist (adjacency itself is built at freeze time).
+        _ = self.id_to_index.get(from) orelse {
             var detail_buf: [64]u8 = undefined;
             const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{from}) catch "node does not exist";
             self.diagnostics.captureFull(error.NodeNotFound, @src(), detail, &.{from});
             return error.NodeNotFound;
         };
-        const to_idx = self.id_to_index.get(to) orelse {
+        _ = self.id_to_index.get(to) orelse {
             var detail_buf: [64]u8 = undefined;
             const detail = std.fmt.bufPrint(&detail_buf, "node {d} does not exist", .{to}) catch "node does not exist";
             self.diagnostics.captureFull(error.NodeNotFound, @src(), detail, &.{to});
@@ -571,10 +564,9 @@ pub const Graph = struct {
             .directed = directed,
             .label = label,
         });
-
-        // Update adjacency lists
-        try self.children.items[from_idx].append(self.allocator, to_idx);
-        try self.parents.items[to_idx].append(self.allocator, from_idx);
+        // Invalidate only after the mutation committed: a failed append
+        // leaves both the topology and any live frozen view untouched.
+        self.invalidateFrozen();
     }
 
     /// Allocate a label string for an ID (e.g., 42 → "42")
@@ -617,14 +609,15 @@ pub const Graph = struct {
             return error.NodeLimitExceeded;
         }
 
+        // Same transactional ordering as addNode: commit, then invalidate.
+        try self.id_to_index.ensureUnusedCapacity(self.allocator, 1);
         const idx = self.nodes.items.len;
         var node = Node.init(id, label);
         node.owned_label = true; // Mark for cleanup
         node.kind = .implicit; // Auto-created from edge
         try self.nodes.append(self.allocator, node);
-        try self.id_to_index.put(self.allocator, id, @intCast(idx));
-        try self.children.append(self.allocator, .empty);
-        try self.parents.append(self.allocator, .empty);
+        self.id_to_index.putAssumeCapacity(id, @intCast(idx));
+        self.invalidateFrozen();
     }
 
     /// Get the index of a node by its ID.
@@ -657,18 +650,74 @@ pub const Graph = struct {
         return self.nodeAt(idx);
     }
 
-    /// Get indices of all children of a node (by index).
-    /// Slice points into internal NodeIndex (u32) storage; u32 coerces to
-    /// usize wherever a slice index is expected.
-    pub fn getChildren(self: *const Self, idx: usize) []const NodeIndex {
-        if (idx >= self.children.items.len) return &.{};
-        return self.children.items[idx].items;
+    /// Drop the cached frozen adjacency (called by every mutation).
+    fn invalidateFrozen(self: *Self) void {
+        if (self.frozen) |*f| {
+            f.deinit();
+            self.frozen = null;
+        }
     }
 
-    /// Get indices of all parents of a node (by index).
-    pub fn getParents(self: *const Self, idx: usize) []const NodeIndex {
-        if (idx >= self.parents.items.len) return &.{};
-        return self.parents.items[idx].items;
+    /// Build a frozen CSR adjacency view with the given allocator.
+    /// The caller owns the result (`deinit()` it). Does not touch the cache.
+    pub fn buildFrozen(self: *const Self, allocator: Allocator) !csr.FrozenGraph {
+        const m = self.edges.items.len;
+        const endpoints = try allocator.alloc([2]NodeIndex, m);
+        defer allocator.free(endpoints);
+        for (self.edges.items, 0..) |e, i| {
+            endpoints[i] = .{ self.id_to_index.get(e.from).?, self.id_to_index.get(e.to).? };
+        }
+        return csr.FrozenGraph.build(allocator, self.nodes.items.len, endpoints);
+    }
+
+    /// The freeze point: build (or reuse) the cached frozen adjacency view.
+    ///
+    /// The returned view is valid until the next node/edge mutation or
+    /// deinit. Layout entry points call this once before the pipeline runs;
+    /// after that, any number of threads may read the view concurrently.
+    pub fn ensureFrozen(self: *Self) !*const csr.FrozenGraph {
+        if (self.frozen == null) {
+            self.frozen = try self.buildFrozen(self.allocator);
+        }
+        return &self.frozen.?;
+    }
+
+    /// Get indices of all children of a node (by index), in edge-insertion
+    /// order. Slice points into internal NodeIndex (u32) storage; u32
+    /// coerces to usize wherever a slice index is expected.
+    ///
+    /// Lazily freezes the graph on first use after a mutation (hence `!` —
+    /// the freeze allocates). Prefer `ensureFrozen()` + `children()` on the
+    /// frozen view when querying in a loop that interleaves with mutations:
+    /// each mutation invalidates the cache and the next query rebuilds it
+    /// (O(V+E)). Out-of-range indices yield an empty slice.
+    pub fn getChildren(self: *Self, idx: usize) ![]const NodeIndex {
+        const f = try self.ensureFrozen();
+        return f.children(idx);
+    }
+
+    /// Get indices of all parents of a node (by index), in edge-insertion
+    /// order. Same freezing semantics as `getChildren`.
+    pub fn getParents(self: *Self, idx: usize) ![]const NodeIndex {
+        const f = try self.ensureFrozen();
+        return f.parents(idx);
+    }
+
+    /// Children of a node on an already-frozen graph (const access for the
+    /// layout pipeline). Requires `ensureFrozen()` to have been called with
+    /// no mutation since — layout entry points guarantee this before the
+    /// pipeline runs. Panics with an explicit message (in every build mode,
+    /// not just safe builds) if the graph is not frozen.
+    /// (Stage D replaces pipeline use with explicit FrozenGraph parameters.)
+    pub fn frozenChildren(self: *const Self, idx: usize) []const NodeIndex {
+        if (self.frozen) |*f| return f.children(idx);
+        @panic("zigraph: adjacency queried on an unfrozen graph — call ensureFrozen() (layout() does this) before frozenChildren/frozenParents");
+    }
+
+    /// Parents counterpart of `frozenChildren`; same contract.
+    pub fn frozenParents(self: *const Self, idx: usize) []const NodeIndex {
+        if (self.frozen) |*f| return f.parents(idx);
+        @panic("zigraph: adjacency queried on an unfrozen graph — call ensureFrozen() (layout() does this) before frozenChildren/frozenParents");
     }
 
     /// Retrieve the diagnostic for the most recent captured error on this graph.
@@ -705,25 +754,37 @@ pub const Graph = struct {
     }
 
     /// Find all root nodes (nodes with no parents).
+    /// Computed by a direct O(V+E) edge scan — works on const graphs
+    /// without freezing.
     pub fn findRoots(self: *const Self, allocator: Allocator) !std.ArrayListUnmanaged(usize) {
-        var roots: std.ArrayListUnmanaged(usize) = .empty;
-        for (self.parents.items, 0..) |parent_list, idx| {
-            if (parent_list.items.len == 0) {
-                try roots.append(allocator, idx);
-            }
-        }
-        return roots;
+        return self.findDegreeless(allocator, .to);
     }
 
     /// Find all leaf nodes (nodes with no children).
+    /// Computed by a direct O(V+E) edge scan — works on const graphs
+    /// without freezing.
     pub fn findLeaves(self: *const Self, allocator: Allocator) !std.ArrayListUnmanaged(usize) {
-        var leaves: std.ArrayListUnmanaged(usize) = .empty;
-        for (self.children.items, 0..) |child_list, idx| {
-            if (child_list.items.len == 0) {
-                try leaves.append(allocator, idx);
-            }
+        return self.findDegreeless(allocator, .from);
+    }
+
+    /// Collect nodes with no incident edge on the given side (`.to` marks
+    /// nodes with parents → roots remain; `.from` marks nodes with
+    /// children → leaves remain).
+    fn findDegreeless(self: *const Self, allocator: Allocator, comptime side: enum { from, to }) !std.ArrayListUnmanaged(usize) {
+        const n = self.nodes.items.len;
+        const marked = try allocator.alloc(bool, n);
+        defer allocator.free(marked);
+        @memset(marked, false);
+        for (self.edges.items) |e| {
+            const id = if (side == .to) e.to else e.from;
+            if (self.id_to_index.get(id)) |idx| marked[idx] = true;
         }
-        return leaves;
+        var result: std.ArrayListUnmanaged(usize) = .empty;
+        errdefer result.deinit(allocator);
+        for (0..n) |idx| {
+            if (!marked[idx]) try result.append(allocator, idx);
+        }
+        return result;
     }
 
     /// Validate the graph for layout operations.
@@ -736,12 +797,14 @@ pub const Graph = struct {
     /// This should be called before layout to get detailed error info.
     /// See `validation.zig` for the standalone algorithm.
     pub fn validate(self: *const Self, allocator: Allocator) !ValidationResult {
-        return validation.validate(
-            self.nodes.items.len,
-            self.children.items,
-            self.parents.items,
-            allocator,
-        );
+        // Reuse the cached frozen view when present (layout freezes before
+        // validating); otherwise build a temporary one.
+        if (self.frozen) |*f| {
+            return validation.validate(self.nodes.items.len, &f.out, &f.in, allocator);
+        }
+        var tmp = try self.buildFrozen(allocator);
+        defer tmp.deinit();
+        return validation.validate(self.nodes.items.len, &tmp.out, &tmp.in, allocator);
     }
 
     /// Check if the graph contains a cycle.
@@ -749,11 +812,12 @@ pub const Graph = struct {
     /// This is a convenience method that returns true/false.
     /// Use `validate()` for detailed cycle information.
     pub fn hasCycle(self: *const Self, allocator: Allocator) !bool {
-        return validation.hasCycle(
-            self.nodes.items.len,
-            self.children.items,
-            allocator,
-        );
+        if (self.frozen) |*f| {
+            return validation.hasCycle(self.nodes.items.len, &f.out, allocator);
+        }
+        var tmp = try self.buildFrozen(allocator);
+        defer tmp.deinit();
+        return validation.hasCycle(self.nodes.items.len, &tmp.out, allocator);
     }
 };
 
@@ -779,11 +843,11 @@ test "Graph: basic node and edge operations" {
     try std.testing.expectEqual(@as(usize, 2), g.edgeCount());
 
     // Check adjacency
-    const children_of_1 = g.getChildren(0);
+    const children_of_1 = try g.getChildren(0);
     try std.testing.expectEqual(@as(usize, 1), children_of_1.len);
     try std.testing.expectEqual(@as(usize, 1), children_of_1[0]); // index of node 2
 
-    const parents_of_2 = g.getParents(1);
+    const parents_of_2 = try g.getParents(1);
     try std.testing.expectEqual(@as(usize, 1), parents_of_2.len);
     try std.testing.expectEqual(@as(usize, 0), parents_of_2[0]); // index of node 1
 }
@@ -1125,8 +1189,9 @@ test "NodeIndex: adjacency storage and accessors are u32" {
     try g.addNode(1, "a");
     try g.addNode(2, "b");
     try g.addDiEdge(1, 2);
-    comptime std.debug.assert(@TypeOf(g.getChildren(0)) == []const NodeIndex);
-    try std.testing.expectEqual(@as(NodeIndex, 1), g.getChildren(0)[0]);
+    const children = try g.getChildren(0);
+    comptime std.debug.assert(@TypeOf(children) == []const NodeIndex);
+    try std.testing.expectEqual(@as(NodeIndex, 1), children[0]);
 }
 
 test "effective caps: configured limits clamp to index capacity" {

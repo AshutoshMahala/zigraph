@@ -50,7 +50,7 @@ pub fn refineAndCompact(
     // Scratch buffer for median computation — pre-allocate for max degree
     var max_degree: usize = 0;
     for (0..node_count) |ni| {
-        const deg = g.getChildren(ni).len + g.getParents(ni).len;
+        const deg = g.frozenChildren(ni).len + g.frozenParents(ni).len;
         max_degree = @max(max_degree, deg);
     }
     var median_buf = std.ArrayListUnmanaged(usize).empty;
@@ -234,7 +234,7 @@ fn groupSiblingSubgraphs(
     for (0..node_count) |ni| {
         const grp = node_group[ni];
         // Children in different groups
-        for (g.getChildren(ni)) |child| {
+        for (g.frozenChildren(ni)) |child| {
             if (child >= node_count) continue;
             if (node_group[child] != grp) {
                 const cx: u64 = @intCast(node_x[child] + node_widths[child] / 2);
@@ -247,7 +247,7 @@ fn groupSiblingSubgraphs(
             }
         }
         // Parents in different groups
-        for (g.getParents(ni)) |parent| {
+        for (g.frozenParents(ni)) |parent| {
             if (parent >= node_count) continue;
             if (node_group[parent] != grp) {
                 const cx: u64 = @intCast(node_x[parent] + node_widths[parent] / 2);
@@ -454,13 +454,13 @@ fn connectedMedianX(
     buf.clearRetainingCapacity();
 
     // Children
-    for (g.getChildren(node_idx)) |child_idx| {
+    for (g.frozenChildren(node_idx)) |child_idx| {
         if (child_idx < node_level.len and node_level[child_idx] == adj_level) {
             buf.appendAssumeCapacity(node_x[child_idx] + node_widths[child_idx] / 2);
         }
     }
     // Parents
-    for (g.getParents(node_idx)) |parent_idx| {
+    for (g.frozenParents(node_idx)) |parent_idx| {
         if (parent_idx < node_level.len and node_level[parent_idx] == adj_level) {
             buf.appendAssumeCapacity(node_x[parent_idx] + node_widths[parent_idx] / 2);
         }
@@ -683,5 +683,6 @@ test "compact: basic refine and compact" {
     const node_level = [_]usize{ 0, 1 };
     const node_widths = [_]usize{ 3, 3 };
 
+    _ = try g.ensureFrozen();
     try refineAndCompact(&g, &node_x, &node_level, &node_widths, 2, allocator);
 }

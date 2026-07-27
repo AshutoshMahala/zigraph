@@ -120,7 +120,7 @@ pub fn compute(
             const child_level = levels[level_idx + 1];
 
             for (level.items) |node_idx| {
-                const children = g.getChildren(node_idx);
+                const children = g.frozenChildren(node_idx);
                 const w: f64 = @floatFromInt(widths[node_idx]);
 
                 if (children.len > 0) {
@@ -158,7 +158,7 @@ pub fn compute(
             const parent_level = levels[level_idx - 1];
 
             for (level.items) |node_idx| {
-                const parents = g.getParents(node_idx);
+                const parents = g.frozenParents(node_idx);
                 if (parents.len == 0) continue;
 
                 var parent_center_sum: f64 = 0;
@@ -200,7 +200,7 @@ pub fn compute(
             const parent_level = levels[level_idx - 1];
 
             for (level.items) |node_idx| {
-                const parents = g.getParents(node_idx);
+                const parents = g.frozenParents(node_idx);
                 if (parents.len == 0) continue;
 
                 var parent_center_sum: f64 = 0;
@@ -242,7 +242,7 @@ pub fn compute(
             const child_level = levels[level_idx + 1];
 
             for (level.items) |node_idx| {
-                const children = g.getChildren(node_idx);
+                const children = g.frozenChildren(node_idx);
                 if (children.len == 0) continue;
 
                 const w: f64 = @floatFromInt(widths[node_idx]);
@@ -346,6 +346,7 @@ test "brandes_kopf: empty graph" {
     defer g.deinit();
 
     const levels = [_]std.ArrayListUnmanaged(usize){};
+    _ = try g.ensureFrozen();
     var result = try compute(&g, &levels, .{}, allocator);
     defer result.deinit();
 
@@ -364,6 +365,7 @@ test "brandes_kopf: single node" {
     try level0.append(allocator, 0);
 
     const levels = [_]std.ArrayListUnmanaged(usize){level0};
+    _ = try g.ensureFrozen();
     var result = try compute(&g, &levels, .{}, allocator);
     defer result.deinit();
 
@@ -391,6 +393,7 @@ test "brandes_kopf: binary tree centering" {
     try level1.append(allocator, 2);
 
     const levels = [_]std.ArrayListUnmanaged(usize){ level0, level1 };
+    _ = try g.ensureFrozen();
     var result = try compute(&g, &levels, .{}, allocator);
     defer result.deinit();
 

@@ -5,11 +5,11 @@
 //!
 //! ## Design Philosophy
 //!
-//! These algorithms operate on graph topology (adjacency lists) rather than
-//! the Graph type directly, enabling use in different contexts like:
+//! These algorithms operate on frozen CSR adjacency (`core/csr.zig`) rather
+//! than the Graph type directly, enabling use in different contexts like:
 //! - Pre-layout validation
-//! - Streaming edge processing
 //! - Alternative graph representations
+//! - Concurrent validation of independent graphs (CSR views are immutable)
 //!
 //! ## Algorithm: Three-Color DFS
 //!
@@ -30,18 +30,20 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const errors = @import("errors.zig");
 const NodeIndex = @import("index.zig").NodeIndex;
+const csr = @import("csr.zig");
+pub const Csr = csr.Csr;
 pub const ValidationResult = errors.ValidationResult;
 pub const CycleInfo = errors.CycleInfo;
 pub const ValidationFailures = errors.ValidationFailures;
 pub const Requirements = errors.Requirements;
 pub const GraphProperties = errors.GraphProperties;
 
-/// Validate a graph represented by adjacency lists.
+/// Validate a graph represented by frozen CSR adjacency.
 ///
 /// Parameters:
 /// - `node_count`: Number of nodes in the graph
-/// - `children`: For each node index, the indices of its children
-/// - `parents`: For each node index, the indices of its parents (used for cycle reconstruction)
+/// - `out`: Child adjacency (this → child), used for traversal
+/// - `in`: Parent adjacency (parent → this), used for cycle reconstruction
 /// - `allocator`: Allocator for temporary and result allocations
 ///
 /// Returns:
@@ -50,8 +52,8 @@ pub const GraphProperties = errors.GraphProperties;
 /// - `.cycle` with path information if a cycle is detected
 pub fn validate(
     node_count: usize,
-    children: []const std.ArrayListUnmanaged(NodeIndex),
-    parents: []const std.ArrayListUnmanaged(NodeIndex),
+    out: *const Csr,
+    in: *const Csr,
     allocator: Allocator,
 ) !ValidationResult {
     // Check for empty graph
@@ -96,7 +98,7 @@ pub fn validate(
 
             // Visit children
             var all_children_done = true;
-            for (children[current].items) |child| {
+            for (out.neighbors(current)) |child| {
                 if (color[child] == 1) {
                     // Found a back edge - cycle detected!
                     return try reconstructCycle(
@@ -104,7 +106,7 @@ pub fn validate(
                         current,
                         color,
                         &stack,
-                        parents,
+                        in,
                         allocator,
                     );
                 } else if (color[child] == 0) {
@@ -132,7 +134,7 @@ fn reconstructCycle(
     cycle_end: usize,
     color: []const u8,
     stack: *const std.ArrayListUnmanaged(usize),
-    parents: []const std.ArrayListUnmanaged(NodeIndex),
+    in: *const Csr,
     allocator: Allocator,
 ) !ValidationResult {
     var cycle_path: std.ArrayListUnmanaged(usize) = .empty;
@@ -148,7 +150,7 @@ fn reconstructCycle(
         for (stack.items) |s| {
             if (s == node) {
                 // Find who put us on the stack
-                for (parents[node].items) |p| {
+                for (in.neighbors(node)) |p| {
                     if (color[p] == 1) { // GRAY = in current path
                         node = p;
                         found_parent = true;
@@ -177,7 +179,7 @@ fn reconstructCycle(
 /// Use `validate()` for detailed cycle information.
 pub fn hasCycle(
     node_count: usize,
-    children: []const std.ArrayListUnmanaged(NodeIndex),
+    out: *const Csr,
     allocator: Allocator,
 ) !bool {
     if (node_count == 0) {
@@ -211,7 +213,7 @@ pub fn hasCycle(
             }
 
             var all_done = true;
-            for (children[current].items) |child| {
+            for (out.neighbors(current)) |child| {
                 if (color[child] == 1) {
                     return true; // Cycle found
                 } else if (color[child] == 0) {
@@ -234,8 +236,8 @@ pub fn hasCycle(
 /// Treats graph as undirected for connectivity check.
 pub fn countComponents(
     node_count: usize,
-    children: []const std.ArrayListUnmanaged(NodeIndex),
-    parents: []const std.ArrayListUnmanaged(NodeIndex),
+    out: *const Csr,
+    in: *const Csr,
     allocator: Allocator,
 ) !usize {
     if (node_count == 0) return 0;
@@ -262,14 +264,14 @@ pub fn countComponents(
 
     // Union edges (treat as undirected)
     for (0..node_count) |i| {
-        for (children[i].items) |j| {
+        for (out.neighbors(i)) |j| {
             const root_i = find(i, parent_arr);
             const root_j = find(j, parent_arr);
             if (root_i != root_j) {
                 parent_arr[root_i] = root_j;
             }
         }
-        for (parents[i].items) |j| {
+        for (in.neighbors(i)) |j| {
             const root_i = find(i, parent_arr);
             const root_j = find(j, parent_arr);
             if (root_i != root_j) {
@@ -291,35 +293,23 @@ pub fn countComponents(
 
 /// Compute all graph properties at once for validation.
 ///
-/// This gathers: node count, edge counts (directed/undirected), cycle detection,
-/// and component count into a single struct that can be checked against Requirements.
-///
-/// Parameters:
-/// - `node_count`: Number of nodes in the graph
-/// - `children`: For each node, the indices of its children (directed edges: this -> child)
-/// - `parents`: For each node, the indices of its parents (directed edges: parent -> this)
-/// - `is_directed`: For each edge in children lists, whether it's directed or undirected
-/// - `allocator`: For temporary allocations
-///
-/// The `is_directed` parameter should be indexed in a way that matches the edge order.
-/// If null, all edges are assumed to be directed.
+/// This gathers: node count, edge counts (directed/undirected), cycle
+/// detection, and component count into a single struct that can be checked
+/// against Requirements.
 pub fn computeProperties(
     node_count: usize,
-    children: []const std.ArrayListUnmanaged(NodeIndex),
-    parents: []const std.ArrayListUnmanaged(NodeIndex),
+    out: *const Csr,
+    in: *const Csr,
     allocator: Allocator,
 ) !GraphProperties {
-    // Count edges (each directed edge appears in children once)
-    var directed_count: usize = 0;
-    for (children) |child_list| {
-        directed_count += child_list.items.len;
-    }
+    // Each edge appears exactly once in the out direction.
+    const directed_count = out.targets.len;
 
     // Check for cycles
-    const has_cycle = try hasCycle(node_count, children, allocator);
+    const has_cycle = try hasCycle(node_count, out, allocator);
 
     // Count components
-    const components = try countComponents(node_count, children, parents, allocator);
+    const components = try countComponents(node_count, out, in, allocator);
 
     return GraphProperties{
         .node_count = node_count,
@@ -335,12 +325,12 @@ pub fn computeProperties(
 /// Convenience function that computes properties and checks requirements in one call.
 pub fn checkRequirements(
     node_count: usize,
-    children: []const std.ArrayListUnmanaged(NodeIndex),
-    parents: []const std.ArrayListUnmanaged(NodeIndex),
+    out: *const Csr,
+    in: *const Csr,
     requirements: Requirements,
     allocator: Allocator,
 ) !ValidationFailures {
-    const props = try computeProperties(node_count, children, parents, allocator);
+    const props = try computeProperties(node_count, out, in, allocator);
     return props.checkRequirements(requirements);
 }
 
@@ -348,108 +338,52 @@ pub fn checkRequirements(
 // Tests
 // ============================================================================
 
+const FrozenGraph = csr.FrozenGraph;
+
 test "validate: empty graph" {
     const allocator = std.testing.allocator;
-    const empty: []const std.ArrayListUnmanaged(NodeIndex) = &.{};
-    var result = try validate(0, empty, empty, allocator);
+    var fg = try FrozenGraph.build(allocator, 0, &.{});
+    defer fg.deinit();
+    var result = try validate(0, &fg.out, &fg.in, allocator);
     defer result.deinit();
     try std.testing.expect(result == .empty);
 }
 
 test "validate: single node" {
     const allocator = std.testing.allocator;
-
-    var children = [_]std.ArrayListUnmanaged(NodeIndex){.empty};
-    var parents = [_]std.ArrayListUnmanaged(NodeIndex){.empty};
-
-    var result = try validate(1, &children, &parents, allocator);
+    var fg = try FrozenGraph.build(allocator, 1, &.{});
+    defer fg.deinit();
+    var result = try validate(1, &fg.out, &fg.in, allocator);
     defer result.deinit();
     try std.testing.expect(result == .ok);
 }
 
 test "validate: simple chain" {
     const allocator = std.testing.allocator;
-
     // A -> B -> C
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 1);
-
-    var child1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child1.deinit(allocator);
-    try child1.append(allocator, 2);
-
-    const child2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-
-    const parent0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    var parent1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent1.deinit(allocator);
-    try parent1.append(allocator, 0);
-
-    var parent2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent2.deinit(allocator);
-    try parent2.append(allocator, 1);
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1, child2 };
-    const parents_arr = [_]std.ArrayListUnmanaged(NodeIndex){ parent0, parent1, parent2 };
-
-    var result = try validate(3, &children, &parents_arr, allocator);
+    var fg = try FrozenGraph.build(allocator, 3, &.{ .{ 0, 1 }, .{ 1, 2 } });
+    defer fg.deinit();
+    var result = try validate(3, &fg.out, &fg.in, allocator);
     defer result.deinit();
     try std.testing.expect(result == .ok);
 }
 
 test "validate: self-loop" {
     const allocator = std.testing.allocator;
-
     // A -> A
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 0);
-
-    var parent0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent0.deinit(allocator);
-    try parent0.append(allocator, 0);
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){child0};
-    const parents_arr = [_]std.ArrayListUnmanaged(NodeIndex){parent0};
-
-    var result = try validate(1, &children, &parents_arr, allocator);
+    var fg = try FrozenGraph.build(allocator, 1, &.{.{ 0, 0 }});
+    defer fg.deinit();
+    var result = try validate(1, &fg.out, &fg.in, allocator);
     defer result.deinit();
     try std.testing.expect(result == .cycle);
 }
 
 test "validate: triangle cycle" {
     const allocator = std.testing.allocator;
-
     // A -> B -> C -> A
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 1);
-
-    var child1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child1.deinit(allocator);
-    try child1.append(allocator, 2);
-
-    var child2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child2.deinit(allocator);
-    try child2.append(allocator, 0);
-
-    var parent0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent0.deinit(allocator);
-    try parent0.append(allocator, 2);
-
-    var parent1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent1.deinit(allocator);
-    try parent1.append(allocator, 0);
-
-    var parent2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent2.deinit(allocator);
-    try parent2.append(allocator, 1);
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1, child2 };
-    const parents_arr = [_]std.ArrayListUnmanaged(NodeIndex){ parent0, parent1, parent2 };
-
-    var result = try validate(3, &children, &parents_arr, allocator);
+    var fg = try FrozenGraph.build(allocator, 3, &.{ .{ 0, 1 }, .{ 1, 2 }, .{ 2, 0 } });
+    defer fg.deinit();
+    var result = try validate(3, &fg.out, &fg.in, allocator);
     defer result.deinit();
     try std.testing.expect(result == .cycle);
 }
@@ -458,121 +392,57 @@ test "hasCycle: quick check" {
     const allocator = std.testing.allocator;
 
     // A -> B (no cycle)
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 1);
+    var acyclic = try FrozenGraph.build(allocator, 2, &.{.{ 0, 1 }});
+    defer acyclic.deinit();
+    try std.testing.expect(!try hasCycle(2, &acyclic.out, allocator));
 
-    var child1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1 };
-
-    try std.testing.expect(!try hasCycle(2, &children, allocator));
-
-    // Now add cycle: B -> A
-    try child1.append(allocator, 0);
-    const children_cycle = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1 };
-    defer child1.deinit(allocator);
-
-    try std.testing.expect(try hasCycle(2, &children_cycle, allocator));
+    // A -> B, B -> A (cycle)
+    var cyclic = try FrozenGraph.build(allocator, 2, &.{ .{ 0, 1 }, .{ 1, 0 } });
+    defer cyclic.deinit();
+    try std.testing.expect(try hasCycle(2, &cyclic.out, allocator));
 }
 
 test "countComponents: empty graph" {
     const allocator = std.testing.allocator;
-    const empty: []const std.ArrayListUnmanaged(NodeIndex) = &.{};
-    const count = try countComponents(0, empty, empty, allocator);
+    var fg = try FrozenGraph.build(allocator, 0, &.{});
+    defer fg.deinit();
+    const count = try countComponents(0, &fg.out, &fg.in, allocator);
     try std.testing.expectEqual(@as(usize, 0), count);
 }
 
 test "countComponents: single node" {
     const allocator = std.testing.allocator;
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){.empty};
-    const parents = [_]std.ArrayListUnmanaged(NodeIndex){.empty};
-    const count = try countComponents(1, &children, &parents, allocator);
+    var fg = try FrozenGraph.build(allocator, 1, &.{});
+    defer fg.deinit();
+    const count = try countComponents(1, &fg.out, &fg.in, allocator);
     try std.testing.expectEqual(@as(usize, 1), count);
 }
 
 test "countComponents: connected chain" {
     const allocator = std.testing.allocator;
-
     // A -> B -> C (all connected)
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 1);
-
-    var child1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child1.deinit(allocator);
-    try child1.append(allocator, 2);
-
-    const child2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-
-    const parent0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    var parent1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent1.deinit(allocator);
-    try parent1.append(allocator, 0);
-
-    var parent2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent2.deinit(allocator);
-    try parent2.append(allocator, 1);
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1, child2 };
-    const parents_arr = [_]std.ArrayListUnmanaged(NodeIndex){ parent0, parent1, parent2 };
-
-    const count = try countComponents(3, &children, &parents_arr, allocator);
+    var fg = try FrozenGraph.build(allocator, 3, &.{ .{ 0, 1 }, .{ 1, 2 } });
+    defer fg.deinit();
+    const count = try countComponents(3, &fg.out, &fg.in, allocator);
     try std.testing.expectEqual(@as(usize, 1), count);
 }
 
 test "countComponents: disconnected" {
     const allocator = std.testing.allocator;
-
     // A -> B, C (isolated) - two components
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 1);
-
-    const child1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    const child2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-
-    const parent0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    var parent1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent1.deinit(allocator);
-    try parent1.append(allocator, 0);
-
-    const parent2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1, child2 };
-    const parents_arr = [_]std.ArrayListUnmanaged(NodeIndex){ parent0, parent1, parent2 };
-
-    const count = try countComponents(3, &children, &parents_arr, allocator);
+    var fg = try FrozenGraph.build(allocator, 3, &.{.{ 0, 1 }});
+    defer fg.deinit();
+    const count = try countComponents(3, &fg.out, &fg.in, allocator);
     try std.testing.expectEqual(@as(usize, 2), count);
 }
 
 test "computeProperties: basic dag" {
     const allocator = std.testing.allocator;
-
     // A -> B -> C
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 1);
+    var fg = try FrozenGraph.build(allocator, 3, &.{ .{ 0, 1 }, .{ 1, 2 } });
+    defer fg.deinit();
 
-    var child1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child1.deinit(allocator);
-    try child1.append(allocator, 2);
-
-    const child2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-
-    const parent0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    var parent1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent1.deinit(allocator);
-    try parent1.append(allocator, 0);
-
-    var parent2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent2.deinit(allocator);
-    try parent2.append(allocator, 1);
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1, child2 };
-    const parents_arr = [_]std.ArrayListUnmanaged(NodeIndex){ parent0, parent1, parent2 };
-
-    const props = try computeProperties(3, &children, &parents_arr, allocator);
+    const props = try computeProperties(3, &fg.out, &fg.in, allocator);
 
     try std.testing.expectEqual(@as(usize, 3), props.node_count);
     try std.testing.expectEqual(@as(usize, 2), props.directed_edge_count);
@@ -585,39 +455,20 @@ test "computeProperties: basic dag" {
 
 test "checkRequirements: sugiyama validation" {
     const allocator = std.testing.allocator;
-
     // Valid DAG: A -> B -> C
-    var child0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child0.deinit(allocator);
-    try child0.append(allocator, 1);
+    var fg = try FrozenGraph.build(allocator, 3, &.{ .{ 0, 1 }, .{ 1, 2 } });
+    defer fg.deinit();
 
-    var child1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer child1.deinit(allocator);
-    try child1.append(allocator, 2);
-
-    const child2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-
-    const parent0: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    var parent1: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent1.deinit(allocator);
-    try parent1.append(allocator, 0);
-
-    var parent2: std.ArrayListUnmanaged(NodeIndex) = .empty;
-    defer parent2.deinit(allocator);
-    try parent2.append(allocator, 1);
-
-    const children = [_]std.ArrayListUnmanaged(NodeIndex){ child0, child1, child2 };
-    const parents_arr = [_]std.ArrayListUnmanaged(NodeIndex){ parent0, parent1, parent2 };
-
-    const failures = try checkRequirements(3, &children, &parents_arr, Requirements.sugiyama, allocator);
+    const failures = try checkRequirements(3, &fg.out, &fg.in, Requirements.sugiyama, allocator);
     try std.testing.expect(failures.isOk());
 }
 
 test "checkRequirements: empty graph fails sugiyama" {
     const allocator = std.testing.allocator;
-    const empty: []const std.ArrayListUnmanaged(NodeIndex) = &.{};
+    var fg = try FrozenGraph.build(allocator, 0, &.{});
+    defer fg.deinit();
 
-    const failures = try checkRequirements(0, empty, empty, Requirements.sugiyama, allocator);
+    const failures = try checkRequirements(0, &fg.out, &fg.in, Requirements.sugiyama, allocator);
     try std.testing.expect(!failures.isOk());
     try std.testing.expect(failures.empty);
     try std.testing.expectEqual(@as(u8, 1), failures.count());

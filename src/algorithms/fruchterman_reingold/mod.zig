@@ -27,6 +27,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const graph_mod = @import("../../core/graph.zig");
+const csr_mod = @import("../../core/csr.zig");
 const Graph = graph_mod.Graph;
 
 // Shared modules
@@ -121,6 +122,16 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
         };
     }
 
+    // Resolve frozen adjacency: reuse the graph's cached view when present
+    // (layout() freezes before dispatch), else build a temporary one so
+    // direct callers need no prior freeze.
+    var local_frozen: ?csr_mod.FrozenGraph = null;
+    defer if (local_frozen) |*f| f.deinit();
+    const frozen: *const csr_mod.FrozenGraph = if (g.frozen) |*f| f else blk: {
+        local_frozen = try g.buildFrozen(allocator);
+        break :blk &local_frozen.?;
+    };
+
     // Initialize positions
     const positions = switch (config.initializer) {
         .grid => try common.initGrid(n, config.spacing, allocator),
@@ -161,7 +172,7 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
         // === Attractive forces: O(E) ===
         // Iterate over edges via adjacency lists
         for (0..n) |u| {
-            for (g.getChildren(u)) |v| {
+            for (frozen.children(u)) |v| {
                 forces.applyAttraction(positions, force_accum, u, v, inv_k);
             }
         }
@@ -225,6 +236,16 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
         };
     }
 
+    // Resolve frozen adjacency: reuse the graph's cached view when present
+    // (layout() freezes before dispatch), else build a temporary one so
+    // direct callers need no prior freeze.
+    var local_frozen: ?csr_mod.FrozenGraph = null;
+    defer if (local_frozen) |*f| f.deinit();
+    const frozen: *const csr_mod.FrozenGraph = if (g.frozen) |*f| f else blk: {
+        local_frozen = try g.buildFrozen(allocator);
+        break :blk &local_frozen.?;
+    };
+
     // Initialize positions
     const positions = switch (config.initializer) {
         .grid => try common.initGrid(n, config.spacing, allocator),
@@ -262,7 +283,7 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
 
         // === Attractive forces: O(E) ===
         for (0..n) |u| {
-            for (g.getChildren(u)) |v| {
+            for (frozen.children(u)) |v| {
                 forces.applyAttraction(positions, force_accum, u, v, inv_k);
             }
         }

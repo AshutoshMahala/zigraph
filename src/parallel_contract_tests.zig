@@ -118,19 +118,111 @@ test "accessors: neighbor order matches insertion order, out-of-range is empty" 
     const idx_c = g.nodeIndex(30).?;
     const idx_d = g.nodeIndex(40).?;
 
-    const children = g.getChildren(idx_a);
+    const children = try g.getChildren(idx_a);
     try std.testing.expectEqual(@as(usize, 3), children.len);
     try std.testing.expectEqual(idx_c, children[0]);
     try std.testing.expectEqual(idx_b, children[1]);
     try std.testing.expectEqual(idx_d, children[2]);
 
-    const parents = g.getParents(idx_b);
+    const parents = try g.getParents(idx_b);
     try std.testing.expectEqual(@as(usize, 1), parents.len);
     try std.testing.expectEqual(idx_a, parents[0]);
 
     // Out-of-range index degrades to an empty slice, not a panic.
-    try std.testing.expectEqual(@as(usize, 0), g.getChildren(999).len);
-    try std.testing.expectEqual(@as(usize, 0), g.getParents(999).len);
+    try std.testing.expectEqual(@as(usize, 0), (try g.getChildren(999)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try g.getParents(999)).len);
+}
+
+// ============================================================================
+// Freeze semantics
+// ============================================================================
+
+test "freeze: mutation invalidates the cached view, refreeze reflects it" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.init(allocator);
+    defer g.deinit();
+    try g.addNode(1, "a");
+    try g.addNode(2, "b");
+    try g.addDiEdge(1, 2);
+
+    const f1 = try g.ensureFrozen();
+    try std.testing.expectEqual(@as(usize, 1), f1.children(0).len);
+
+    // Mutating drops the cache; the next freeze sees the new edge.
+    try g.addNode(3, "c");
+    try g.addDiEdge(1, 3);
+    try std.testing.expect(g.frozen == null);
+
+    const f2 = try g.ensureFrozen();
+    try std.testing.expectEqual(@as(usize, 2), f2.children(0).len);
+
+    // Repeated freezes without mutation reuse the same cached view.
+    const f3 = try g.ensureFrozen();
+    try std.testing.expectEqual(@intFromPtr(f2), @intFromPtr(f3));
+}
+
+test "freeze: failed mutation leaves the live frozen view intact" {
+    const allocator = std.testing.allocator;
+
+    var g = Graph.initWithOptions(allocator, .{ .max_nodes = 2, .max_edges = 1 });
+    defer g.deinit();
+    try g.addNode(1, "a");
+    try g.addNode(2, "b");
+    try g.addDiEdge(1, 2);
+
+    const frozen = try g.ensureFrozen();
+    const before = frozen.children(0);
+
+    // Mutations that fail their preconditions must not touch the cache:
+    // the previously returned view (and slices into it) stay valid.
+    try std.testing.expectError(error.NodeLimitExceeded, g.addNode(3, "c"));
+    try std.testing.expectError(error.EdgeLimitExceeded, g.addDiEdge(2, 1));
+    try std.testing.expectError(error.NodeNotFound, g.addDiEdge(1, 99));
+
+    try std.testing.expect(g.frozen != null);
+    const after = try g.ensureFrozen();
+    try std.testing.expectEqual(@intFromPtr(frozen), @intFromPtr(after));
+    try std.testing.expectEqual(before.ptr, after.children(0).ptr);
+    try std.testing.expectEqualSlices(zigraph.NodeIndex, before, after.children(0));
+}
+
+fn workerSumDegrees(frozen: *const zigraph.FrozenGraph, out_sum: *usize) void {
+    var sum: usize = 0;
+    for (0..frozen.node_count) |i| {
+        sum += frozen.children(i).len + frozen.parents(i).len;
+    }
+    out_sum.* = sum;
+}
+
+test "freeze: one frozen view is safely shared by concurrent readers" {
+    if (@import("builtin").single_threaded) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+
+    var g = try buildVariant(allocator, 2);
+    defer g.deinit();
+    const frozen = try g.ensureFrozen();
+
+    // Serial reference: total degree = 2 * edge count.
+    var expected: usize = 0;
+    workerSumDegrees(frozen, &expected);
+    try std.testing.expectEqual(2 * g.edgeCount(), expected);
+
+    // Many readers of the same immutable view, no synchronization.
+    const n_readers = 8;
+    var sums = [_]usize{0} ** n_readers;
+    var threads: [n_readers]std.Thread = undefined;
+    var spawned: usize = 0;
+    for (0..n_readers) |i| {
+        threads[i] = std.Thread.spawn(.{}, workerSumDegrees, .{ frozen, &sums[i] }) catch break;
+        spawned += 1;
+    }
+    for (threads[0..spawned]) |*t| t.join();
+
+    try std.testing.expect(spawned > 0);
+    for (sums[0..spawned]) |s| {
+        try std.testing.expectEqual(expected, s);
+    }
 }
 
 // ============================================================================
@@ -229,7 +321,7 @@ test "diagnostics: read-only queries never modify the captured diagnostic" {
     roots.deinit(allocator);
     var leaves = try g.findLeaves(allocator);
     leaves.deinit(allocator);
-    _ = g.getChildren(0);
+    _ = try g.getChildren(0);
     _ = g.nodeCount();
 
     // The stale diagnostic is still there — read-only queries are inert.

@@ -39,10 +39,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Bug fix: nodes auto-created by `addEdgeAutoCreate` now respect
     `max_nodes` (previously they bypassed the DoS cap entirely).
 
+- **CSR freeze** — the Graph's per-node adjacency ArrayLists are replaced by
+  a frozen Compressed Sparse Row view built once at layout time (the
+  passive-parallelism freeze point). Neighbor content and ordering are
+  unchanged (edge-insertion order); layout output is identical.
+  - `getChildren`/`getParents` now take `*Graph` (was `*const`) and return
+    `![]const NodeIndex` (was plain slice): they lazily freeze, which can
+    allocate. Prefer `ensureFrozen()` + `FrozenGraph.children()/parents()`
+    when querying in loops that interleave with mutations — every mutation
+    invalidates the cached view and the next query rebuilds it in O(V+E).
+  - `validation.zig` functions (`validate`, `hasCycle`, `countComponents`,
+    `computeProperties`, `checkRequirements`) take `*const Csr` adjacency
+    instead of ArrayList-of-ArrayList slices.
+  - Sugiyama-internal steps read adjacency via `frozenChildren`/
+    `frozenParents`, which require a frozen graph (layout entry points
+    guarantee this) and panic in safe builds otherwise. Calling algorithm
+    internals directly requires `_ = try g.ensureFrozen();` first;
+    `fdg.fruchterman_reingold.compute()`/`computeFast()` handle this
+    themselves (cached view when present, temporary otherwise).
+
 ### Added
 
 - `Graph.lastDiagnostic()`, `Graph.clearDiagnostics()`, and a
   `zigraph.Diagnostics` re-export.
+- `core/csr.zig`: `Csr` and `FrozenGraph` (both-direction CSR with
+  `edge_ids` mapping entries back to the edge list), re-exported as
+  `zigraph.csr`/`Csr`/`FrozenGraph`; `Graph.ensureFrozen()` (cached),
+  `Graph.buildFrozen()` (caller-owned), `Graph.frozenChildren()`/
+  `frozenParents()` (const pipeline accessors).
+- Contract tests: freeze invalidation semantics, concurrent readers
+  sharing one frozen view with no synchronization, and failed-mutation
+  view stability.
+- `FrozenGraph.build` validates endpoint indices
+  (`error.EndpointOutOfRange`) rather than trusting callers, and graph
+  mutations commit transactionally: a mutation that fails (cap, missing
+  node, or allocation failure) leaves both the topology and any live
+  frozen view untouched — the cached view is invalidated only when a
+  mutation succeeds.
 - `zigraph.NodeIndex` (u32), `zigraph.nil_index` sentinel,
   `Graph.index_capacity`, and `Graph.effectiveMaxNodes()`/
   `effectiveMaxEdges()`.
