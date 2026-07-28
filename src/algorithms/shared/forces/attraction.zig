@@ -71,7 +71,7 @@ fn accumulateEndpoint(
 
     // f_att = d × inv_k (proportional to distance)
     const force_mag = fp.mul(d, inv_k);
-    const force_vec = delta.normalizeScaled(force_mag);
+    const force_vec = delta.normalizeScaledWithLength(force_mag, d);
 
     if (u == from) {
         fxs[u] = fp.accumSub(fxs[u], force_vec.x);

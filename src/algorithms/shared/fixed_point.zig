@@ -331,7 +331,21 @@ pub const Vec2 = struct {
     /// Normalize to unit length, scaled by `target_length`.
     /// If the vector is zero-length, returns (target_length, 0) to avoid NaN.
     pub fn normalizeScaled(self: Vec2, target_length: FP) Vec2 {
-        const len = self.length();
+        return self.normalizeScaledWithLength(target_length, self.length());
+    }
+
+    /// Like `normalizeScaled`, but reuses an already-computed `len` (which
+    /// must equal `self.length()` — asserted in **test builds only**, since
+    /// the check itself recomputes the sqrt this variant exists to avoid;
+    /// consumer builds, including Debug and ReleaseSafe, trust the caller
+    /// and keep the single-sqrt win). Every force interaction computes the
+    /// length for its distance guard and magnitude anyway; passing it in
+    /// removes the second Newton-loop square root per interaction.
+    /// Bit-identical to `normalizeScaled` given the same vector.
+    pub fn normalizeScaledWithLength(self: Vec2, target_length: FP, len: FP) Vec2 {
+        if (@import("builtin").is_test) {
+            std.debug.assert(len == self.length());
+        }
         if (len == 0) {
             return .{ .x = target_length, .y = ZERO };
         }
@@ -466,4 +480,36 @@ test "add/sub: saturating semantics at the extremes" {
     try std.testing.expectEqual(MIN, add(MIN, -ONE));
     try std.testing.expectEqual(MIN, sub(MIN, ONE));
     try std.testing.expectEqual(MAX, sub(MAX, -ONE));
+}
+
+test "normalizeScaledWithLength: equivalent to normalizeScaled" {
+    // Edge cases: zero vector, negatives, extremes near saturation.
+    const cases = [_]Vec2{
+        .{ .x = 0, .y = 0 },
+        .{ .x = fromInt(3), .y = fromInt(-4) },
+        .{ .x = -ONE, .y = -ONE },
+        .{ .x = MAX, .y = 0 },
+        .{ .x = MIN + 1, .y = ONE },
+    };
+    for (cases) |v| {
+        const a = v.normalizeScaled(fromInt(7));
+        const b = v.normalizeScaledWithLength(fromInt(7), v.length());
+        try std.testing.expectEqual(a.x, b.x);
+        try std.testing.expectEqual(a.y, b.y);
+    }
+
+    // Randomized vectors and target lengths.
+    var prng = std.Random.DefaultPrng.init(99);
+    const random = prng.random();
+    for (0..200) |_| {
+        const v = Vec2{
+            .x = random.intRangeAtMost(FP, -1_000_000, 1_000_000),
+            .y = random.intRangeAtMost(FP, -1_000_000, 1_000_000),
+        };
+        const target = random.intRangeAtMost(FP, 0, 500_000);
+        const a = v.normalizeScaled(target);
+        const b = v.normalizeScaledWithLength(target, v.length());
+        try std.testing.expectEqual(a.x, b.x);
+        try std.testing.expectEqual(a.y, b.y);
+    }
 }

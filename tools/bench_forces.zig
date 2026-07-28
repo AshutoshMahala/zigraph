@@ -298,6 +298,29 @@ fn legacyScatterPairwise(xs: []const FP, ys: []const FP, fxs: []FP, fys: []FP, k
     }
 }
 
+/// The historical scatter loop WITH the same normalization-reuse
+/// optimization the gather kernel now has. Comparing gather against this
+/// isolates the pure architectural gather tax (each pair computed twice);
+/// comparing against `legacyScatterPairwise` measures the regression vs
+/// the code that actually shipped pre-Stage-D.
+fn optimizedScatterPairwise(xs: []const FP, ys: []const FP, fxs: []FP, fys: []FP, k_squared: FP) void {
+    const Vec2 = fp.Vec2;
+    const n = xs.len;
+    for (0..n) |i| {
+        for ((i + 1)..n) |j| {
+            const delta = Vec2{ .x = xs[i] -| xs[j], .y = ys[i] -| ys[j] };
+            const d = delta.length();
+            if (d < 2) continue;
+            const force_mag = fp.div(k_squared, d);
+            const force_vec = delta.normalizeScaledWithLength(force_mag, d);
+            fxs[i] = fxs[i] +| force_vec.x;
+            fys[i] = fys[i] +| force_vec.y;
+            fxs[j] = fxs[j] -| force_vec.x;
+            fys[j] = fys[j] -| force_vec.y;
+        }
+    }
+}
+
 fn scatterVsGather(allocator: std.mem.Allocator, io: std.Io, n: usize, k_squared: FP) !void {
     const xs = try allocator.alloc(FP, n);
     defer allocator.free(xs);
@@ -311,26 +334,40 @@ fn scatterVsGather(allocator: std.mem.Allocator, io: std.Io, n: usize, k_squared
 
     const iters: usize = 200;
 
-    @memset(fxs, 0);
-    @memset(fys, 0);
+    // Per-pass resets keep accumulator values (and thus Newton-iteration
+    // counts) identical across repetitions; the memset cost is noise
+    // relative to the O(n²) kernels.
     const t_sc = startTs(io);
     for (0..iters) |_| {
+        @memset(fxs, 0);
+        @memset(fys, 0);
         legacyScatterPairwise(xs, ys, fxs, fys, k_squared);
     }
     const scatter_ns = elapsedNsPer(io, t_sc, iters);
     std.mem.doNotOptimizeAway(&fxs[0]);
 
-    @memset(fxs, 0);
-    @memset(fys, 0);
+    const t_opt = startTs(io);
+    for (0..iters) |_| {
+        @memset(fxs, 0);
+        @memset(fys, 0);
+        optimizedScatterPairwise(xs, ys, fxs, fys, k_squared);
+    }
+    const opt_scatter_ns = elapsedNsPer(io, t_opt, iters);
+    std.mem.doNotOptimizeAway(&fxs[0]);
+
     const t_ga = startTs(io);
     for (0..iters) |_| {
+        @memset(fxs, 0);
+        @memset(fys, 0);
         fdg.forces.accumulatePairwiseRepulsion(xs, ys, fxs, fys, k_squared, Range.full(n));
     }
     const gather_ns = elapsedNsPer(io, t_ga, iters);
     std.mem.doNotOptimizeAway(&fxs[0]);
 
-    const ratio = @as(f64, @floatFromInt(gather_ns)) / @as(f64, @floatFromInt(scatter_ns));
-    std.debug.print("scatter-vs-gather (n={d}): legacy scatter={d}ns  gather={d}ns  ratio={d:.2}x\n", .{ n, scatter_ns, gather_ns, ratio });
+    const vs_shipped = @as(f64, @floatFromInt(gather_ns)) / @as(f64, @floatFromInt(scatter_ns));
+    const gather_tax = @as(f64, @floatFromInt(gather_ns)) / @as(f64, @floatFromInt(opt_scatter_ns));
+    std.debug.print("scatter-vs-gather (n={d}): legacy={d}ns  optimized-scatter={d}ns  gather={d}ns  " ++
+        "vs-shipped={d:.2}x  gather-tax={d:.2}x\n", .{ n, scatter_ns, opt_scatter_ns, gather_ns, vs_shipped, gather_tax });
 }
 
 /// Measure (a) the full pairwise kernel, (b) only its delta+distance² part

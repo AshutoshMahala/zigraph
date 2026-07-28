@@ -416,7 +416,7 @@ fn applyForcesWithTemp(xs: []FP, ys: []FP, fxs: []const FP, fys: []const FP, tem
 
         // Clamp displacement to temperature
         const clamped = fp.min(disp, temperature);
-        const scaled = force.normalizeScaled(clamped);
+        const scaled = force.normalizeScaledWithLength(clamped, disp);
 
         xs[i] = fp.add(xs[i], scaled.x);
         ys[i] = fp.add(ys[i], scaled.y);

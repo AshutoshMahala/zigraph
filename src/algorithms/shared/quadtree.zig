@@ -236,7 +236,7 @@ pub const Quadtree = struct {
             // Single body — compute exact force
             // f_rep = k² / d, direction = delta / d (away from other body)
             const force_mag = fp.div(k_squared, d);
-            return delta.normalizeScaled(force_mag);
+            return delta.normalizeScaledWithLength(force_mag, d);
         }
 
         // Barnes-Hut check: if cell_size / d < θ, treat as single body
@@ -246,7 +246,7 @@ pub const Quadtree = struct {
             // Far enough — approximate
             // Force magnitude = k² * mass / d
             const force_mag = fp.div(fp.mul(k_squared, fp.fromInt(node.mass)), d);
-            return delta.normalizeScaled(force_mag);
+            return delta.normalizeScaledWithLength(force_mag, d);
         }
 
         // Too close — recurse into children

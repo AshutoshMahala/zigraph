@@ -49,7 +49,7 @@ pub fn accumulatePairwise(
 
             // f_rep = k² / d
             const force_mag = fp.div(k_squared, d);
-            const force_vec = delta.normalizeScaled(force_mag);
+            const force_vec = delta.normalizeScaledWithLength(force_mag, d);
 
             if (i == a) {
                 fxs[i] = fp.accumAdd(fxs[i], force_vec.x);

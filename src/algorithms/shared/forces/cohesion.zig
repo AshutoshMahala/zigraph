@@ -248,7 +248,7 @@ pub fn applyCohesion(
             if (d < 2) continue;
 
             const force_mag = fp.mul(strength, d);
-            const force_vec = delta.normalizeScaled(force_mag);
+            const force_vec = delta.normalizeScaledWithLength(force_mag, d);
             fxs[node_idx] = fp.accumAdd(fxs[node_idx], force_vec.x);
             fys[node_idx] = fp.accumAdd(fys[node_idx], force_vec.y);
         }
@@ -347,7 +347,7 @@ pub fn applySeparation(
             // Coulomb-like: f = strength * k² / d
             const base_force = fp.div(k_squared, d);
             const force_mag = fp.mul(strength, base_force);
-            const force_vec = delta.normalizeScaled(force_mag);
+            const force_vec = delta.normalizeScaledWithLength(force_mag, d);
 
             // Distribute evenly to transitive members of each subgraph
             const members_i = index.transitive[i];

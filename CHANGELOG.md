@@ -80,9 +80,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     every test run). Saturation itself remains supported with the
     historical silent-saturate semantics in all consumer build modes —
     the non-saturation check is test-build instrumentation only.
-  - **Measured serial cost**: the gather pairwise kernel is ≈2.0–2.15×
-    the old scatter loop (each pair computed once per endpoint;
-    machine-dependent within that band). This
+  - **Measured serial cost, two distinct numbers**: versus the code that
+    actually shipped pre-refactor, the gather pairwise kernel costs
+    ≈1.6–1.8× (the normalization reuse below claws back part of the
+    doubling). The pure architectural gather tax — measured against an
+    *equally optimized* scatter baseline — is ≈2.0×, exactly the
+    each-pair-computed-twice theory. This
     applies to the standard O(n²) variant only — `computeFast`'s
     Barnes-Hut path was already gather-shaped and did not regress, and
     attraction's absolute cost is microseconds. Accepted deliberately:
@@ -95,9 +98,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `Quadtree.build` takes SoA arrays (`xs, ys, allocator`).
   - `applyCohesion`/`applySeparation` take SoA arrays; they remain
     documented serial phases (subgraph-major writes).
-  - `fixed_point.accumAdd`/`accumSub`: saturating accumulation that
-    asserts non-saturation in safe builds — the checked precondition for
-    partition invariance and golden stability.
+  - `fixed_point.accumAdd`/`accumSub`: saturating accumulation whose
+    non-saturation check runs in **test builds only** — consumer builds
+    keep the historical silent-saturating semantics in every optimization
+    mode. The check is the verified precondition for attraction's golden
+    stability.
 
 ### Added
 
@@ -106,6 +111,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `fdg.common.Range` (half-open kernel range with `Range.full(n)`), and
   SoA grid initializers `initGridSoa`/`initGridJitterSoa` (PRNG-order
   compatible with the AoS versions, bit-identical positions).
+- `Vec2.normalizeScaledWithLength(target, len)`: reuses the caller's
+  already-computed length instead of recomputing the Newton-loop sqrt —
+  bit-identical to `normalizeScaled`. All force interactions use it;
+  measured: pairwise repulsion −18–23%, Barnes-Hut −13%, attraction −33%,
+  with golden output unchanged.
 - Contract tests: partition-shuffle invariance over the full force pass
   (repulsion + attraction + Barnes-Hut, random chunkings byte-compared),
   and a threaded test where workers write disjoint ranges of one shared

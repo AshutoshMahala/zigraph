@@ -37,7 +37,7 @@ pub fn accumulateToCenter(
         if (d < 2) continue;
 
         const force_mag = fp.mul(strength, d);
-        const force_vec = delta.normalizeScaled(force_mag);
+        const force_vec = delta.normalizeScaledWithLength(force_mag, d);
 
         fxs[i] = fp.accumAdd(fxs[i], force_vec.x);
         fys[i] = fp.accumAdd(fys[i], force_vec.y);
@@ -64,7 +64,7 @@ pub fn accumulateStrongGravity(
         if (d < 2) continue;
 
         // Force magnitude is constant (strong gravity)
-        const force_vec = delta.normalizeScaled(strength);
+        const force_vec = delta.normalizeScaledWithLength(strength, d);
         fxs[i] = fp.accumAdd(fxs[i], force_vec.x);
         fys[i] = fp.accumAdd(fys[i], force_vec.y);
     }
