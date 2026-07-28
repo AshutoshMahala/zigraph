@@ -138,7 +138,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   path, which alone accounted for roughly two-thirds of an apparent +56%
   slowdown; it was replaced by a bit-identical i64 quotient/remainder
   decomposition — important for WASM/embedded targets, where 128-bit
-  division lowers to a software helper.)
+  division lowers to a software helper. The decomposition is sign-aware
+  and saturates at both bounds: negative `Config.repulsion_strength`
+  — which inverts repulsion into attraction and has always been accepted
+  by the standard variant — behaves identically in both variants, with
+  the domain now documented on the config field.)
 
 ### Added
 

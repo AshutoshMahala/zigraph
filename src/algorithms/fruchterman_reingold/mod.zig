@@ -71,6 +71,9 @@ pub const Config = struct {
 
     /// Repulsion strength multiplier (Q16.16).
     /// Multiplied with k² for repulsive force. Default: 1.0.
+    /// Domain: any Q16.16 value. Negative values invert repulsion into
+    /// attraction (a niche but supported knob) — both the standard and
+    /// Barnes-Hut variants handle the sign identically.
     repulsion_strength: FP = fp.ONE,
 
     /// Attraction strength multiplier (Q16.16).

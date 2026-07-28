@@ -7,7 +7,7 @@
 //! range.end)` is written by exactly this call, reading only the frozen
 //! position arrays. Any partition of `[0, n)` produces bit-identical
 //! results (accumulation per cell runs in a fixed, data-defined order and
-//! is asserted non-saturating in safe builds).
+//! is asserted non-saturating in test builds).
 
 const std = @import("std");
 const fp = @import("../fixed_point.zig");

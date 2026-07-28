@@ -205,20 +205,28 @@ pub const Quadtree = struct {
     ///
     /// Uses i64 quotient/remainder decomposition instead of a 128-bit
     /// division (which lowers to an expensive software helper on WASM and
-    /// embedded targets): with a = q·d + r and everything non-negative,
-    /// (a << 16)/d == (q << 16) + (r << 16)/d exactly, preserving the
-    /// truncation semantics. All operands are non-negative by
-    /// construction (k² ≥ 0, mass > 0, d ≥ 2 from the caller's guard).
+    /// embedded targets): with a = q·d + r, (a·2¹⁶)/d == q·2¹⁶ + (r·2¹⁶)/d
+    /// exactly under truncating division — for either sign of `a`, since
+    /// @divTrunc/@rem are sign-symmetric. Sign-aware and saturating at both
+    /// bounds: `k_squared` may be negative (a negative
+    /// `Config.repulsion_strength` inverts repulsion into attraction, and
+    /// has always been accepted by the pairwise kernel — the two variants
+    /// must agree on the config domain). mass > 0 and d ≥ 2 are structural
+    /// invariants from the caller.
     fn mulMassDiv(k_squared: FP, mass: i32, d: FP) FP {
-        std.debug.assert(k_squared >= 0 and mass > 0 and d > 0);
+        std.debug.assert(mass > 0 and d > 0);
         const a: i64 = @as(i64, k_squared) * mass;
         const q = @divTrunc(a, d);
-        // If the scaled quotient alone exceeds Q16.16, the result saturates.
+        // If the scaled quotient alone leaves Q16.16, saturate (both signs).
         if (q > (std.math.maxInt(i32) >> fp.SHIFT)) return fp.MAX;
+        if (q < (std.math.minInt(i32) >> fp.SHIFT)) return fp.MIN;
+        // |q| ≤ 32768 → q·2¹⁶ fits i64; |r| < d keeps r·2¹⁶ within i64 and
+        // the remainder term within (−2¹⁶, 2¹⁶).
         const r = @rem(a, d);
-        // q ≤ 32767 → q<<16 ≤ 2³¹−2¹⁶; the remainder term is < 2¹⁶, so the
-        // sum fits i32 exactly (32767·65536 + 65535 == maxInt(i32)).
-        return @intCast((q << fp.SHIFT) + @divTrunc(r << fp.SHIFT, @as(i64, d)));
+        const result = q * (1 << fp.SHIFT) + @divTrunc(r * (1 << fp.SHIFT), @as(i64, d));
+        if (result > std.math.maxInt(i32)) return fp.MAX;
+        if (result < std.math.minInt(i32)) return fp.MIN;
+        return @intCast(result);
     }
 
     /// Determine which quadrant a position falls in relative to a node's center.
@@ -459,4 +467,52 @@ test "Quadtree: cells containing the target are never approximated" {
     const tol: FP = 2000; // ~0.03 in Q16.16, far below the pre-fix error
     try std.testing.expect(fp.abs(fp.sub(exact.x, aggressive.x)) < tol);
     try std.testing.expect(fp.abs(fp.sub(exact.y, aggressive.y)) < tol);
+}
+
+test "Quadtree: negative k_squared inverts force on leaf and aggregate paths" {
+    const allocator = std.testing.allocator;
+    // Cluster heavy enough to exercise the aggregate (mass) path.
+    const n = 120;
+    const xs_arr = try allocator.alloc(FP, n);
+    defer allocator.free(xs_arr);
+    const ys_arr = try allocator.alloc(FP, n);
+    defer allocator.free(ys_arr);
+    for (0..n) |i| {
+        xs_arr[i] = fp.fromInt(100) + fp.fromInt(@intCast(i % 8));
+        ys_arr[i] = fp.fromInt(@intCast(i / 8));
+    }
+    var qt = try Quadtree.build(xs_arr, ys_arr, allocator);
+    defer qt.deinit();
+
+    const far = Vec2{ .x = fp.fromInt(-500), .y = fp.ZERO };
+
+    // Aggregate path (theta accepts the cluster cell).
+    const pos_agg = qt.computeForce(far, fp.fromInt(400), fp.fromFloat(0.8));
+    const neg_agg = qt.computeForce(far, fp.fromInt(-400), fp.fromFloat(0.8));
+    try std.testing.expect(pos_agg.x < 0); // repulsion pushes away
+    try std.testing.expect(neg_agg.x > 0); // negative strength attracts
+    try std.testing.expectEqual(pos_agg.x, -neg_agg.x); // exact mirror
+    try std.testing.expectEqual(pos_agg.y, -neg_agg.y);
+
+    // Leaf path (theta = 0 → exact per-body walk).
+    const pos_leaf = qt.computeForce(far, fp.fromInt(400), fp.fromFloat(0.0));
+    const neg_leaf = qt.computeForce(far, fp.fromInt(-400), fp.fromFloat(0.0));
+    try std.testing.expect(pos_leaf.x < 0);
+    try std.testing.expect(neg_leaf.x > 0);
+    try std.testing.expectEqual(pos_leaf.x, -neg_leaf.x);
+}
+
+test "mulMassDiv: pins both saturation bounds" {
+    // Early positive saturation: the scaled quotient alone exceeds Q16.16.
+    try std.testing.expectEqual(fp.MAX, Quadtree.mulMassDiv(fp.fromInt(30000), 100, fp.fromInt(2)));
+    // Early negative saturation.
+    try std.testing.expectEqual(fp.MIN, Quadtree.mulMassDiv(fp.fromInt(-30000), 100, fp.fromInt(2)));
+    // Exact negative corner: k²·mass/d lands on MIN exactly (q = −32768,
+    // remainder 0 — passes the early guard, no clamping needed).
+    try std.testing.expectEqual(fp.MIN, Quadtree.mulMassDiv(fp.MIN, 3, fp.fromInt(3)));
+    // Post-sum negative clamp: q = −32768 with a negative remainder pushes
+    // the sum below MIN — the final clamp branch must catch it.
+    try std.testing.expectEqual(fp.MIN, Quadtree.mulMassDiv(fp.MIN, 3, 196607));
+    // In-range sanity just inside the bound: exact division, no clamping.
+    try std.testing.expectEqual(fp.fromInt(15000), Quadtree.mulMassDiv(fp.fromInt(30000), 1, fp.fromInt(2)));
 }
