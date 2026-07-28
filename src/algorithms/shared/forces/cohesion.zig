@@ -205,14 +205,22 @@ pub const SubgraphIndex = struct {
 /// The force magnitude is: `strength × distance_to_centroid`.
 /// This is similar to gravity but per-subgraph rather than global.
 ///
+/// **Serial phase** (not range-parameterized): iteration is subgraph-major
+/// and nested subgraphs write overlapping node sets, so this runs in the
+/// serial section of each iteration, like quadtree construction. A
+/// node-major gather reformulation (via a node → subgraphs reverse index)
+/// is deferred until profiling shows subgraph-heavy graphs need it.
+///
 /// Arguments:
-///   - positions: Node positions (read-only for centroid; written via forces).
-///   - forces: Force accumulators (modified in-place).
+///   - xs, ys: Node positions (read-only for centroid).
+///   - fxs, fys: Force accumulators (modified in-place).
 ///   - index: Pre-built SubgraphIndex mapping subgraphs → member nodes.
 ///   - strength: Cohesion strength multiplier (Q16.16). Typical: 0.3–1.0.
 pub fn applyCohesion(
-    positions: []const Vec2,
-    forces: []Vec2,
+    xs: []const FP,
+    ys: []const FP,
+    fxs: []FP,
+    fys: []FP,
     index: *const SubgraphIndex,
     strength: FP,
 ) void {
@@ -224,8 +232,8 @@ pub fn applyCohesion(
         var sum_x: i64 = 0;
         var sum_y: i64 = 0;
         for (member_indices) |node_idx| {
-            sum_x += positions[node_idx].x;
-            sum_y += positions[node_idx].y;
+            sum_x += xs[node_idx];
+            sum_y += ys[node_idx];
         }
         const n_members: i64 = @intCast(member_indices.len);
         const centroid = Vec2{
@@ -235,13 +243,14 @@ pub fn applyCohesion(
 
         // Pull each member toward centroid
         for (member_indices) |node_idx| {
-            const delta = centroid.subVec(positions[node_idx]);
+            const delta = Vec2{ .x = fp.sub(centroid.x, xs[node_idx]), .y = fp.sub(centroid.y, ys[node_idx]) };
             const d = delta.length();
             if (d < 2) continue;
 
             const force_mag = fp.mul(strength, d);
             const force_vec = delta.normalizeScaled(force_mag);
-            forces[node_idx] = forces[node_idx].addVec(force_vec);
+            fxs[node_idx] = fp.accumAdd(fxs[node_idx], force_vec.x);
+            fys[node_idx] = fp.accumAdd(fys[node_idx], force_vec.y);
         }
     }
 }
@@ -258,16 +267,21 @@ pub fn applyCohesion(
 /// Force magnitude per cluster pair: `strength × k² / d`
 /// where d = centroid-to-centroid distance.
 ///
+/// **Serial phase** — same contract as `applyCohesion`: sibling-pair
+/// iteration writes overlapping member sets; runs in the serial section.
+///
 /// Arguments:
-///   - positions: Node positions (read-only for centroids; written via forces).
-///   - forces: Force accumulators (modified in-place).
+///   - xs, ys: Node positions (read-only for centroids).
+///   - fxs, fys: Force accumulators (modified in-place).
 ///   - index: Pre-built SubgraphIndex mapping subgraphs → member nodes.
 ///   - graph: Graph reference for subgraph parent lookups.
 ///   - strength: Separation strength multiplier (Q16.16). Typical: 0.5–2.0.
 ///   - k_squared: Ideal spring length squared (same as repulsion k²).
 pub fn applySeparation(
-    positions: []const Vec2,
-    forces: []Vec2,
+    xs: []const FP,
+    ys: []const FP,
+    fxs: []FP,
+    fys: []FP,
     index: *const SubgraphIndex,
     graph: *const Graph,
     strength: FP,
@@ -291,8 +305,8 @@ pub fn applySeparation(
         var sum_x: i64 = 0;
         var sum_y: i64 = 0;
         for (members) |node_idx| {
-            sum_x += positions[node_idx].x;
-            sum_y += positions[node_idx].y;
+            sum_x += xs[node_idx];
+            sum_y += ys[node_idx];
         }
         const n_members: i64 = @intCast(members.len);
         centroids[sg_idx] = Vec2{
@@ -351,11 +365,13 @@ pub fn applySeparation(
 
             // Push cluster i away from j (add force)
             for (members_i) |node_idx| {
-                forces[node_idx] = forces[node_idx].addVec(per_i);
+                fxs[node_idx] = fp.accumAdd(fxs[node_idx], per_i.x);
+                fys[node_idx] = fp.accumAdd(fys[node_idx], per_i.y);
             }
             // Push cluster j away from i (subtract force)
             for (members_j) |node_idx| {
-                forces[node_idx] = forces[node_idx].subVec(per_j);
+                fxs[node_idx] = fp.accumSub(fxs[node_idx], per_j.x);
+                fys[node_idx] = fp.accumSub(fys[node_idx], per_j.y);
             }
         }
     }
@@ -390,24 +406,22 @@ test "cohesion: members pulled toward group centroid" {
     try testing.expectEqual(@as(usize, 2), index.members[0].len);
 
     // Place A far left, B far right, C somewhere
-    var positions = [_]Vec2{
-        .{ .x = fp.fromInt(-50), .y = fp.ZERO }, // A
-        .{ .x = fp.fromInt(50), .y = fp.ZERO }, // B
-        .{ .x = fp.fromInt(100), .y = fp.fromInt(100) }, // C
-    };
-    var forces_arr = [_]Vec2{ .{}, .{}, .{} };
+    const xs = [_]FP{ fp.fromInt(-50), fp.fromInt(50), fp.fromInt(100) };
+    const ys = [_]FP{ fp.ZERO, fp.ZERO, fp.fromInt(100) };
+    var fxs = [_]FP{ 0, 0, 0 };
+    var fys = [_]FP{ 0, 0, 0 };
 
     const strength = fp.div(fp.ONE, fp.fromInt(2)); // 0.5
 
-    applyCohesion(&positions, &forces_arr, &index, strength);
+    applyCohesion(&xs, &ys, &fxs, &fys, &index, strength);
 
     // A (left) should be pulled right (toward centroid at x=0)
-    try testing.expect(forces_arr[0].x > 0);
+    try testing.expect(fxs[0] > 0);
     // B (right) should be pulled left (toward centroid at x=0)
-    try testing.expect(forces_arr[1].x < 0);
+    try testing.expect(fxs[1] < 0);
     // C is not in any subgraph — should have zero force
-    try testing.expectEqual(@as(FP, 0), forces_arr[2].x);
-    try testing.expectEqual(@as(FP, 0), forces_arr[2].y);
+    try testing.expectEqual(@as(FP, 0), fxs[2]);
+    try testing.expectEqual(@as(FP, 0), fys[2]);
 }
 
 test "cohesion: single-member subgraph is skipped" {
@@ -422,16 +436,16 @@ test "cohesion: single-member subgraph is skipped" {
     var index = try SubgraphIndex.build(&g, allocator);
     defer index.deinit();
 
-    var positions = [_]Vec2{
-        .{ .x = fp.fromInt(10), .y = fp.fromInt(20) },
-    };
-    var forces_arr = [_]Vec2{.{}};
+    const xs = [_]FP{fp.fromInt(10)};
+    const ys = [_]FP{fp.fromInt(20)};
+    var fxs = [_]FP{0};
+    var fys = [_]FP{0};
 
-    applyCohesion(&positions, &forces_arr, &index, fp.ONE);
+    applyCohesion(&xs, &ys, &fxs, &fys, &index, fp.ONE);
 
     // Single member — no cohesion force
-    try testing.expectEqual(@as(FP, 0), forces_arr[0].x);
-    try testing.expectEqual(@as(FP, 0), forces_arr[0].y);
+    try testing.expectEqual(@as(FP, 0), fxs[0]);
+    try testing.expectEqual(@as(FP, 0), fys[0]);
 }
 
 test "cohesion: empty graph produces empty index" {

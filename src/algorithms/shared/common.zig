@@ -45,6 +45,32 @@ pub const Convergence = struct {
     min_displacement: FP = 655,
 };
 
+/// A half-open range of output node indices for force kernels.
+///
+/// Kernels write only cells in `[begin, end)` and read only frozen data,
+/// so any partition of `[0, n)` into ranges — run in any order, on any
+/// threads — produces bit-identical results (see
+/// docs/passive-parallelism.md). zigraph's serial driver always passes
+/// `Range.full(n)`; callers with their own threads may chunk it.
+pub const Range = struct {
+    begin: u32,
+    end: u32,
+
+    pub fn full(n: usize) Range {
+        std.debug.assert(n <= std.math.maxInt(u32));
+        return .{ .begin = 0, .end = @intCast(n) };
+    }
+};
+
+/// Force-kernel preconditions, checked in safety-enabled builds: all four
+/// SoA slices share one length and the range lies within it. Callers doing
+/// their own chunking (as the contract invites) get a loud failure on
+/// malformed ranges instead of silent out-of-bounds in unsafe builds.
+pub fn assertShape(xs: []const FP, ys: []const FP, fxs: []const FP, fys: []const FP, range: Range) void {
+    std.debug.assert(xs.len == ys.len and xs.len == fxs.len and xs.len == fys.len);
+    std.debug.assert(range.begin <= range.end and range.end <= xs.len);
+}
+
 /// Node initialization strategy.
 pub const Initializer = enum {
     /// Deterministic grid placement. No randomness.
@@ -183,6 +209,39 @@ pub fn initGridJitter(n: usize, spacing: FP, seed: u64, allocator: Allocator) ![
     }
 
     return positions;
+}
+
+/// SoA variant of `initGrid`: fills caller-provided `xs`/`ys` directly —
+/// no temporary AoS allocation. Same positions, bit for bit.
+pub fn initGridSoa(xs: []FP, ys: []FP, spacing: FP) void {
+    std.debug.assert(xs.len == ys.len);
+    const n = xs.len;
+    if (n == 0) return;
+
+    const cols = isqrtCeil(n);
+    for (0..n) |i| {
+        const col: i32 = @intCast(i % cols);
+        const row: i32 = @intCast(i / cols);
+        xs[i] = fp.mul(fp.fromInt(col), spacing);
+        ys[i] = fp.mul(fp.fromInt(row), spacing);
+    }
+}
+
+/// SoA variant of `initGridJitter`. Consumes the PRNG in the same order as
+/// the AoS version, so positions match it bit for bit for a given seed.
+pub fn initGridJitterSoa(xs: []FP, ys: []FP, spacing: FP, seed: u64) void {
+    initGridSoa(xs, ys, spacing);
+
+    const jitter_range = fp.div(spacing, fp.fromInt(4));
+    var prng = std.Random.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    for (xs, ys) |*x, *y| {
+        const rx = randomFP(random, jitter_range);
+        const ry = randomFP(random, jitter_range);
+        x.* = fp.add(x.*, rx);
+        y.* = fp.add(y.*, ry);
+    }
 }
 
 // ============================================================================

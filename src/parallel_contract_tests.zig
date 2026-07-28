@@ -226,6 +226,298 @@ test "freeze: one frozen view is safely shared by concurrent readers" {
 }
 
 // ============================================================================
+// Partition invariance (the contract's keystone)
+// ============================================================================
+
+const fdg = zigraph.fdg;
+const FP = fdg.fixed_point.FP;
+const fpm = fdg.fixed_point;
+const Range = fdg.common.Range;
+
+/// Run the full force pass (all five gather kernels) over the given ranges.
+fn forcePassRanges(
+    frozen: *const zigraph.FrozenGraph,
+    qt: *const fdg.quadtree.Quadtree,
+    xs: []const FP,
+    ys: []const FP,
+    fxs: []FP,
+    fys: []FP,
+    ranges: []const Range,
+) void {
+    const k_squared = fpm.fromInt(100);
+    const inv_k = fpm.div(fpm.ONE, fpm.fromInt(10));
+    const theta = fpm.fromFloat(0.8);
+    const center = fpm.Vec2{ .x = fpm.fromInt(5), .y = fpm.fromInt(5) };
+    const gravity_strength = fpm.div(fpm.ONE, fpm.fromInt(10));
+    for (ranges) |r| {
+        fdg.forces.accumulatePairwiseRepulsion(xs, ys, fxs, fys, k_squared, r);
+        fdg.forces.accumulateAttraction(frozen, xs, ys, fxs, fys, inv_k, r);
+        fdg.forces.accumulateBarnesHutRepulsion(xs, ys, fxs, fys, qt, k_squared, theta, r);
+        fdg.forces.accumulateGravity(xs, ys, fxs, fys, center, gravity_strength, r);
+        fdg.forces.accumulateStrongGravity(xs, ys, fxs, fys, center, gravity_strength, r);
+    }
+}
+
+/// The pre-Stage-D scatter loops, reproduced as a reference model: each
+/// pair/edge computed once, written to both endpoints.
+///
+/// Uses raw `+|`/`-|` (the historical semantics) while the gather kernels
+/// use `accumAdd`/`accumSub`, whose test-build instrumentation panics on
+/// saturation *before* any comparison runs. The equivalence this test
+/// proves is therefore "bit-identical on non-saturating workloads" — it
+/// does not (and cannot) claim order-insensitivity at saturation, where
+/// attraction's changed per-cell order could legitimately differ.
+fn legacyScatterReference(
+    frozen: *const zigraph.FrozenGraph,
+    xs: []const FP,
+    ys: []const FP,
+    fxs: []FP,
+    fys: []FP,
+) void {
+    const Vec2 = fpm.Vec2;
+    const k_squared = fpm.fromInt(100);
+    const inv_k = fpm.div(fpm.ONE, fpm.fromInt(10));
+    const n = xs.len;
+    // Repulsion: i<j scatter (historical applyPairwise).
+    for (0..n) |i| {
+        for ((i + 1)..n) |j| {
+            const delta = Vec2{ .x = xs[i] -| xs[j], .y = ys[i] -| ys[j] };
+            const d = delta.length();
+            if (d < 2) continue;
+            const force_vec = delta.normalizeScaled(fpm.div(k_squared, d));
+            fxs[i] = fxs[i] +| force_vec.x;
+            fys[i] = fys[i] +| force_vec.y;
+            fxs[j] = fxs[j] -| force_vec.x;
+            fys[j] = fys[j] -| force_vec.y;
+        }
+    }
+    // Attraction: per-edge scatter in edge orientation (historical
+    // applyBetween over adjacency).
+    for (0..n) |u| {
+        for (frozen.children(u)) |v| {
+            if (u == v) continue;
+            const delta = Vec2{ .x = xs[u] -| xs[v], .y = ys[u] -| ys[v] };
+            const d = delta.length();
+            if (d < 2) continue;
+            const force_vec = delta.normalizeScaled(fpm.mul(d, inv_k));
+            fxs[u] = fxs[u] -| force_vec.x;
+            fys[u] = fys[u] -| force_vec.y;
+            fxs[v] = fxs[v] +| force_vec.x;
+            fys[v] = fys[v] +| force_vec.y;
+        }
+    }
+}
+
+test "gather kernels are bit-identical to the legacy scatter loops" {
+    const allocator = std.testing.allocator;
+
+    for (0..8) |seed| {
+        var g = try buildVariant(allocator, seed);
+        defer g.deinit();
+        const frozen = try g.ensureFrozen();
+        const n = g.nodeCount();
+
+        const xs = try allocator.alloc(FP, n);
+        defer allocator.free(xs);
+        const ys = try allocator.alloc(FP, n);
+        defer allocator.free(ys);
+        fdg.common.initGridJitterSoa(xs, ys, fpm.fromInt(10), seed);
+
+        const scatter_fxs = try allocator.alloc(FP, n);
+        defer allocator.free(scatter_fxs);
+        const scatter_fys = try allocator.alloc(FP, n);
+        defer allocator.free(scatter_fys);
+        @memset(scatter_fxs, 0);
+        @memset(scatter_fys, 0);
+        legacyScatterReference(frozen, xs, ys, scatter_fxs, scatter_fys);
+
+        const gather_fxs = try allocator.alloc(FP, n);
+        defer allocator.free(gather_fxs);
+        const gather_fys = try allocator.alloc(FP, n);
+        defer allocator.free(gather_fys);
+        @memset(gather_fxs, 0);
+        @memset(gather_fys, 0);
+        const full = Range.full(n);
+        fdg.forces.accumulatePairwiseRepulsion(xs, ys, gather_fxs, gather_fys, fpm.fromInt(100), full);
+        fdg.forces.accumulateAttraction(frozen, xs, ys, gather_fxs, gather_fys, fpm.div(fpm.ONE, fpm.fromInt(10)), full);
+
+        try std.testing.expectEqualSlices(FP, scatter_fxs, gather_fxs);
+        try std.testing.expectEqualSlices(FP, scatter_fys, gather_fys);
+    }
+}
+
+/// Assert partition invariance of the full force pass on one graph:
+/// random chunkings of [0, n), executed in shuffled order, must be
+/// byte-identical to a single full-range pass.
+fn checkPartitionInvariance(allocator: std.mem.Allocator, random: std.Random, g: *Graph, position_seed: u64) !void {
+    const frozen = try g.ensureFrozen();
+    const n = g.nodeCount();
+
+    // Deterministic jittered SoA positions.
+    const xs = try allocator.alloc(FP, n);
+    defer allocator.free(xs);
+    const ys = try allocator.alloc(FP, n);
+    defer allocator.free(ys);
+    fdg.common.initGridJitterSoa(xs, ys, fpm.fromInt(10), position_seed);
+
+    var qt = try fdg.quadtree.Quadtree.build(xs, ys, allocator);
+    defer qt.deinit();
+
+    // Reference: one full range.
+    const ref_fxs = try allocator.alloc(FP, n);
+    defer allocator.free(ref_fxs);
+    const ref_fys = try allocator.alloc(FP, n);
+    defer allocator.free(ref_fys);
+    @memset(ref_fxs, 0);
+    @memset(ref_fys, 0);
+    forcePassRanges(frozen, &qt, xs, ys, ref_fxs, ref_fys, &.{Range.full(n)});
+
+    // Trials: random chunk boundaries, executed in shuffled order.
+    const fxs = try allocator.alloc(FP, n);
+    defer allocator.free(fxs);
+    const fys = try allocator.alloc(FP, n);
+    defer allocator.free(fys);
+
+    for (0..6) |_| {
+        // Random partition of [0, n) into 1..5 chunks.
+        var ranges_buf: [5]Range = undefined;
+        const n_chunks = random.intRangeAtMost(usize, 1, 5);
+        var cuts_buf: [6]u32 = undefined;
+        cuts_buf[0] = 0;
+        for (1..n_chunks) |c| {
+            cuts_buf[c] = random.intRangeAtMost(u32, 0, @intCast(n));
+        }
+        cuts_buf[n_chunks] = @intCast(n);
+        std.mem.sort(u32, cuts_buf[0 .. n_chunks + 1], {}, std.sort.asc(u32));
+        for (0..n_chunks) |c| {
+            ranges_buf[c] = .{ .begin = cuts_buf[c], .end = cuts_buf[c + 1] };
+        }
+        random.shuffle(Range, ranges_buf[0..n_chunks]);
+
+        @memset(fxs, 0);
+        @memset(fys, 0);
+        forcePassRanges(frozen, &qt, xs, ys, fxs, fys, ranges_buf[0..n_chunks]);
+
+        try std.testing.expectEqualSlices(FP, ref_fxs, fxs);
+        try std.testing.expectEqualSlices(FP, ref_fys, fys);
+    }
+}
+
+/// A larger random graph than buildVariant's small chains/fans, so the
+/// partition corpus also covers graphs with hundreds of nodes/edges.
+fn buildRandomGraph(allocator: std.mem.Allocator, random: std.Random, n: usize, m: usize) !Graph {
+    var g = Graph.init(allocator);
+    errdefer g.deinit();
+    for (0..n) |i| try g.addNode(i, "r");
+    for (0..m) |_| {
+        const a = random.intRangeLessThan(usize, 0, n);
+        const b = random.intRangeLessThan(usize, 0, n);
+        try g.addDiEdge(a, b);
+    }
+    return g;
+}
+
+test "partition invariance: any chunking of the force pass is bit-identical" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0xD1_5EED);
+    const random = prng.random();
+
+    // Small structured variants (chains + fans).
+    for (0..8) |seed| {
+        var g = try buildVariant(allocator, seed);
+        defer g.deinit();
+        try checkPartitionInvariance(allocator, random, &g, 42);
+    }
+
+    // Larger random graphs — the corpus the contract doc's claims rest on.
+    for ([_][2]usize{ .{ 40, 100 }, .{ 80, 250 }, .{ 150, 500 } }) |shape| {
+        var g = try buildRandomGraph(allocator, random, shape[0], shape[1]);
+        defer g.deinit();
+        try checkPartitionInvariance(allocator, random, &g, shape[0]);
+    }
+}
+
+fn forcePassWorker(
+    frozen: *const zigraph.FrozenGraph,
+    qt: *const fdg.quadtree.Quadtree,
+    xs: []const FP,
+    ys: []const FP,
+    fxs: []FP,
+    fys: []FP,
+    range: Range,
+) void {
+    forcePassRanges(frozen, qt, xs, ys, fxs, fys, &.{range});
+}
+
+test "partition invariance: threads writing disjoint ranges of one array" {
+    if (@import("builtin").single_threaded) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+
+    var g = try buildVariant(allocator, 3);
+    defer g.deinit();
+    const frozen = try g.ensureFrozen();
+    const n = g.nodeCount();
+
+    const init_positions = try fdg.common.initGridJitter(n, fpm.fromInt(10), 7, allocator);
+    defer allocator.free(init_positions);
+    const xs = try allocator.alloc(FP, n);
+    defer allocator.free(xs);
+    const ys = try allocator.alloc(FP, n);
+    defer allocator.free(ys);
+    for (init_positions, 0..) |p, i| {
+        xs[i] = p.x;
+        ys[i] = p.y;
+    }
+
+    var qt = try fdg.quadtree.Quadtree.build(xs, ys, allocator);
+    defer qt.deinit();
+
+    // Serial reference.
+    const ref_fxs = try allocator.alloc(FP, n);
+    defer allocator.free(ref_fxs);
+    const ref_fys = try allocator.alloc(FP, n);
+    defer allocator.free(ref_fys);
+    @memset(ref_fxs, 0);
+    @memset(ref_fys, 0);
+    forcePassRanges(frozen, &qt, xs, ys, ref_fxs, ref_fys, &.{Range.full(n)});
+
+    // Concurrent: one SHARED output array, threads own disjoint ranges.
+    const fxs = try allocator.alloc(FP, n);
+    defer allocator.free(fxs);
+    const fys = try allocator.alloc(FP, n);
+    defer allocator.free(fys);
+    @memset(fxs, 0);
+    @memset(fys, 0);
+
+    const n_workers = @min(n, 4);
+    var threads: [4]std.Thread = undefined;
+    var spawned: usize = 0;
+    const chunk = n / n_workers;
+    const rangeFor = struct {
+        fn f(w: usize, ch: usize, nw: usize, total: usize) Range {
+            const begin: u32 = @intCast(w * ch);
+            const end: u32 = if (w == nw - 1) @intCast(total) else @intCast((w + 1) * ch);
+            return .{ .begin = begin, .end = end };
+        }
+    }.f;
+    for (0..n_workers) |w| {
+        threads[w] = std.Thread.spawn(.{}, forcePassWorker, .{
+            frozen, &qt, xs, ys, fxs, fys, rangeFor(w, chunk, n_workers, n),
+        }) catch break;
+        spawned += 1;
+    }
+    for (threads[0..spawned]) |*t| t.join();
+    // If some spawns failed, run their ranges serially — partition
+    // invariance is scheduler-independent, so the result must still match.
+    for (spawned..n_workers) |w| {
+        forcePassWorker(frozen, &qt, xs, ys, fxs, fys, rangeFor(w, chunk, n_workers, n));
+    }
+
+    try std.testing.expectEqualSlices(FP, ref_fxs, fxs);
+    try std.testing.expectEqualSlices(FP, ref_fys, fys);
+}
+
+// ============================================================================
 // Batch parallelism (tests only — `std` is not a dependency)
 // ============================================================================
 

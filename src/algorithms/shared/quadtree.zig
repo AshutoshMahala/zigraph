@@ -7,9 +7,9 @@
 //!
 //! ```zig
 //! const qt = @import("zigraph").fdg.quadtree;
-//! var tree = try qt.Quadtree.build(positions, allocator);
+//! var tree = try qt.Quadtree.build(xs, ys, allocator); // SoA Q16.16 arrays
 //! defer tree.deinit();
-//! const force = tree.computeForce(node_pos, theta);
+//! const force = tree.computeForce(.{ .x = xs[i], .y = ys[i] }, k_squared, theta);
 //! ```
 //!
 //! ## Algorithm
@@ -55,17 +55,20 @@ pub const Quadtree = struct {
     nodes: std.ArrayListUnmanaged(QuadNode) = .empty,
     allocator: Allocator,
 
-    /// Build a quadtree from a set of positions.
+    /// Build a quadtree from SoA position arrays.
     ///
     /// Positions are in Q16.16 fixed-point. The tree covers the
     /// bounding box of all positions with some margin.
-    pub fn build(positions: []const Vec2, allocator: Allocator) !Quadtree {
+    /// Construction is a serial per-iteration phase; once built, the tree
+    /// is frozen and `computeForce` reads are parallel-safe.
+    pub fn build(xs: []const FP, ys: []const FP, allocator: Allocator) !Quadtree {
+        std.debug.assert(xs.len == ys.len);
         var self = Quadtree{
             .allocator = allocator,
         };
         errdefer self.deinit();
 
-        if (positions.len == 0) return self;
+        if (xs.len == 0) return self;
 
         // Compute bounding box
         var min_x: FP = fp.MAX;
@@ -73,11 +76,11 @@ pub const Quadtree = struct {
         var max_x: FP = fp.MIN;
         var max_y: FP = fp.MIN;
 
-        for (positions) |pos| {
-            min_x = fp.min(min_x, pos.x);
-            min_y = fp.min(min_y, pos.y);
-            max_x = fp.max(max_x, pos.x);
-            max_y = fp.max(max_y, pos.y);
+        for (xs, ys) |x, y| {
+            min_x = fp.min(min_x, x);
+            min_y = fp.min(min_y, y);
+            max_x = fp.max(max_x, x);
+            max_y = fp.max(max_y, y);
         }
 
         // Make it square with some margin
@@ -99,8 +102,8 @@ pub const Quadtree = struct {
         });
 
         // Insert all bodies
-        for (positions) |pos| {
-            try self.insert(0, pos, 0);
+        for (xs, ys) |x, y| {
+            try self.insert(0, Vec2{ .x = x, .y = y }, 0);
         }
 
         return self;
@@ -264,15 +267,16 @@ pub const Quadtree = struct {
 
 test "Quadtree: build empty" {
     const allocator = std.testing.allocator;
-    var qt = try Quadtree.build(&.{}, allocator);
+    var qt = try Quadtree.build(&.{}, &.{}, allocator);
     defer qt.deinit();
     try std.testing.expectEqual(@as(usize, 0), qt.nodes.items.len);
 }
 
 test "Quadtree: build single node" {
     const allocator = std.testing.allocator;
-    const positions = [_]Vec2{Vec2.init(fp.fromInt(5), fp.fromInt(5))};
-    var qt = try Quadtree.build(&positions, allocator);
+    const xs = [_]FP{fp.fromInt(5)};
+    const ys = [_]FP{fp.fromInt(5)};
+    var qt = try Quadtree.build(&xs, &ys, allocator);
     defer qt.deinit();
     try std.testing.expect(qt.nodes.items.len >= 1);
     try std.testing.expectEqual(@as(i32, 1), qt.nodes.items[0].mass);
@@ -280,52 +284,43 @@ test "Quadtree: build single node" {
 
 test "Quadtree: build multiple nodes" {
     const allocator = std.testing.allocator;
-    const positions = [_]Vec2{
-        Vec2.init(fp.fromInt(0), fp.fromInt(0)),
-        Vec2.init(fp.fromInt(10), fp.fromInt(0)),
-        Vec2.init(fp.fromInt(0), fp.fromInt(10)),
-        Vec2.init(fp.fromInt(10), fp.fromInt(10)),
-    };
-    var qt = try Quadtree.build(&positions, allocator);
+    const xs = [_]FP{ fp.fromInt(0), fp.fromInt(10), fp.fromInt(0), fp.fromInt(10) };
+    const ys = [_]FP{ fp.fromInt(0), fp.fromInt(0), fp.fromInt(10), fp.fromInt(10) };
+    var qt = try Quadtree.build(&xs, &ys, allocator);
     defer qt.deinit();
     try std.testing.expectEqual(@as(i32, 4), qt.nodes.items[0].mass);
 }
 
 test "Quadtree: force pushes away" {
     const allocator = std.testing.allocator;
-    const positions = [_]Vec2{
-        Vec2.init(fp.fromInt(0), fp.fromInt(0)),
-        Vec2.init(fp.fromInt(10), fp.fromInt(0)),
-    };
-    var qt = try Quadtree.build(&positions, allocator);
+    const xs = [_]FP{ fp.fromInt(0), fp.fromInt(10) };
+    const ys = [_]FP{ fp.fromInt(0), fp.fromInt(0) };
+    var qt = try Quadtree.build(&xs, &ys, allocator);
     defer qt.deinit();
 
     const k_squared = fp.fromInt(100);
     const theta = fp.fromFloat(0.0); // Exact — no approximation
 
     // Force on node at (0,0) — should push it left (away from node at (10,0))
-    const force = qt.computeForce(positions[0], k_squared, theta);
+    const force = qt.computeForce(Vec2{ .x = xs[0], .y = ys[0] }, k_squared, theta);
     try std.testing.expect(force.x < 0); // Pushed left
 }
 
 test "Quadtree: force is deterministic" {
     const allocator = std.testing.allocator;
-    const positions = [_]Vec2{
-        Vec2.init(fp.fromInt(0), fp.fromInt(0)),
-        Vec2.init(fp.fromInt(5), fp.fromInt(3)),
-        Vec2.init(fp.fromInt(-2), fp.fromInt(8)),
-        Vec2.init(fp.fromInt(7), fp.fromInt(-1)),
-    };
+    const xs = [_]FP{ fp.fromInt(0), fp.fromInt(5), fp.fromInt(-2), fp.fromInt(7) };
+    const ys = [_]FP{ fp.fromInt(0), fp.fromInt(3), fp.fromInt(8), fp.fromInt(-1) };
 
-    var qt1 = try Quadtree.build(&positions, allocator);
+    var qt1 = try Quadtree.build(&xs, &ys, allocator);
     defer qt1.deinit();
-    var qt2 = try Quadtree.build(&positions, allocator);
+    var qt2 = try Quadtree.build(&xs, &ys, allocator);
     defer qt2.deinit();
 
     const k_sq = fp.fromInt(50);
     const theta = fp.fromFloat(0.8);
 
-    for (positions) |pos| {
+    for (xs, ys) |x, y| {
+        const pos = Vec2{ .x = x, .y = y };
         const f1 = qt1.computeForce(pos, k_sq, theta);
         const f2 = qt2.computeForce(pos, k_sq, theta);
         try std.testing.expectEqual(f1.x, f2.x);

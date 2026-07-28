@@ -1,48 +1,71 @@
-//! Attraction Force
+//! Attractive Forces (SoA gather kernel)
 //!
-//! Spring-like attractive force between connected nodes.
-//! Force magnitude: f = d / k where d = distance, k = ideal spring length.
+//! Spring-like attraction along edges: f_att = d / k (proportional to
+//! distance).
 //!
-//! Used by: Fruchterman-Reingold, ForceAtlas2 (with linlog option).
+//! Gather formulation over frozen CSR adjacency: node `u` visits its
+//! incident edges from both directions (`children(u)` and `parents(u)`),
+//! so each edge is processed twice — once per endpoint — but every write
+//! lands in `u`'s own accumulator cell. This is the passive-parallelism
+//! trade: ~2× the arithmetic of the historical scatter loop, in exchange
+//! for race-free range partitioning and SIMD-friendly access.
+//!
+//! Each edge's force vector is computed in the **edge's own orientation**
+//! (`from → to`), which both endpoints share — so the two per-endpoint
+//! computations produce bit-identical vectors with opposite signs, exactly
+//! matching the historical scatter results (which computed the vector once
+//! in the same orientation and applied ±).
 
+const std = @import("std");
 const fp = @import("../fixed_point.zig");
 const FP = fp.FP;
 const Vec2 = fp.Vec2;
+const FrozenGraph = @import("../../../core/csr.zig").FrozenGraph;
+const common = @import("../common.zig");
+const Range = common.Range;
 
-/// Apply attraction forces for all edges.
-///
-/// For each edge (u, v), computes spring force f = d × inv_k
-/// and applies it symmetrically: u pulled toward v, v pulled toward u.
-///
-/// Arguments:
-///   - positions: Node positions (read-only).
-///   - forces: Force accumulators (modified in-place).
-///   - edges: Iterator or slice yielding (source, target) pairs.
-///   - inv_k: Pre-computed 1/k (or strength/k for weighted attraction).
-pub fn applyEdges(
-    positions: []const Vec2,
-    forces: []Vec2,
-    edges: anytype,
+/// Accumulate edge attraction into `fxs`/`fys` for nodes in `range`,
+/// gathering over the frozen adjacency.
+pub fn accumulateEdges(
+    frozen: *const FrozenGraph,
+    xs: []const FP,
+    ys: []const FP,
+    fxs: []FP,
+    fys: []FP,
     inv_k: FP,
+    range: Range,
 ) void {
-    for (edges) |edge| {
-        const u = edge[0];
-        const v = edge[1];
-        applyBetween(positions, forces, u, v, inv_k);
+    common.assertShape(xs, ys, fxs, fys, range);
+    std.debug.assert(frozen.node_count == xs.len);
+    for (range.begin..range.end) |u| {
+        // Edges where u is the source: u = from, neighbor = to.
+        for (frozen.children(u)) |v| {
+            accumulateEndpoint(xs, ys, fxs, fys, inv_k, u, v, u, v);
+        }
+        // Edges where u is the target: neighbor = from, u = to.
+        for (frozen.parents(u)) |v| {
+            accumulateEndpoint(xs, ys, fxs, fys, inv_k, u, v, v, u);
+        }
     }
 }
 
-/// Apply attraction between a single pair of connected nodes.
-///
-/// Useful when iterating edges via adjacency lists (avoid double-counting).
-pub fn applyBetween(
-    positions: []const Vec2,
-    forces: []Vec2,
+/// Accumulate one edge's attraction contribution into node `u`'s cell.
+/// The force vector is computed in the edge's `from → to` orientation;
+/// `from` receives `-f` (pulled toward `to`), `to` receives `+f`.
+fn accumulateEndpoint(
+    xs: []const FP,
+    ys: []const FP,
+    fxs: []FP,
+    fys: []FP,
+    inv_k: FP,
     u: usize,
     v: usize,
-    inv_k: FP,
+    from: usize,
+    to: usize,
 ) void {
-    const delta = positions[u].subVec(positions[v]);
+    if (u == v) return; // Self-loop: no net force (historically d<2 skip)
+
+    const delta = Vec2{ .x = fp.sub(xs[from], xs[to]), .y = fp.sub(ys[from], ys[to]) };
     const d = delta.length();
     if (d < 2) return; // Coincident — skip
 
@@ -50,71 +73,88 @@ pub fn applyBetween(
     const force_mag = fp.mul(d, inv_k);
     const force_vec = delta.normalizeScaled(force_mag);
 
-    // Attraction: pull u toward v (subtract), pull v toward u (add)
-    forces[u] = forces[u].subVec(force_vec);
-    forces[v] = forces[v].addVec(force_vec);
-}
-
-/// Apply attraction with logarithmic scaling (LinLog mode).
-///
-/// Force magnitude: f = log(1 + d) × inv_k
-/// This reduces the pull on long edges, useful for clustered layouts.
-pub fn applyBetweenLinLog(
-    positions: []const Vec2,
-    forces: []Vec2,
-    u: usize,
-    v: usize,
-    inv_k: FP,
-) void {
-    const delta = positions[u].subVec(positions[v]);
-    const d = delta.length();
-    if (d < 2) return;
-
-    // f_att = log(1 + d) × inv_k
-    // Approximate log(1 + d) in fixed-point: use d / (1 + d/2) ≈ 2d / (2 + d)
-    const two = fp.fromInt(2);
-    const log_approx = fp.div(fp.mul(two, d), fp.add(two, d));
-    const force_mag = fp.mul(log_approx, inv_k);
-    const force_vec = delta.normalizeScaled(force_mag);
-
-    forces[u] = forces[u].subVec(force_vec);
-    forces[v] = forces[v].addVec(force_vec);
+    if (u == from) {
+        fxs[u] = fp.accumSub(fxs[u], force_vec.x);
+        fys[u] = fp.accumSub(fys[u], force_vec.y);
+    } else {
+        fxs[u] = fp.accumAdd(fxs[u], force_vec.x);
+        fys[u] = fp.accumAdd(fys[u], force_vec.y);
+    }
 }
 
 // ============================================================================
 // Tests
 // ============================================================================
 
-const std = @import("std");
 const testing = std.testing;
 
 test "attraction: connected nodes pulled together" {
-    var positions = [_]Vec2{
-        .{ .x = fp.ZERO, .y = fp.ZERO },
-        .{ .x = fp.fromInt(100), .y = fp.ZERO },
-    };
-    var forces = [_]Vec2{ .{}, .{} };
+    const allocator = testing.allocator;
+    var frozen = try FrozenGraph.build(allocator, 2, &.{.{ 0, 1 }});
+    defer frozen.deinit();
 
-    const k = fp.fromInt(20);
-    const inv_k = fp.div(fp.ONE, k);
+    const xs = [_]FP{ fp.ZERO, fp.fromInt(100) };
+    const ys = [_]FP{ fp.ZERO, fp.ZERO };
+    var fxs = [_]FP{ 0, 0 };
+    var fys = [_]FP{ 0, 0 };
 
-    applyBetween(&positions, &forces, 0, 1, inv_k);
+    accumulateEdges(&frozen, &xs, &ys, &fxs, &fys, fp.div(fp.ONE, fp.fromInt(10)), Range.full(2));
 
-    // Node 0 should be pulled right (toward node 1)
-    try testing.expect(forces[0].x > 0);
-    // Node 1 should be pulled left (toward node 0)
-    try testing.expect(forces[1].x < 0);
+    // Node 0 pulled right (toward 1), node 1 pulled left (toward 0).
+    try testing.expect(fxs[0] > 0);
+    try testing.expect(fxs[1] < 0);
+    // Exact antisymmetry: both endpoints computed the same edge vector.
+    try testing.expectEqual(fxs[0], -fxs[1]);
+    try testing.expectEqual(fys[0], -fys[1]);
 }
 
-test "attraction: coincident nodes skipped" {
-    var positions = [_]Vec2{
-        .{ .x = fp.ZERO, .y = fp.ZERO },
-        .{ .x = fp.ZERO, .y = fp.ZERO },
-    };
-    var forces = [_]Vec2{ .{}, .{} };
+test "attraction: edge orientation does not break antisymmetry" {
+    const allocator = testing.allocator;
+    // Same topology, reversed edge orientation.
+    var frozen = try FrozenGraph.build(allocator, 2, &.{.{ 1, 0 }});
+    defer frozen.deinit();
 
-    applyBetween(&positions, &forces, 0, 1, fp.fromInt(1));
+    const xs = [_]FP{ fp.ZERO, fp.fromInt(100) };
+    const ys = [_]FP{ fp.ZERO, fp.ZERO };
+    var fxs = [_]FP{ 0, 0 };
+    var fys = [_]FP{ 0, 0 };
 
-    try testing.expectEqual(@as(FP, 0), forces[0].x);
-    try testing.expectEqual(@as(FP, 0), forces[1].x);
+    accumulateEdges(&frozen, &xs, &ys, &fxs, &fys, fp.div(fp.ONE, fp.fromInt(10)), Range.full(2));
+
+    try testing.expect(fxs[0] > 0);
+    try testing.expect(fxs[1] < 0);
+    try testing.expectEqual(fxs[0], -fxs[1]);
+}
+
+test "attraction: self-loop contributes nothing" {
+    const allocator = testing.allocator;
+    var frozen = try FrozenGraph.build(allocator, 1, &.{.{ 0, 0 }});
+    defer frozen.deinit();
+
+    const xs = [_]FP{fp.fromInt(5)};
+    const ys = [_]FP{fp.fromInt(5)};
+    var fxs = [_]FP{0};
+    var fys = [_]FP{0};
+
+    accumulateEdges(&frozen, &xs, &ys, &fxs, &fys, fp.ONE, Range.full(1));
+
+    try testing.expectEqual(fp.ZERO, fxs[0]);
+    try testing.expectEqual(fp.ZERO, fys[0]);
+}
+
+test "attraction: partial range writes only its cells" {
+    const allocator = testing.allocator;
+    var frozen = try FrozenGraph.build(allocator, 3, &.{ .{ 0, 1 }, .{ 1, 2 } });
+    defer frozen.deinit();
+
+    const xs = [_]FP{ fp.ZERO, fp.fromInt(50), fp.fromInt(100) };
+    const ys = [_]FP{ fp.ZERO, fp.ZERO, fp.ZERO };
+    var fxs = [_]FP{ 0, 0, 0 };
+    var fys = [_]FP{ 0, 0, 0 };
+
+    accumulateEdges(&frozen, &xs, &ys, &fxs, &fys, fp.ONE, .{ .begin = 0, .end = 1 });
+
+    try testing.expect(fxs[0] != 0); // in range: written
+    try testing.expectEqual(fp.ZERO, fxs[1]); // out of range: untouched
+    try testing.expectEqual(fp.ZERO, fxs[2]);
 }

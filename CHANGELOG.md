@@ -58,10 +58,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `fdg.fruchterman_reingold.compute()`/`computeFast()` handle this
     themselves (cached view when present, temporary otherwise).
 
+- **SoA + gather force kernels** — the force-directed hot path moved from
+  Array-of-Structs (`[]Vec2`) to Struct-of-Arrays (`xs`/`ys`/`fxs`/`fys`)
+  with gather-only, range-parameterized kernels (the passive-parallelism
+  contract): every output cell is written by exactly one range, so callers
+  may chunk `[0, n)` across their own threads with bit-identical results.
+  `PositionResult.positions` remains `[]Vec2` — the SoA change is internal
+  to the iteration loop.
+  - Renamed/re-signatured force functions: `applyPairwiseRepulsion` →
+    `accumulatePairwiseRepulsion(xs, ys, fxs, fys, k², range)`;
+    `applyBarnesHutRepulsion` → `accumulateBarnesHutRepulsion(...)`;
+    per-pair `applyAttraction` → `accumulateAttraction(frozen, ...)`
+    (gathers over frozen CSR; each edge visited from both endpoints, force
+    computed in the edge's own orientation); `applyGravity`/
+    `applyStrongGravity` → `accumulateToCenter`/`accumulateStrongGravity`
+    with ranges.
+  - Output equivalence with the old scatter loops: repulsion is
+    bit-identical unconditionally (same per-cell contribution order);
+    attraction is bit-identical on workloads whose accumulation never
+    saturates (the golden/fuzz corpus verifies itself non-saturating on
+    every test run). Saturation itself remains supported with the
+    historical silent-saturate semantics in all consumer build modes —
+    the non-saturation check is test-build instrumentation only.
+  - **Measured serial cost**: the gather pairwise kernel is ≈2.0–2.15×
+    the old scatter loop (each pair computed once per endpoint;
+    machine-dependent within that band). This
+    applies to the standard O(n²) variant only — `computeFast`'s
+    Barnes-Hut path was already gather-shaped and did not regress, and
+    attraction's absolute cost is microseconds. Accepted deliberately:
+    callers chunking across 2+ threads break even immediately, and one
+    kernel beats maintaining scatter/gather twins. See `zig build bench`.
+  - Public kernels assert SoA shape and range validity in safety-enabled
+    builds (`forces.repulsion.assertShape`).
+  - `applyAttractionLinLog` removed (unused; returns with ForceAtlas2 as a
+    gather kernel).
+  - `Quadtree.build` takes SoA arrays (`xs, ys, allocator`).
+  - `applyCohesion`/`applySeparation` take SoA arrays; they remain
+    documented serial phases (subgraph-major writes).
+  - `fixed_point.accumAdd`/`accumSub`: saturating accumulation that
+    asserts non-saturation in safe builds — the checked precondition for
+    partition invariance and golden stability.
+
 ### Added
 
 - `Graph.lastDiagnostic()`, `Graph.clearDiagnostics()`, and a
   `zigraph.Diagnostics` re-export.
+- `fdg.common.Range` (half-open kernel range with `Range.full(n)`), and
+  SoA grid initializers `initGridSoa`/`initGridJitterSoa` (PRNG-order
+  compatible with the AoS versions, bit-identical positions).
+- Contract tests: partition-shuffle invariance over the full force pass
+  (repulsion + attraction + Barnes-Hut, random chunkings byte-compared),
+  and a threaded test where workers write disjoint ranges of one shared
+  accumulator array.
+- `zig build bench` (`tools/bench_forces.zig`): ReleaseFast force-kernel
+  benchmark with a micro-split quantifying the SIMD-vectorizable fraction
+  of the pairwise kernel. Its verdict — a ≤1.3% ceiling for fixed-point
+  SIMD (the kernel is integer-division/sqrt-bound) — closed the roadmap's
+  Phase 2 SIMD question: no SIMD path ships; kernels stay scalar with the
+  SoA/gather shape ready if an f32-internal variant is ever justified.
 - `core/csr.zig`: `Csr` and `FrozenGraph` (both-direction CSR with
   `edge_ids` mapping entries back to the edge list), re-exported as
   `zigraph.csr`/`Csr`/`FrozenGraph`; `Graph.ensureFrozen()` (cached),

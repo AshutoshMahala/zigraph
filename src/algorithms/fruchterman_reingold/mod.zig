@@ -132,15 +132,19 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
         break :blk &local_frozen.?;
     };
 
-    // Initialize positions
-    const positions = switch (config.initializer) {
-        .grid => try common.initGrid(n, config.spacing, allocator),
-        .grid_jitter => try common.initGridJitter(n, config.spacing, config.seed, allocator),
-    };
-    errdefer allocator.free(positions);
+    // SoA position arrays — the hot-loop representation (Vec2 only at the
+    // PositionResult boundary).
+    const xs = try allocator.alloc(FP, n);
+    defer allocator.free(xs);
+    const ys = try allocator.alloc(FP, n);
+    defer allocator.free(ys);
+    switch (config.initializer) {
+        .grid => common.initGridSoa(xs, ys, config.spacing),
+        .grid_jitter => common.initGridJitterSoa(xs, ys, config.spacing, config.seed),
+    }
 
     // Apply pin constraints: override initial positions and build pin masks
-    const pin_masks = try applyPins(g, positions, config.spacing, allocator);
+    const pin_masks = try applyPins(g, xs, ys, config.spacing, allocator);
     defer if (pin_masks) |m| allocator.free(m);
 
     // Ideal spring length: k = spacing
@@ -155,46 +159,51 @@ pub fn compute(g: *const Graph, allocator: Allocator, config: Config) !PositionR
     defer sg_index.deinit();
     const has_subgraphs = sg_index.sg_count > 0;
 
-    // Temporary force accumulator
-    const force_accum = try allocator.alloc(Vec2, n);
-    defer allocator.free(force_accum);
+    // Force accumulators (SoA)
+    const fxs = try allocator.alloc(FP, n);
+    defer allocator.free(fxs);
+    const fys = try allocator.alloc(FP, n);
+    defer allocator.free(fys);
 
+    const full = common.Range.full(n);
     var temperature = config.initial_temp;
     var iterations: u32 = 0;
 
     while (iterations < config.convergence.max_iterations) : (iterations += 1) {
         // Reset forces
-        @memset(force_accum, Vec2{});
+        @memset(fxs, 0);
+        @memset(fys, 0);
 
-        // === Repulsive forces: O(N²) using shared force module ===
-        forces.applyPairwiseRepulsion(positions, force_accum, k_squared);
+        // === Repulsive forces: O(N²) gather kernel ===
+        forces.accumulatePairwiseRepulsion(xs, ys, fxs, fys, k_squared, full);
 
-        // === Attractive forces: O(E) ===
-        // Iterate over edges via adjacency lists
-        for (0..n) |u| {
-            for (frozen.children(u)) |v| {
-                forces.applyAttraction(positions, force_accum, u, v, inv_k);
-            }
-        }
+        // === Attractive forces: O(E) gather over frozen CSR ===
+        forces.accumulateAttraction(frozen, xs, ys, fxs, fys, inv_k, full);
 
-        // === Subgraph cohesion: pull members toward group centroid ===
+        // === Subgraph cohesion (serial phase): pull members toward centroid ===
         if (has_subgraphs and config.subgraph_cohesion > 0) {
-            forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
+            forces.applyCohesion(xs, ys, fxs, fys, &sg_index, config.subgraph_cohesion);
         }
 
-        // === Inter-cluster separation: push sibling subgraphs apart ===
+        // === Inter-cluster separation (serial phase) ===
         if (has_subgraphs and config.cluster_separation > 0) {
-            forces.applySeparation(positions, force_accum, &sg_index, g, config.cluster_separation, k_squared);
+            forces.applySeparation(xs, ys, fxs, fys, &sg_index, g, config.cluster_separation, k_squared);
         }
 
         // === Apply forces with temperature clamping (respects pin constraints) ===
-        const max_disp = applyForcesWithTemp(positions, force_accum, temperature, pin_masks);
+        const max_disp = applyForcesWithTemp(xs, ys, fxs, fys, temperature, pin_masks, full);
 
         // === Cool ===
         temperature = fp.mul(temperature, config.decay);
 
         // === Check convergence ===
         if (max_disp < config.convergence.min_displacement) break;
+    }
+
+    // Assemble the Vec2 output at the API boundary.
+    const positions = try allocator.alloc(Vec2, n);
+    for (positions, xs, ys) |*p, x, y| {
+        p.* = .{ .x = x, .y = y };
     }
 
     var result = PositionResult{
@@ -246,15 +255,19 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
         break :blk &local_frozen.?;
     };
 
-    // Initialize positions
-    const positions = switch (config.initializer) {
-        .grid => try common.initGrid(n, config.spacing, allocator),
-        .grid_jitter => try common.initGridJitter(n, config.spacing, config.seed, allocator),
-    };
-    errdefer allocator.free(positions);
+    // SoA position arrays — the hot-loop representation (Vec2 only at the
+    // PositionResult boundary).
+    const xs = try allocator.alloc(FP, n);
+    defer allocator.free(xs);
+    const ys = try allocator.alloc(FP, n);
+    defer allocator.free(ys);
+    switch (config.initializer) {
+        .grid => common.initGridSoa(xs, ys, config.spacing),
+        .grid_jitter => common.initGridJitterSoa(xs, ys, config.spacing, config.seed),
+    }
 
     // Apply pin constraints: override initial positions and build pin masks
-    const pin_masks = try applyPins(g, positions, config.spacing, allocator);
+    const pin_masks = try applyPins(g, xs, ys, config.spacing, allocator);
     defer if (pin_masks) |m| allocator.free(m);
 
     const k = config.spacing;
@@ -266,46 +279,54 @@ pub fn computeFast(g: *const Graph, allocator: Allocator, config: Config) !Posit
     defer sg_index.deinit();
     const has_subgraphs = sg_index.sg_count > 0;
 
-    const force_accum = try allocator.alloc(Vec2, n);
-    defer allocator.free(force_accum);
+    // Force accumulators (SoA)
+    const fxs = try allocator.alloc(FP, n);
+    defer allocator.free(fxs);
+    const fys = try allocator.alloc(FP, n);
+    defer allocator.free(fys);
 
+    const full = common.Range.full(n);
     var temperature = config.initial_temp;
     var iterations: u32 = 0;
 
     while (iterations < config.convergence.max_iterations) : (iterations += 1) {
-        @memset(force_accum, Vec2{});
+        @memset(fxs, 0);
+        @memset(fys, 0);
 
         // === Repulsive forces: O(N log N) via Barnes-Hut ===
-        var qt = try Quadtree.build(positions, allocator);
+        // Quadtree construction is the serial phase; reads are gather-safe.
+        var qt = try Quadtree.build(xs, ys, allocator);
         defer qt.deinit();
 
-        forces.applyBarnesHutRepulsion(positions, force_accum, &qt, k_squared, config.theta);
+        forces.accumulateBarnesHutRepulsion(xs, ys, fxs, fys, &qt, k_squared, config.theta, full);
 
-        // === Attractive forces: O(E) ===
-        for (0..n) |u| {
-            for (frozen.children(u)) |v| {
-                forces.applyAttraction(positions, force_accum, u, v, inv_k);
-            }
-        }
+        // === Attractive forces: O(E) gather over frozen CSR ===
+        forces.accumulateAttraction(frozen, xs, ys, fxs, fys, inv_k, full);
 
-        // === Subgraph cohesion: pull members toward group centroid ===
+        // === Subgraph cohesion (serial phase): pull members toward centroid ===
         if (has_subgraphs and config.subgraph_cohesion > 0) {
-            forces.applyCohesion(positions, force_accum, &sg_index, config.subgraph_cohesion);
+            forces.applyCohesion(xs, ys, fxs, fys, &sg_index, config.subgraph_cohesion);
         }
 
-        // === Inter-cluster separation: push sibling subgraphs apart ===
+        // === Inter-cluster separation (serial phase) ===
         if (has_subgraphs and config.cluster_separation > 0) {
-            forces.applySeparation(positions, force_accum, &sg_index, g, config.cluster_separation, k_squared);
+            forces.applySeparation(xs, ys, fxs, fys, &sg_index, g, config.cluster_separation, k_squared);
         }
 
         // === Apply forces with temperature clamping (respects pin constraints) ===
-        const max_disp = applyForcesWithTemp(positions, force_accum, temperature, pin_masks);
+        const max_disp = applyForcesWithTemp(xs, ys, fxs, fys, temperature, pin_masks, full);
 
         // === Cool ===
         temperature = fp.mul(temperature, config.decay);
 
         // === Check convergence ===
         if (max_disp < config.convergence.min_displacement) break;
+    }
+
+    // Assemble the Vec2 output at the API boundary.
+    const positions = try allocator.alloc(Vec2, n);
+    for (positions, xs, ys) |*p, x, y| {
+        p.* = .{ .x = x, .y = y };
     }
 
     var result = PositionResult{
@@ -336,7 +357,7 @@ const PinMask = struct {
 ///
 /// For each node with a pin constraint, the corresponding axis is marked
 /// and the initial position is set to the pinned coordinate (scaled by spacing).
-fn applyPins(g: *const Graph, positions: []Vec2, spacing: FP, allocator: Allocator) !?[]PinMask {
+fn applyPins(g: *const Graph, xs: []FP, ys: []FP, spacing: FP, allocator: Allocator) !?[]PinMask {
     const n = g.nodeCount();
 
     // Quick scan: any pins at all?
@@ -359,11 +380,11 @@ fn applyPins(g: *const Graph, positions: []Vec2, spacing: FP, allocator: Allocat
 
         if (pin.x) |px| {
             masks[i].x = true;
-            positions[i].x = fp.mul(fp.fromInt(@as(i32, @intCast(px))), spacing);
+            xs[i] = fp.mul(fp.fromInt(@as(i32, @intCast(px))), spacing);
         }
         if (pin.y) |py| {
             masks[i].y = true;
-            positions[i].y = fp.mul(fp.fromInt(@as(i32, @intCast(py))), spacing);
+            ys[i] = fp.mul(fp.fromInt(@as(i32, @intCast(py))), spacing);
         }
     }
 
@@ -372,12 +393,17 @@ fn applyPins(g: *const Graph, positions: []Vec2, spacing: FP, allocator: Allocat
 
 /// Apply accumulated forces to positions with temperature clamping.
 /// Respects pin masks: pinned axes are not displaced.
-/// Returns the maximum displacement applied.
-fn applyForcesWithTemp(positions: []Vec2, force_accum: []const Vec2, temperature: FP, pin_masks: ?[]const PinMask) FP {
+/// Returns the maximum displacement applied within `range`.
+///
+/// Range-parameterized position-update kernel: reads forces, writes only
+/// position cells in `range` — the second phase of each iteration (the
+/// force phase reads positions and writes forces; this phase reads forces
+/// and writes positions; read/write sets are disjoint per phase).
+fn applyForcesWithTemp(xs: []FP, ys: []FP, fxs: []const FP, fys: []const FP, temperature: FP, pin_masks: ?[]const PinMask, range: common.Range) FP {
     var max_disp: FP = fp.ZERO;
 
-    for (0..positions.len) |i| {
-        var force = force_accum[i];
+    for (range.begin..range.end) |i| {
+        var force = Vec2{ .x = fxs[i], .y = fys[i] };
 
         // Zero out forces on pinned axes
         if (pin_masks) |masks| {
@@ -392,7 +418,8 @@ fn applyForcesWithTemp(positions: []Vec2, force_accum: []const Vec2, temperature
         const clamped = fp.min(disp, temperature);
         const scaled = force.normalizeScaled(clamped);
 
-        positions[i] = positions[i].addVec(scaled);
+        xs[i] = fp.add(xs[i], scaled.x);
+        ys[i] = fp.add(ys[i], scaled.y);
         max_disp = fp.max(max_disp, clamped);
     }
 

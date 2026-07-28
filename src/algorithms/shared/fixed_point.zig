@@ -87,6 +87,40 @@ pub fn add(a: FP, b: FP) FP {
     return a +| b;
 }
 
+/// Accumulating add for force kernels — **contract instrumentation, not a
+/// general-purpose arithmetic API**. Intended for gather-kernel
+/// implementations (zigraph's own, and custom kernels written against the
+/// passive-parallelism contract that want the same invariant checking);
+/// everyone else should use `add`.
+///
+/// Identical to `add` (saturating) in
+/// every consumer build mode. **Test builds only** additionally assert the
+/// exact sum stays in range: the attraction gather's golden equivalence
+/// with the historical scatter ordering depends on accumulation not
+/// saturating (saturating addition is not associative at overflow, so
+/// regrouping/reordering changes results). Gating on `is_test` verifies
+/// that precondition across the golden/fuzz corpus without turning valid
+/// high-force workloads into panics for library consumers — saturation
+/// remains supported, silently, exactly as it always was.
+pub fn accumAdd(a: FP, b: FP) FP {
+    if (@import("builtin").is_test) {
+        const wide = @as(i64, a) + @as(i64, b);
+        std.debug.assert(wide >= std.math.minInt(i32) and wide <= std.math.maxInt(i32));
+    }
+    return a +| b;
+}
+
+/// Subtracting counterpart of `accumAdd` (use instead of `accumAdd(a, -b)`,
+/// which would overflow when `b` is the saturated minimum). Same
+/// test-only instrumentation, same saturating consumer semantics.
+pub fn accumSub(a: FP, b: FP) FP {
+    if (@import("builtin").is_test) {
+        const wide = @as(i64, a) - @as(i64, b);
+        std.debug.assert(wide >= std.math.minInt(i32) and wide <= std.math.maxInt(i32));
+    }
+    return a -| b;
+}
+
 /// Subtraction (saturating).
 pub fn sub(a: FP, b: FP) FP {
     return a -| b;
@@ -420,4 +454,16 @@ test "saturating add/sub" {
     const small = MIN + fromInt(1);
     const result2 = sub(small, fromInt(2));
     try std.testing.expectEqual(MIN, result2);
+}
+
+test "add/sub: saturating semantics at the extremes" {
+    // accumAdd/accumSub share these exact semantics in consumer builds;
+    // their test-only instrumentation asserts the golden/fuzz corpus never
+    // reaches saturation (which is why they cannot be exercised with
+    // saturating inputs here — see the accumAdd doc comment).
+    try std.testing.expectEqual(MAX, add(MAX, ONE));
+    try std.testing.expectEqual(MAX, add(MAX, MAX));
+    try std.testing.expectEqual(MIN, add(MIN, -ONE));
+    try std.testing.expectEqual(MIN, sub(MIN, ONE));
+    try std.testing.expectEqual(MAX, sub(MAX, -ONE));
 }

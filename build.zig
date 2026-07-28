@@ -40,6 +40,28 @@ pub fn build(b: *std.Build) void {
     run_no_globals.setCwd(b.path("."));
     test_step.dependOn(&run_no_globals.step);
 
+    // Force-kernel benchmark (Stage D3 evidence) — always ReleaseFast so
+    // measurements reflect shipped performance, regardless of -Doptimize.
+    const zigraph_fast = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    const bench_exe = b.addExecutable(.{
+        .name = "bench_forces",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/bench_forces.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{
+                .{ .name = "zigraph", .module = zigraph_fast },
+            },
+        }),
+    });
+    const run_bench = b.addRunArtifact(bench_exe);
+    const bench_step = b.step("bench", "Run force-kernel benchmarks (ReleaseFast)");
+    bench_step.dependOn(&run_bench.step);
+
     // Long-running stress/fuzz harness
     const fuzz_harness = b.addExecutable(.{
         .name = "fuzz_harness",
