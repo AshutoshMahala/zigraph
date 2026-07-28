@@ -178,21 +178,47 @@ pub const Quadtree = struct {
         const old_mass = node.mass;
         const new_mass = old_mass + 1;
 
-        // Weighted average for center of mass:
-        // com = (com * old_mass + pos) / new_mass
-        if (new_mass > 0) {
-            const old_weight = fp.fromInt(old_mass);
-            const new_weight = fp.fromInt(new_mass);
-            node.center_of_mass.x = fp.div(
-                fp.add(fp.mul(node.center_of_mass.x, old_weight), pos.x),
-                new_weight,
-            );
-            node.center_of_mass.y = fp.div(
-                fp.add(fp.mul(node.center_of_mass.y, old_weight), pos.y),
-                new_weight,
-            );
-        }
+        // Weighted average for center of mass, in wide raw arithmetic:
+        //   com = (com_raw × old_mass + pos_raw) / new_mass
+        // The mass stays a plain integer — converting it to Q16.16 and
+        // using fp.mul saturated the product for coordinate×mass beyond
+        // ~32767 (e.g. coordinate 100 × mass 400), silently corrupting
+        // every large cell's center of mass. i64 is safe: |raw| ≤ 2³¹ and
+        // mass is i32 (≤ 2³¹−1, far beyond any layout workload), so the
+        // product stays below 2⁶².
+        node.center_of_mass.x = @intCast(@divTrunc(
+            @as(i64, node.center_of_mass.x) * old_mass + pos.x,
+            @as(i64, new_mass),
+        ));
+        node.center_of_mass.y = @intCast(@divTrunc(
+            @as(i64, node.center_of_mass.y) * old_mass + pos.y,
+            @as(i64, new_mass),
+        ));
         node.mass = new_mass;
+    }
+
+    /// (k² × mass) / d in Q16.16 with wide intermediates. The former
+    /// `fp.mul(k², fp.fromInt(mass))` saturated once k²×mass exceeded the
+    /// Q16.16 integer range (mass > 81 at the default k² = 400), clamping
+    /// every large cell's aggregate force. Mass stays a plain integer;
+    /// saturation happens only after the distance division.
+    ///
+    /// Uses i64 quotient/remainder decomposition instead of a 128-bit
+    /// division (which lowers to an expensive software helper on WASM and
+    /// embedded targets): with a = q·d + r and everything non-negative,
+    /// (a << 16)/d == (q << 16) + (r << 16)/d exactly, preserving the
+    /// truncation semantics. All operands are non-negative by
+    /// construction (k² ≥ 0, mass > 0, d ≥ 2 from the caller's guard).
+    fn mulMassDiv(k_squared: FP, mass: i32, d: FP) FP {
+        std.debug.assert(k_squared >= 0 and mass > 0 and d > 0);
+        const a: i64 = @as(i64, k_squared) * mass;
+        const q = @divTrunc(a, d);
+        // If the scaled quotient alone exceeds Q16.16, the result saturates.
+        if (q > (std.math.maxInt(i32) >> fp.SHIFT)) return fp.MAX;
+        const r = @rem(a, d);
+        // q ≤ 32767 → q<<16 ≤ 2³¹−2¹⁶; the remainder term is < 2¹⁶, so the
+        // sum fits i32 exactly (32767·65536 + 65535 == maxInt(i32)).
+        return @intCast((q << fp.SHIFT) + @divTrunc(r << fp.SHIFT, @as(i64, d)));
     }
 
     /// Determine which quadrant a position falls in relative to a node's center.
@@ -232,20 +258,35 @@ pub const Quadtree = struct {
         // Avoid self-interaction (distance ≈ 0 means same node)
         if (d < 2) return Vec2{};
 
-        if (node.is_leaf) {
-            // Single body — compute exact force
-            // f_rep = k² / d, direction = delta / d (away from other body)
-            const force_mag = fp.div(k_squared, d);
+        // A leaf, or a childless max-depth accumulator (coincident bodies
+        // past MAX_DEPTH collect into a node that is neither leaf nor has
+        // children — before this check, such clusters were invisible to
+        // any walk that recursed into them, e.g. at theta = 0). Both are
+        // point masses: f_rep = k² × mass / d — bit-identical to the old
+        // single-body k²/d when mass == 1.
+        const childless = node.children[0] == 0 and node.children[1] == 0 and
+            node.children[2] == 0 and node.children[3] == 0;
+        if (node.is_leaf or childless) {
+            const force_mag = mulMassDiv(k_squared, node.mass, d);
             return delta.normalizeScaledWithLength(force_mag, d);
         }
 
         // Barnes-Hut check: if cell_size / d < θ, treat as single body
-        // Equivalent: cell_size < θ * d (all in Q16.16)
+        // (rearranged: cell_size < θ × d, all in Q16.16). Additionally the
+        // target must lie OUTSIDE the cell's bounds (GADGET-style geometric
+        // safety test): the d < 2 guard only catches coincidence with the
+        // center of mass, so an unbalanced cell *containing* the target
+        // could otherwise be accepted — folding the target's own mass into
+        // its repulsion. Inside → always recurse.
         const cell_size = fp.mul(node.half_size, fp.fromInt(2));
-        if (fp.mul(cell_size, fp.fromInt(1)) < fp.mul(theta, d)) {
+        const inside = pos.x >= fp.sub(node.cx, node.half_size) and
+            pos.x <= fp.add(node.cx, node.half_size) and
+            pos.y >= fp.sub(node.cy, node.half_size) and
+            pos.y <= fp.add(node.cy, node.half_size);
+        if (!inside and cell_size < fp.mul(theta, d)) {
             // Far enough — approximate
-            // Force magnitude = k² * mass / d
-            const force_mag = fp.div(fp.mul(k_squared, fp.fromInt(node.mass)), d);
+            // Force magnitude = k² * mass / d (wide mass arithmetic)
+            const force_mag = mulMassDiv(k_squared, node.mass, d);
             return delta.normalizeScaledWithLength(force_mag, d);
         }
 
@@ -326,4 +367,96 @@ test "Quadtree: force is deterministic" {
         try std.testing.expectEqual(f1.x, f2.x);
         try std.testing.expectEqual(f1.y, f2.y);
     }
+}
+
+test "Quadtree: large-cell center of mass is not saturated" {
+    const allocator = std.testing.allocator;
+    // 200 bodies clustered near x=300: coordinate × mass far exceeds the
+    // Q16.16 integer range, which corrupted the root COM before the wide
+    // arithmetic fix (fp.mul saturated at coordinate × mass > ~32767).
+    const n = 200;
+    const xs = try allocator.alloc(FP, n);
+    defer allocator.free(xs);
+    const ys = try allocator.alloc(FP, n);
+    defer allocator.free(ys);
+    for (0..n) |i| {
+        xs[i] = fp.fromInt(300) + fp.fromInt(@intCast(i % 10));
+        ys[i] = fp.fromInt(300) + fp.fromInt(@intCast(i / 10));
+    }
+    var qt = try Quadtree.build(xs, ys, allocator);
+    defer qt.deinit();
+
+    // Root COM must sit inside the cluster (300..310, 300..320).
+    const com = qt.nodes.items[0].center_of_mass;
+    try std.testing.expect(com.x >= fp.fromInt(299) and com.x <= fp.fromInt(311));
+    try std.testing.expect(com.y >= fp.fromInt(299) and com.y <= fp.fromInt(321));
+}
+
+test "Quadtree: aggregate force scales with mass (no k²·mass saturation)" {
+    const allocator = std.testing.allocator;
+    // Two clusters at the same location in separate trees, one twice the
+    // mass. Aggregate far-field force must roughly double — before the
+    // wide fix both saturated to the same clamped magnitude (k²·mass
+    // saturated at mass > 81 for k² = 400).
+    const far = Vec2{ .x = fp.fromInt(-500), .y = fp.ZERO };
+    const k_squared = fp.fromInt(400);
+    const theta = fp.fromFloat(0.8);
+
+    var forces_by_mass: [2]Vec2 = undefined;
+    for ([_]usize{ 100, 200 }, 0..) |n, which| {
+        const xs = try allocator.alloc(FP, n);
+        defer allocator.free(xs);
+        const ys = try allocator.alloc(FP, n);
+        defer allocator.free(ys);
+        for (0..n) |i| {
+            xs[i] = fp.fromInt(100) + fp.fromInt(@intCast(i % 8));
+            ys[i] = fp.fromInt(@intCast(i / 8));
+        }
+        var qt = try Quadtree.build(xs, ys, allocator);
+        defer qt.deinit();
+        forces_by_mass[which] = qt.computeForce(far, k_squared, theta);
+    }
+
+    // Repulsion pushes the far target further in -x; magnitude ~2x.
+    try std.testing.expect(forces_by_mass[0].x < 0);
+    try std.testing.expect(forces_by_mass[1].x < 0);
+    const f1: i64 = -forces_by_mass[0].x;
+    const f2: i64 = -forces_by_mass[1].x;
+    try std.testing.expect(f2 > @divTrunc(f1 * 3, 2)); // at least 1.5x
+    try std.testing.expect(f2 < f1 * 3); // and no more than 3x
+}
+
+test "Quadtree: cells containing the target are never approximated" {
+    const allocator = std.testing.allocator;
+    // Target at (10,10) plus 20 coincident bodies at (200,200), all in one
+    // tree. At theta=1.5 the ROOT (which contains the target) satisfies
+    // the opening criterion — before the geometric safety test, the walk
+    // approximated it, folding the target's own mass and a COM shifted
+    // toward the target into the result. With the test, the root opens and
+    // only the cluster's own cell aggregates. Because the cluster is a
+    // single point, its aggregate equals the exact per-body sum up to
+    // per-term truncation, giving a tight deterministic bound.
+    const n = 21;
+    var xs: [n]FP = undefined;
+    var ys: [n]FP = undefined;
+    xs[0] = fp.fromInt(10);
+    ys[0] = fp.fromInt(10);
+    for (1..n) |i| {
+        xs[i] = fp.fromInt(200);
+        ys[i] = fp.fromInt(200);
+    }
+    var qt = try Quadtree.build(&xs, &ys, allocator);
+    defer qt.deinit();
+
+    const target = Vec2{ .x = xs[0], .y = ys[0] };
+    const k_squared = fp.fromInt(400);
+    const exact = qt.computeForce(target, k_squared, fp.fromFloat(0.0));
+    const aggressive = qt.computeForce(target, k_squared, fp.fromFloat(1.5));
+
+    // Both point away from the cluster; magnitudes match within rounding
+    // (pre-fix, the aggressive result was ~10% larger from self-inclusion).
+    try std.testing.expect(exact.x < 0 and aggressive.x < 0);
+    const tol: FP = 2000; // ~0.03 in Q16.16, far below the pre-fix error
+    try std.testing.expect(fp.abs(fp.sub(exact.x, aggressive.x)) < tol);
+    try std.testing.expect(fp.abs(fp.sub(exact.y, aggressive.y)) < tol);
 }

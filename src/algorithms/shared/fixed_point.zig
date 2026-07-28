@@ -349,10 +349,23 @@ pub const Vec2 = struct {
         if (len == 0) {
             return .{ .x = target_length, .y = ZERO };
         }
-        return .{
-            .x = div(mul(self.x, target_length), len),
-            .y = div(mul(self.y, target_length), len),
-        };
+        // Wide intermediates: the former div(mul(x, target), len) saturated
+        // the *intermediate* product once |coordinate × magnitude| exceeded
+        // the Q16.16 integer range (e.g. delta 600 × force 66), silently
+        // corrupting large force vectors in every kernel. The wide form
+        // performs the identical shift/truncation sequence without the
+        // intermediate clamp — bit-identical whenever the old path did not
+        // saturate — and clamps only the final result.
+        const wx = (@as(i64, self.x) * target_length) >> SHIFT;
+        const wy = (@as(i64, self.y) * target_length) >> SHIFT;
+        return .{ .x = divWide(wx, len), .y = divWide(wy, len) };
+    }
+
+    fn divWide(a: i64, b: FP) FP {
+        const result = @divTrunc(a << SHIFT, @as(i64, b));
+        if (result > std.math.maxInt(i32)) return MAX;
+        if (result < std.math.minInt(i32)) return MIN;
+        return @intCast(result);
     }
 };
 
@@ -512,4 +525,28 @@ test "normalizeScaledWithLength: equivalent to normalizeScaled" {
         try std.testing.expectEqual(a.x, b.x);
         try std.testing.expectEqual(a.y, b.y);
     }
+}
+
+test "normalizeScaledWithLength: no intermediate saturation (oracle)" {
+    // (600, 0) scaled to length 66. The pre-fix implementation saturated
+    // the intermediate 600 × 66 product (> 32767 in value space) and
+    // returned ~54.6 instead of 66 — this expected-value oracle pins the
+    // wide-arithmetic fix directly (the equivalence test alone cannot,
+    // since both entry points share the wide implementation).
+    const v = Vec2{ .x = fromInt(600), .y = ZERO };
+    const len = v.length();
+    try std.testing.expectEqual(fromInt(600), len);
+
+    const scaled = v.normalizeScaledWithLength(fromInt(66), len);
+    try std.testing.expectEqual(fromInt(66), scaled.x);
+    try std.testing.expectEqual(ZERO, scaled.y);
+
+    // Same through the recomputing wrapper.
+    const scaled2 = v.normalizeScaled(fromInt(66));
+    try std.testing.expectEqual(fromInt(66), scaled2.x);
+
+    // Negative component: same magnitude, mirrored sign.
+    const vn = Vec2{ .x = fromInt(-600), .y = ZERO };
+    const scaled_n = vn.normalizeScaledWithLength(fromInt(66), vn.length());
+    try std.testing.expectEqual(fromInt(-66), scaled_n.x);
 }

@@ -104,6 +104,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     mode. The check is the verified precondition for attraction's golden
     stability.
 
+### Fixed
+
+- **Four Q16.16 saturation/aggregation bugs in the Barnes-Hut force path**
+  (review-prompted; all deterministic, so tests passed on the corrupted
+  values — regression tests now pin each):
+  - Quadtree center-of-mass updates saturated once `coordinate × mass`
+    exceeded the Q16.16 integer range (~32767; e.g. coordinate 100 ×
+    mass 400), silently corrupting every large cell's COM. Now wide raw
+    i64 arithmetic with the mass kept as a plain integer.
+  - Aggregate cell forces saturated `k² × mass` at mass > 81 (default
+    k² = 400), clamping all far-field repulsion from big cells. Now
+    computed via wide intermediates, clamped only after the distance
+    division.
+  - `Vec2.normalizeScaled` saturated its *intermediate* product once
+    `|coordinate × magnitude|` exceeded ~32767 (e.g. delta 600 × force
+    66), corrupting large force vectors in **every** kernel, not just
+    Barnes-Hut. Now wide intermediates — bit-identical whenever the old
+    path did not saturate.
+  - Coincident-body clusters past MAX_DEPTH accumulated into nodes that
+    were neither leaves nor had children, contributing **zero** force to
+    any walk that recursed into them (θ = 0, or forced recursion). Leaf
+    and accumulator nodes now aggregate as point masses (`k² × mass / d`
+    — bit-identical to the old single-body case at mass 1).
+- **Barnes-Hut geometric safety test** (GADGET-style): a cell is never
+  approximated if the target lies inside its bounds — previously an
+  unbalanced cell containing the target could pass the θ criterion and
+  fold the target's own mass into its repulsion. `computeFast` output
+  changes accordingly (it is now correct). Measured cost of the full
+  correctness round on the BH kernel: ≈+3% at n=500 and ≈+21% at n=2000
+  — the previously-skipped (incorrect) recursion now being performed.
+  (An initial implementation used an i128 division in the traversal hot
+  path, which alone accounted for roughly two-thirds of an apparent +56%
+  slowdown; it was replaced by a bit-identical i64 quotient/remainder
+  decomposition — important for WASM/embedded targets, where 128-bit
+  division lowers to a software helper.)
+
 ### Added
 
 - `Graph.lastDiagnostic()`, `Graph.clearDiagnostics()`, and a
